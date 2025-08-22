@@ -2,7 +2,7 @@
 
 Operational playbooks & governance for AI coding agents (Claude Code, GitHub Copilot, and future peers). This repository centralizes standards, workflows, and per‑agent operating contracts so multi‑agent collaboration stays predictable, auditable, and safe.
 
-## ✨ Goals
+## Goals
 
 - Provide a clear, enforceable contract for each coding agent.
 - Keep human maintainer control over commits & change history.
@@ -10,7 +10,7 @@ Operational playbooks & governance for AI coding agents (Claude Code, GitHub Cop
 - Encourage minimal, testable, reversible changes.
 - Scale to multiple agents without policy drift.
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 ./
@@ -29,28 +29,28 @@ AGENT_TEMPLATE.md           # Copy baseline when introducing a new agent (planne
 CONTRIBUTING.md             # (May be extracted from README when policies grow) (planned)
 ```
 
-## 🧩 Philosophy
+## Philosophy
 
 1. Human-in-the-loop for any persistent change.
 2. **Single source of truth per agent**: Each agent only defers to its own contract file plus shared repo conventions here.
 3. Transparency: Every edit to an agent contract logs rationale (date + why).
 4. Minimalism first: Add only policies that deliver concrete safety or velocity.
 
-## 🔐 Governance Principles
+## Governance Principles
 
 - Never auto-commit; explicit human request required (reinforced in `CLAUDE.md`).
 - No secrets ever added (future: add baseline `.gitignore` + secret scanning suggestion).
 - Conventional Commits for all commit messages.
 - Change logs live inside each agent file under a "Recent Updates & Decisions" section.
 
-## 📘 Current Agent Guides
+## Current Agent Guides
 
 | Agent | Status | File | Notes |
 |-------|--------|------|-------|
 | Claude Code | Active | `claude-code/CLAUDE.md` | Includes operating contract & update protocol |
 | GitHub Copilot | Planned | (pending) | To be added using template |
 
-## 🏗️ Adding a New Agent Guide
+## Adding a New Agent Guide
 
 Follow this lightweight process:
 
@@ -66,7 +66,7 @@ Follow this lightweight process:
 5. Update this README table (Current Agent Guides).
 6. Open a pull request; request review focusing on clarity & safety.
 
-## 📝 (Planned) Agent Template Outline
+## (Planned) Agent Template Outline
 
 The forthcoming `AGENT_TEMPLATE.md` will include:
 
@@ -93,32 +93,7 @@ _Last updated: YYYY-MM-DD (Time Zone)_
 - YYYY-MM-DD — Initialized template. _Reasoning: …_
 ```
 
-## ✅ Contribution Workflow (Human Maintainers)
-
-1. Discuss or open an issue if the change is non-trivial.
-2. Make focused edits (one conceptual change per PR where possible).
-3. Ensure timestamps & change log entries updated in touched agent files.
-4. Use Conventional Commits style, e.g.:
-	- `docs(claude): clarify validation step before staging`
-	- `feat(copilot): add rollback instruction section`
-5. PR description should answer: *Why now?* and *Intended effect?*
-
-## 🧪 Validation (Once Code Appears)
-
-Currently the repo is documentation-only. When executable code or tooling scripts are introduced, add:
-
-- Formatting / lint command (e.g., `npm run lint`, `ruff`, etc.)
-- Lightweight CI (GitHub Actions) to enforce no unreviewed policy drift.
-
-## ✉️ Commit Message Conventions (Recap)
-
-Format: `type(scope): short description`
-
-Types (suggested): `feat`, `fix`, `docs`, `refactor`, `chore`, `test`, `ci`.
-
-Avoid scope if noise; include if it narrows impact (e.g., `docs(readme)`).
-
-## 🤝 FAQ
+## FAQ
 
 **Why separate files per agent?** Isolation reduces cross-policy contamination and cognitive load.
 
@@ -126,13 +101,13 @@ Avoid scope if noise; include if it narrows impact (e.g., `docs(readme)`).
 
 **Can agents modify each other's contracts?** Only if explicitly directed; default: no.
 
-## 🪪 License
+## License
 
 MIT — see `LICENSE`.
 
-## 📬 Feedback
+## Feedback
 
-Open an issue or PR. Keep proposals concise and outcome-focused.
+Open a PR. Keep proposals concise and outcome-focused.
 
 ---
 
