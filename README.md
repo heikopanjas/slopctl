@@ -205,8 +205,6 @@ The `universal/` directory provides a generic prompt that should work with most 
 
 MIT License - See [LICENSE](LICENSE) for details.
 
-Copyright (c) 2025 Heiko Panjas
-
 ## Acknowledgments
 
 Inspired by the need for consistent, safe, and auditable AI-assisted coding workflows across multiple projects and agents.
