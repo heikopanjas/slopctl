@@ -161,16 +161,6 @@ For **Cursor**, create `.cursor/rules/main.mdc`:
 Please read and follow the instructions in `AGENTS.md` as your primary reference.
 ```
 
-```markdown
-Please read and follow the instructions in `AGENTS.md` as your primary reference.
-```
-
-For **Cursor**, create `.cursor/rules/main.mdc`:
-
-```markdown
-Please read and follow the instructions in `AGENTS.md` as your primary reference.
-```
-
 For **Codex**: No reference file needed – Codex works directly with `AGENTS.md` out-of-the-box.
 
 ### Step 3: Initialize Your Session
