@@ -52,11 +52,7 @@ Read AGENTS.md and CLAUDE.md. Confirm understanding. Update ONLY AGENTS.md—mai
 Copy and paste from [`copilot/instructions.md`](copilot/instructions.md):
 
 ```text
-## Quick Copy-Paste Version for Copilot
-
-```
 Read AGENTS.md (primary instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
-```
 ```
 
 ### For Cursor
