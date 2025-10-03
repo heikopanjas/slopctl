@@ -1,4 +1,4 @@
-# vibe-coding
+# vibe-check
 
 **Session initialization prompts for AI coding agents** – A curated collection of ready-to-use initialization prompts for Claude, GitHub Copilot, Cursor, Codex, and other AI coding assistants. This repository provides consistent, safe, and standardized prompts to kickstart agent sessions with governance guardrails built in.
 
@@ -71,12 +71,12 @@ Copy and paste from [`universal/instructions.md`](universal/instructions.md) for
 
 All prompts in this repository enforce these critical rules:
 
-- ✅ **Never auto-commit** – Explicit human request required before any commit
-- ✅ **Conventional commits** – Standardized commit message format
-- ✅ **Change logging** – Maintain "Recent Updates & Decisions" log with timestamps
-- ✅ **Single source of truth** – Update only `AGENTS.md`, not reference files
-- ✅ **Structured updates** – Preserve file structure: header → timestamp → content → log
-- ✅ **No secrets** – Never add credentials, API keys, or sensitive data
+- **Never auto-commit** – Explicit human request required before any commit
+- **Conventional commits** – Standardized commit message format
+- **Change logging** – Maintain "Recent Updates & Decisions" log with timestamps
+- **Single source of truth** – Update only `AGENTS.md`, not reference files
+- **Structured updates** – Preserve file structure: header → timestamp → content → log
+- **No secrets** – Never add credentials, API keys, or sensitive data
 
 ## Agent Instruction Files
 
@@ -94,11 +94,11 @@ Choose the version that best fits your workflow and comfort level.
 
 | Agent | Status | Directory | Notes |
 |-------|--------|-----------|-------|
-| Claude | ✅ Active | [`claude/`](claude/) | Anthropic's Claude (Code, Sonnet, Opus) |
-| GitHub Copilot | ✅ Active | [`copilot/`](copilot/) | VS Code Copilot Chat & inline suggestions |
-| Cursor | ✅ Active | [`cursor/`](cursor/) | Cursor IDE AI assistant |
-| Codex | ✅ Active | [`codex/`](codex/) | OpenAI Codex-based agents |
-| Universal | ✅ Active | [`universal/`](universal/) | Generic prompt for any agent |
+| Claude | Active | [`claude/`](claude/) | Anthropic's Claude (Code, Sonnet, Opus) |
+| GitHub Copilot | Active | [`copilot/`](copilot/) | VS Code Copilot Chat & inline suggestions |
+| Cursor | Active | [`cursor/`](cursor/) | Cursor IDE AI assistant |
+| Codex | Active | [`codex/`](codex/) | OpenAI Codex-based agents |
+| Universal | Active | [`universal/`](universal/) | Generic prompt for any agent |
 
 ## Usage in Your Projects
 
