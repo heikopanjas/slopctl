@@ -85,7 +85,7 @@ Each agent directory contains three versions of the initialization prompt:
 | Version | Use Case | Length |
 |---------|----------|--------|
 | **Quick Copy-Paste** | Fast session start | 1-2 sentences |
-| **Agent-Specific** | Standard initialization | 1 paragraph |
+| **Standard** | Standard initialization | 1 paragraph |
 | **Detailed** | Comprehensive setup | Full context |
 
 Choose the version that best fits your workflow and comfort level.
