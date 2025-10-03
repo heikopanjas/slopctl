@@ -201,16 +201,6 @@ Yes! MIT license allows commercial use. Attribution appreciated but not required
 **Do these prompts work with future AI agents?**
 The `universal/` directory provides a generic prompt that should work with most agents. Customize as needed.
 
-## Contributing
-
-This is a personal collection, but suggestions are welcome! If you have:
-
-- **Improved prompts** for existing agents
-- **New agent support** (Tabnine, Cody, Replit AI, etc.)
-- **Better governance patterns** or safety mechanisms
-
-Feel free to open an issue or submit a pull request.
-
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
