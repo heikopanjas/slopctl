@@ -4,7 +4,7 @@
 
 ```
 Analyze the workspace and read the following instruction files in order:
-1. AGENTS.md (master instructions file)
+1. AGENTS.md (primary instructions file)
 2. .github/copilot-instructions.md or AGENTS.md directly (Codex uses similar structure to Copilot)
 
 Please confirm you've read and understood these instructions before we begin.
@@ -30,7 +30,7 @@ Whenever I ask you to commit changes:
 
 ```
 Analyze the workspace and read and follow the instructions in the following files in order:
-1. AGENTS.md (master instructions file - this is your primary reference)
+1. AGENTS.md (primary instructions file - this is your primary reference)
 2. .github/copilot-instructions.md (references AGENTS.md - Codex uses similar structure to Copilot)
 
 Please confirm you've read and understood these instructions before we begin.

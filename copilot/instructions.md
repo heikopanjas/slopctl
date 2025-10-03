@@ -4,7 +4,7 @@
 
 ```
 Analyze the workspace and read the following instruction files in order:
-1. AGENTS.md (master instructions file)
+1. AGENTS.md (primary instructions file)
 2. .github/copilot-instructions.md (references AGENTS.md)
 
 Please confirm you've read and understood these instructions before we begin.
@@ -30,7 +30,7 @@ Whenever I ask you to commit changes:
 
 ```
 Analyze the workspace and read and follow the instructions in the following files in order:
-1. AGENTS.md (master instructions file - this is your primary reference)
+1. AGENTS.md (primary instructions file - this is your primary reference)
 2. .github/copilot-instructions.md (references AGENTS.md)
 
 Please confirm you've read and understood these instructions before we begin.
@@ -45,7 +45,7 @@ Whenever I ask you to commit the changes, stage the changes, write a detailed bu
 ## Quick Copy-Paste Version for Copilot
 
 ```
-Read AGENTS.md (master instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+Read AGENTS.md (primary instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
 ```
 
 

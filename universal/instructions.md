@@ -4,7 +4,7 @@
 
 ```
 Analyze the workspace and read the following instruction files in order:
-1. AGENTS.md (master instructions file)
+1. AGENTS.md (primary instructions file)
 2. [Agent-specific file: CLAUDE.md, .github/copilot-instructions.md, or .cursor/rules/main.mdc]
 
 The agent-specific file references AGENTS.md as the single source of truth. Please confirm you've read and understood these instructions before we begin.

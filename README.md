@@ -52,7 +52,11 @@ Read AGENTS.md and CLAUDE.md. Confirm understanding. Update ONLY AGENTS.md—mai
 Copy and paste from [`copilot/instructions.md`](copilot/instructions.md):
 
 ```text
-Read AGENTS.md (master instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+## Quick Copy-Paste Version for Copilot
+
+```
+Read AGENTS.md (primary instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+```
 ```
 
 ### For Cursor
@@ -143,11 +147,23 @@ For **Claude**, create `CLAUDE.md`:
 # Claude Operating Contract
 
 Please read and follow the instructions in `AGENTS.md` as your primary reference.
-
-This file exists only to point you to the single source of truth.
 ```
 
 For **Copilot**, create `.github/copilot-instructions.md`:
+
+```markdown
+# Copilot Operating Contract
+
+Please read and follow the instructions in `AGENTS.md` as your primary reference.
+```
+
+For **Cursor**, create `.cursor/rules/main.mdc`:
+
+```markdown
+# Cursor Operating Contract
+
+Please read and follow the instructions in `AGENTS.md` as your primary reference.
+```
 
 ```markdown
 Please read and follow the instructions in `AGENTS.md` as your primary reference.
