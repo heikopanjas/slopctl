@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-10-03
+**Last updated:** 2025-10-05
 
 ## Project Overview
 
@@ -19,6 +19,7 @@ vibe-check/
 ├── LICENSE                     # MIT license
 ├── README.md                   # Main documentation
 ├── AGENTS.md                   # This file - primary instructions
+├── AGENTS.template.md          # Template for use in other projects
 ├── CLAUDE.md                   # Claude-specific reference
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot reference
@@ -62,6 +63,7 @@ vibe-check/
 - Maintain consistency across all agent instruction files
 - Use three versions of prompts: Quick Copy-Paste, Agent-Specific, Detailed
 - Preserve file structure and formatting when updating
+- Use AGENTS.template.md as the base template for projects using these prompts
 
 ## Core Principles
 
@@ -124,6 +126,14 @@ git diff
 ---
 
 ## Recent Updates & Decisions
+
+### 2025-10-05
+
+- Created AGENTS.template.md as comprehensive template for use in other projects
+- Template includes all agent-specific initialization prompts embedded in one file
+- Template incorporates the basic structure from README.md Step 1
+- Added AGENTS.template.md to repository structure documentation
+- Updated file organization best practices to reference the template
 
 ### 2025-10-03
 
