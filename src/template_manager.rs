@@ -71,33 +71,6 @@ impl TemplateManager
         Ok(hex::encode(hasher.finalize()))
     }
 
-    /// Verifies checksum file exists, creates it if missing
-    ///
-    /// Checksums are stored alongside templates with .sha extension.
-    /// For example, template.md -> template.sha
-    ///
-    /// # Arguments
-    ///
-    /// * `template_path` - Path to the template file
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if checksum calculation or file write fails
-    fn verify_or_create_checksum(&self, template_path: &Path) -> Result<()>
-    {
-        let checksum_path = template_path.with_extension("sha");
-
-        if checksum_path.exists() == false
-        {
-            println!("{} Creating missing checksum for {}", "→".blue(), template_path.display().to_string().yellow());
-
-            let checksum = self.calculate_checksum(template_path)?;
-            fs::write(&checksum_path, checksum)?;
-        }
-
-        Ok(())
-    }
-
     /// Checks if local file has been modified compared to global template
     ///
     /// Compares SHA-256 checksums of local and global files.
@@ -157,6 +130,7 @@ impl TemplateManager
     ///
     /// Supports both local file paths and URLs. For URLs starting with http/https,
     /// templates are downloaded. For local paths, templates are copied.
+    /// Creates SHA checksums immediately after downloading or copying.
     ///
     /// # Arguments
     ///
@@ -185,6 +159,57 @@ impl TemplateManager
             println!("{} Copying templates from local path...", "→".blue());
             fs::create_dir_all(&self.config_dir)?;
             copy_dir_all(source_path, &self.config_dir)?;
+
+            // Create checksums for all copied files
+            println!("{} Creating checksums for copied templates...", "→".blue());
+            self.create_checksums_for_directory(&self.config_dir)?;
+        }
+
+        Ok(())
+    }
+
+    /// Creates checksums for all template files in a directory
+    ///
+    /// Recursively walks through the directory and creates .sha files
+    /// for all .md files found.
+    ///
+    /// # Arguments
+    ///
+    /// * `dir` - Directory to create checksums for
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if checksum creation fails
+    fn create_checksums_for_directory(&self, dir: &Path) -> Result<()>
+    {
+        if dir.exists() == false
+        {
+            return Ok(());
+        }
+
+        for entry in fs::read_dir(dir)?
+        {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir()
+            {
+                // Recursively process subdirectories
+                self.create_checksums_for_directory(&path)?;
+            }
+            else if path.is_file()
+            {
+                // Create checksum for .md files
+                if let Some(ext) = path.extension()
+                {
+                    if ext == "md"
+                    {
+                        let checksum = self.calculate_checksum(&path)?;
+                        let checksum_path = path.with_extension("sha");
+                        fs::write(&checksum_path, checksum)?;
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -279,6 +304,8 @@ impl TemplateManager
     ///
     /// Downloads known template files from a GitHub repository.
     ///
+    /// Creates SHA checksums immediately after downloading each file.
+    ///
     /// # Arguments
     ///
     /// * `url` - GitHub URL to download from
@@ -318,7 +345,14 @@ impl TemplateManager
 
             match self.download_file(&file_url, &dest_path)
             {
-                | Ok(_) => println!("{}", "✓".green()),
+                | Ok(_) =>
+                {
+                    println!("{}", "✓".green());
+                    // Create checksum immediately after download
+                    let checksum = self.calculate_checksum(&dest_path)?;
+                    let checksum_path = dest_path.with_extension("sha");
+                    fs::write(&checksum_path, checksum)?;
+                }
                 | Err(_) => println!("{} (skipped)", "✗".red())
             }
         }
@@ -337,7 +371,14 @@ impl TemplateManager
 
             match self.download_file(&file_url, &dest_path)
             {
-                | Ok(_) => println!("{}", "✓".green()),
+                | Ok(_) =>
+                {
+                    println!("{}", "✓".green());
+                    // Create checksum immediately after download
+                    let checksum = self.calculate_checksum(&dest_path)?;
+                    let checksum_path = dest_path.with_extension("sha");
+                    fs::write(&checksum_path, checksum)?;
+                }
                 | Err(_) => println!("{} (skipped)", "✗".red())
             }
         }
@@ -410,12 +451,7 @@ impl TemplateManager
             return Err(format!("Agent template not found: {}", agent).into());
         }
 
-        // Verify or create checksums
-        if let Some(ref lt) = lang_template
-        {
-            self.verify_or_create_checksum(lt)?;
-        }
-        self.verify_or_create_checksum(&agent_template)?;
+        // Checksums are already created during download/copy, no need to verify or create here
 
         // Check for local modifications
         let current_dir = std::env::current_dir()?;

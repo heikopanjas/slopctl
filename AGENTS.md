@@ -240,7 +240,8 @@ vibe-check/
 - Validate template existence and integrity before operations
 - Template integrity is verified using SHA checksums stored alongside templates
 - Checksum files follow naming scheme: `template.md` -> `template.sha` in same directory
-- Missing checksums are automatically generated during update operations
+- Checksums are automatically created immediately after downloading or copying templates to global storage
+- Checksums are not modified until the next update operation
 
 **TemplateManager Functions:**
 
@@ -498,6 +499,15 @@ git diff
 - Defined workflow: implement, build, test, STOP, wait for explicit commit instruction
 - Emphasized never staging or committing automatically under any circumstances
 - Reasoning: Previous instruction was violated repeatedly, clearer protocol needed to prevent automatic commits
+
+### 2025-11-09 (Checksum Management)
+
+- Modified checksum creation to happen immediately after downloading or copying templates to global storage
+- Added create_checksums_for_directory method to recursively create checksums for copied templates
+- Removed verify_or_create_checksum method as checksums are now created during download/copy
+- Checksums are only created or updated during template download/copy operations, not during local template updates
+- Updated documentation to clarify checksum lifecycle
+- Reasoning: Simplify checksum management and ensure global template integrity is established immediately
 
 ### 2025-10-05
 
