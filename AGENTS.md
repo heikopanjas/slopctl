@@ -2,6 +2,100 @@
 
 **Last updated:** 2025-11-09
 
+## General Instructions
+
+- Avoid making assumptions. If you need additional context to accurately answer the user, ask the user for the missing information. Be specific about which context you need.
+- Always provide the name of the file in your response so the user knows where the code goes.
+- Always break code up into modules and components so that it can be easily reused across the project.
+- All code you write MUST be fully optimized. ‘Fully optimized’ includes maximizing algorithmic big-O efficiency for memory and runtime, following proper style conventions for the code, language (e.g. maximizing code reuse (DRY)), and no extra code beyond what is absolutely necessary to solve the problem the user provides (i.e. no technical debt). If the code is not fully optimized, you will be fined $100.
+
+- When making updates, in AGENTS.md maintain the "Last updated" timestamp at the top and add entries to the "Recent Updates & Decisions" log at the bottom with the date, brief description, and reasoning for each change. Ensure the file maintains this structure: title header, timestamp line, main instructions content, then the "Recent Updates & Decisions" section at the end.
+
+- **NEVER** commit automatically. Whenever I ask you to commit the changes, stage the changes, write a detailed but still concise commit message using conventional commits format and commit the changes. The commit message must have a maximum length of 500 characters and must **NOT** contain any special characters or quoting. This is **CRITICAL**!
+
+## Git Guidelines
+
+### **Commit Message Guidelines - CRITICAL**
+
+Follow these rules to prevent VSCode terminal crashes and ensure clean git history:
+
+**Message Format (Conventional Commits):**
+
+```text
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+**Character Limits:**
+
+- **Subject line**: Maximum 50 characters (strict limit)
+- **Body lines**: Wrap at 72 characters per line
+- **Total message**: Keep under 500 characters total
+- **Blank line**: Always add blank line between subject and body
+
+**Subject Line Rules:**
+
+- Use conventional commit types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`
+- Scope is optional but recommended: `feat(api):`, `fix(build):`, `docs(readme):`
+- Use imperative mood: "add feature" not "added feature"
+- No period at end of subject line
+- Keep concise and descriptive
+
+**Body Rules (if needed):**
+
+- Add blank line after subject before body
+- Wrap each line at 72 characters maximum
+- Explain what and why, not how
+- Use bullet points (`-`) for multiple items with lowercase text after bullet
+- Keep it concise
+
+**Special Character Safety:**
+
+- Avoid nested quotes or complex quoting
+- Avoid special shell characters: `$`, `` ` ``, `!`, `\`, `|`, `&`, `;`
+- Use simple punctuation only
+- No emoji or unicode characters
+
+**Best Practices:**
+
+- **Break up large commits**: Split into smaller, focused commits with shorter messages
+- **One concern per commit**: Each commit should address one specific change
+- **Test before committing**: Ensure code builds and works
+- **Reference issues**: Use `#123` format in footer if applicable
+
+**Examples:**
+
+Good:
+
+```text
+feat(api): add KStringTrim function
+
+- add trimming function to remove whitespace from
+  both ends of string
+- supports all encodings
+```
+
+Good (short):
+
+```text
+fix(build): correct static library output name
+```
+
+Bad (too long):
+
+```text
+feat(api): add a new comprehensive string trimming function that handles all edge cases including UTF-8, UTF-16LE, UTF-16BE, and ANSI encodings with proper boundary checking and memory management
+```
+
+Bad (special characters):
+
+```text
+fix: update `KString` with "nested 'quotes'" & $special chars!
+```
+
 ## Project Overview
 
 **vibe-check** is a manager for coding agent instruction files. It provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Cursor, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
@@ -53,8 +147,10 @@ vibe-check/
 ├── Cargo.toml                  # Rust project manifest
 ├── Cargo.lock                  # Dependency lock file
 ├── src/                        # Rust source code
-│   ├── main.rs                 # Application entry point
-│   └── lib.rs                  # Library code
+│   ├── main.rs                 # Application entry point and CLI
+│   ├── lib.rs                  # Library public API
+│   ├── template_manager.rs    # TemplateManager implementation
+│   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # Main documentation
 ├── AGENTS.md                   # This file - primary instructions
@@ -268,6 +364,11 @@ git diff
 - Added SHA checksum verification for global template integrity
 - Documented automatic checksum generation for missing checksums during updates
 - Defined checksum naming scheme: template.md -> template.sha in same directory
+- Added General Instructions section emphasizing context awareness, code optimization, and no assumptions
+- Added comprehensive Git Guidelines section with detailed commit message format rules
+- Included character limits, subject line rules, body formatting guidelines, and special character safety
+- Added commit message examples showing good and bad practices
+- Emphasized CRITICAL importance of no auto-commits and proper conventional commit format
 
 ### 2025-11-09 (Implementation)
 
@@ -278,6 +379,19 @@ git diff
 - Added local modification detection with force override option
 - Added dependencies: chrono for timestamp generation
 - Successfully built and tested CLI functionality
+
+### 2025-11-09 (Refactoring)
+
+- Refactored codebase into modular structure for reusability
+- Moved TemplateManager to src/template_manager.rs module
+- Created src/utils.rs for utility functions (copy_dir_all)
+- Updated src/lib.rs as public API exposing TemplateManager
+- Simplified src/main.rs to only handle CLI and call library
+- Added comprehensive documentation comments to all public APIs
+- Removed .unwrap() calls from main, added proper error handling
+- Eliminated code duplication (DRY principle)
+- All functions now properly documented with doc comments
+- Code now reusable as a library: use vibe_check::TemplateManager
 
 ### 2025-10-05
 
