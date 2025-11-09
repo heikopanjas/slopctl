@@ -137,7 +137,10 @@ Templates are stored in `$HOME/.config/vibe-check/templates` and managed by the 
 - **Language:** Rust
 - **CLI Framework:** clap (v4.5.20)
 - **Terminal Colors:** owo-colors (v4.1.0)
-- **HTTP Client:** reqwest (for downloading templates)
+- **HTTP Client:** reqwest (v0.12 with blocking and json features)
+- **Checksums:** sha2 (v0.10) and hex (v0.4)
+- **Date/Time:** chrono (v0.4)
+- **Serialization:** serde (v1.0) and serde_json (v1.0)
 - **Version Control:** Git
 - **License:** MIT
 
@@ -184,6 +187,7 @@ vibe-check init --lang rust --agent claude --from https://github.com/user/repo/t
 vibe-check/
 ├── Cargo.toml                  # Rust project manifest
 ├── Cargo.lock                  # Dependency lock file
+├── .rustfmt.toml               # Rust formatting configuration
 ├── src/                        # Rust source code
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
@@ -516,6 +520,16 @@ git diff
 - Template incorporates the basic structure from README.md Step 1
 - Added AGENTS.template.md to repository structure documentation
 - Updated file organization best practices to reference the template
+
+### 2025-11-09 (Documentation Sync)
+
+- Updated Technology Stack to reflect all current dependencies
+- Added sha2 v0.10 and hex v0.4 for checksum functionality
+- Added chrono v0.4 for timestamp generation
+- Added serde v1.0 and serde_json v1.0 for serialization
+- Specified reqwest version v0.12 with blocking and json features
+- Added .rustfmt.toml to Repository Structure documentation
+- Reasoning: Documentation should accurately reflect the current codebase state
 
 ### 2025-10-03
 

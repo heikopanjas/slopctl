@@ -1,32 +1,52 @@
 # vibe-check
 
-**Session initialization prompts for AI coding agents** – A curated collection of ready-to-use initialization prompts for Claude, GitHub Copilot, Cursor, Codex, and other AI coding assistants. This repository provides consistent, safe, and standardized prompts to kickstart agent sessions with governance guardrails built in.
+**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Cursor, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
 
 ## Overview
 
-This repository contains session initialization prompts designed to establish clear operating contracts with AI coding agents. Each prompt ensures:
+vibe-check is a command-line tool that helps you:
 
-- **Human-in-the-loop governance** – No automatic commits without explicit confirmation
-- **Standardized workflow** – Conventional commits, structured updates, and change tracking
-- **Agent-specific optimization** – Tailored prompts for different AI assistants
-- **Universal fallback** – Generic prompts that work with any coding agent
+- **Manage templates globally** – Store templates in `~/.config/vibe-check/templates`
+- **Initialize projects quickly** – Set up agent instructions with a single command
+- **Keep templates synchronized** – Update local templates from global storage
+- **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
+- **Support multiple agents** – Works with Claude, Copilot, Cursor, Codex, and more
 
 ## Repository Structure
 
 ```text
-./
+vibe-check/
+├── Cargo.toml                  # Rust project manifest
+├── Cargo.lock                  # Dependency lock file
+├── .rustfmt.toml               # Rust formatting configuration
+├── src/                        # Rust source code
+│   ├── main.rs                 # Application entry point and CLI
+│   ├── lib.rs                  # Library public API
+│   ├── template_manager.rs    # TemplateManager implementation
+│   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # You are here
-├── claude/
-│   └── instructions.md         # Claude-specific initialization prompts
-├── copilot/
-│   └── instructions.md         # GitHub Copilot initialization prompts
-├── cursor/
-│   └── instructions.md         # Cursor AI initialization prompts
-├── codex/
-│   └── instructions.md         # OpenAI Codex initialization prompts
-└── universal/
-    └── instructions.md         # Universal prompt for any agent
+├── AGENTS.md                   # Primary project instructions
+├── templates/                  # Template files for various languages and frameworks
+│   ├── AGENTS.md               # Template for project-specific agent instructions
+│   ├── C++.md                  # C++ coding standards template
+│   ├── CMake.md                # CMake project template
+│   ├── General.md              # General coding guidelines template
+│   ├── Git.md                  # Git workflow template
+│   ├── claude/
+│   │   └── instructions.md     # Claude initialization prompts template
+│   ├── codex/
+│   │   └── instructions.md     # OpenAI Codex initialization prompts template
+│   ├── copilot/
+│   │   └── instructions.md     # GitHub Copilot initialization prompts template
+│   └── cursor/
+│       └── instructions.md     # Cursor AI initialization prompts template
+├── CLAUDE.md                   # Claude-specific reference
+├── .github/
+│   └── copilot-instructions.md # GitHub Copilot reference
+└── .cursor/
+    └── rules/
+        └── main.mdc            # Cursor AI reference
 ```
 
 ## Philosophy
@@ -37,175 +57,286 @@ This repository contains session initialization prompts designed to establish cl
 4. **Minimalism** – Only essential policies that deliver concrete safety or velocity
 5. **Scalability** – Add new agents without policy drift
 
+## Installation
+
+### From Source
+
+```bash
+git clone https://github.com/heikopanjas/vibe-check.git
+cd vibe-check
+cargo build --release
+sudo cp target/release/vibe-check /usr/local/bin/
+```
+
+### Using Cargo
+
+```bash
+cargo install --path .
+```
+
 ## Quick Start
 
-### For Claude (Anthropic)
+### Initialize a Rust project with Claude
 
-Copy and paste from [`claude/instructions.md`](claude/instructions.md):
-
-```text
-Read AGENTS.md and CLAUDE.md. Confirm understanding. Update ONLY AGENTS.md—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+```bash
+cd your-project
+vibe-check init --lang rust --agent claude
 ```
 
-### For GitHub Copilot
+This will:
 
-Copy and paste from [`copilot/instructions.md`](copilot/instructions.md):
+1. Download templates from the default repository (if not already cached)
+2. Copy the Rust language template and Claude instructions to your project
+3. Create `.claude/instructions.md` for Claude-specific setup
 
-```text
-Read AGENTS.md (primary instructions) and any agent-specific reference file. Confirm understanding. Update ONLY AGENTS.md as we work—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage changes, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+### Initialize from a custom template source
+
+```bash
+# From a local path
+vibe-check init --lang rust --agent copilot --from /path/to/templates
+
+# From a GitHub URL
+vibe-check init --lang python --agent cursor --from https://github.com/user/repo/tree/branch/templates
 ```
 
-### For Cursor
+### Update existing templates
 
-Copy and paste from [`cursor/instructions.md`](cursor/instructions.md):
+```bash
+# Update templates for current project
+vibe-check update --lang rust --agent claude
 
-```text
-Read AGENTS.md and .cursor/rules/main.mdc. Confirm understanding. Update ONLY AGENTS.md—maintain timestamp and add dated entries to "Recent Updates & Decisions" log. For commits: stage, write conventional commit message, NEVER auto-commit, ALWAYS wait for confirmation. CRITICAL!
+# Force update (overwrite local modifications)
+vibe-check update --lang rust --agent claude --force
 ```
 
-### For Any Agent (Universal)
+### Clear local templates
 
-Copy and paste from [`universal/instructions.md`](universal/instructions.md) for a generic initialization that works with any AI coding assistant.
+```bash
+# Remove local templates (with confirmation)
+vibe-check clear
+
+# Force clear without confirmation
+vibe-check clear --force
+```
+
+## CLI Commands
+
+### `init` - Initialize Agent Instructions
+
+Initialize instruction files for AI coding agents in your project.
+
+```bash
+vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
+```
+
+**Options:**
+
+- `--lang <string>` - Programming language or framework (e.g., rust, python, typescript, cmake)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, cursor, codex)
+- `--from <string>` - Optional path or URL to copy/download templates from
+
+### `update` - Update Templates
+
+Update local templates from global storage.
+
+```bash
+vibe-check update --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
+```
+
+**Options:**
+
+- `--lang <string>` - Programming language or framework
+- `--agent <string>` - AI coding agent
+- `--force` - Force overwrite without confirmation
+- `--from <string>` - Optional path or URL to copy/download templates from
+
+### `clear` - Clear Local Templates
+
+Remove local templates from current directory.
+
+```bash
+vibe-check clear [--force]
+```
+
+**Options:**
+
+- `--force` - Force clear without confirmation
 
 ## Core Governance Principles
 
-All prompts in this repository enforce these critical rules:
+All templates in this repository enforce these critical rules:
 
 - **Never auto-commit** – Explicit human request required before any commit
-- **Conventional commits** – Standardized commit message format
+- **Conventional commits** – Standardized commit message format (max 500 chars)
 - **Change logging** – Maintain "Recent Updates & Decisions" log with timestamps
 - **Single source of truth** – Update only `AGENTS.md`, not reference files
 - **Structured updates** – Preserve file structure: header → timestamp → content → log
 - **No secrets** – Never add credentials, API keys, or sensitive data
 
-## Agent Instruction Files
-
-Each agent directory contains three versions of the initialization prompt:
-
-| Version | Use Case | Length |
-|---------|----------|--------|
-| **Quick Copy-Paste** | Fast session start | 1-2 sentences |
-| **Standard** | Standard initialization | 1 paragraph |
-| **Detailed** | Comprehensive setup | Full context |
-
-Choose the version that best fits your workflow and comfort level.
-
 ## Supported Agents
 
-| Agent | Status | Directory | Notes |
-|-------|--------|-----------|-------|
-| Claude | Active | [`claude/`](claude/) | Anthropic's Claude (Code, Sonnet, Opus) |
-| GitHub Copilot | Active | [`copilot/`](copilot/) | VS Code Copilot Chat & inline suggestions |
-| Cursor | Active | [`cursor/`](cursor/) | Cursor IDE AI assistant |
-| Codex | Active | [`codex/`](codex/) | OpenAI Codex-based agents |
-| Universal | Active | [`universal/`](universal/) | Generic prompt for any agent |
+| Agent | Status | Template Directory | Notes |
+|-------|--------|-------------------|-------|
+| Claude | Active | [`templates/claude/`](templates/claude/) | Anthropic's Claude (Code, Sonnet, Opus) |
+| GitHub Copilot | Active | [`templates/copilot/`](templates/copilot/) | VS Code Copilot Chat & inline suggestions |
+| Cursor | Active | [`templates/cursor/`](templates/cursor/) | Cursor IDE AI assistant |
+| Codex | Active | [`templates/codex/`](templates/codex/) | OpenAI Codex-based agents |
 
-## Usage in Your Projects
+## Supported Languages
 
-### Step 1: Set Up AGENTS.md
+- **Rust** - Rust programming language
+- **C++** - C++ programming language
+- **Swift** - Swift programming language
+- **CMake** - CMake build system
+- **General** - General coding guidelines
+- **Git** - Git workflow and commit conventions
 
-Create an `AGENTS.md` file in your project root with this structure:
+## How It Works
 
-```markdown
-# Project Instructions for AI Coding Agents
+### Template Storage
 
-**Last updated:** 2025-10-03
+Templates are stored globally in `~/.config/vibe-check/templates/` and include:
 
-## Project Overview
-[Your project description]
+- **Language templates**: Language-specific coding standards and conventions
+- **Agent templates**: Agent-specific initialization prompts
+- **General templates**: AGENTS.md, Git guidelines, and more
 
-## Technology Stack
-[Your tech stack]
+### Template Management
 
-## Coding Conventions
-[Your conventions]
+1. **First run**: Downloads templates from the default GitHub repository
+2. **Local storage**: Templates are cached in `~/.config/vibe-check/templates/`
+3. **Checksums**: SHA-256 checksums verify template integrity
+4. **Backups**: Automatic backups before any modifications in `~/.cache/vibe-check/backups/`
+5. **Updates**: Detect local modifications and warn before overwriting
 
-## Build Commands
-[Your commands]
+### Project Initialization
 
-## Best Practices
-[Your practices]
+When you run `vibe-check init --lang rust --agent claude`:
 
----
+1. Checks if global templates exist (downloads if needed)
+2. Copies the Rust language template to your project root (`Rust.md`)
+3. Creates `.claude/` directory with `instructions.md`
+4. You're ready to start coding with proper agent instructions
 
-## Recent Updates & Decisions
+### Modification Detection
 
-### 2025-10-03
-- Initial setup
-- Established core coding standards
+vibe-check detects if you've modified local templates:
+
+```bash
+$ vibe-check update --lang rust --agent claude
+→ Updating templates for rust with claude
+! Local modifications detected:
+  - /path/to/Rust.md
+  - /path/to/.claude/instructions.md
+→ Use --force to overwrite
+✗ Local modifications detected. Aborting.
 ```
 
-### Step 2: Create Agent-Specific Reference Files
-
-For **Claude**, create `CLAUDE.md`:
-
-```markdown
-# Claude Operating Contract
-
-Please read and follow the instructions in `AGENTS.md` as your primary reference.
-```
-
-For **Copilot**, create `.github/copilot-instructions.md`:
-
-```markdown
-# Copilot Operating Contract
-
-Please read and follow the instructions in `AGENTS.md` as your primary reference.
-```
-
-For **Cursor**, create `.cursor/rules/main.mdc`:
-
-```markdown
-# Cursor Operating Contract
-
-Please read and follow the instructions in `AGENTS.md` as your primary reference.
-```
-
-For **Codex**: No reference file needed – Codex works directly with `AGENTS.md` out-of-the-box.
-
-### Step 3: Initialize Your Session
-
-Use the appropriate prompt from this repository to start your agent session with governance guardrails enabled.
+Use `--force` to override and update anyway.
 
 ## Customization
 
-All prompts are designed to be customized for your specific needs:
+### Using Custom Templates
 
-1. **Fork this repository** or copy the relevant instruction files
-2. **Modify the prompts** to match your project's requirements
-3. **Add project-specific rules** to your `AGENTS.md` file
-4. **Keep the core governance** principles intact (no auto-commits, conventional commits, etc.)
+You can use your own template repository:
 
-## Adding a New Agent
+```bash
+# From a local path
+vibe-check init --lang rust --agent claude --from /path/to/your/templates
 
-To add support for a new AI coding agent:
+# From a GitHub repository
+vibe-check init --lang rust --agent claude --from https://github.com/yourname/your-templates/tree/main/templates
+```
 
-1. Create a new directory: `agent-name/`
-2. Add an `instructions.md` file with three prompt versions:
-   - Quick Copy-Paste (minimal)
-   - Agent-Specific (standard)
-   - Detailed (comprehensive)
-3. Follow the existing format from other agent directories
-4. Update this README's "Supported Agents" table
+### Modifying Global Templates
+
+1. Navigate to `~/.config/vibe-check/templates/`
+2. Edit the templates as needed
+3. Run `vibe-check update` to sync changes to your projects
+
+### Creating New Templates
+
+To add a new language or agent template:
+
+1. Fork this repository
+2. Add your template to the `templates/` directory
+3. For languages: Create `Language.md` (e.g., `Python.md`)
+4. For agents: Create `agent-name/instructions.md`
 5. Submit a pull request
+
+## Technology Stack
+
+- **Language:** Rust (Edition 2021)
+- **CLI Framework:** clap v4.5.20
+- **Terminal Colors:** owo-colors v4.1.0
+- **HTTP Client:** reqwest v0.12 (blocking, json)
+- **Checksums:** sha2 v0.10, hex v0.4
+- **Date/Time:** chrono v0.4
+- **Serialization:** serde v1.0, serde_json v1.0
 
 ## FAQ
 
-**Why separate files per agent?**
-Isolation reduces cross-policy contamination and allows agent-specific optimizations.
+**Where are templates stored?**
+Global templates: `~/.config/vibe-check/templates/`
+Backups: `~/.cache/vibe-check/backups/`
+
+**What happens if I modify local templates?**
+vibe-check detects modifications and warns you before overwriting. Use `--force` to override.
+
+**Can I use my own template repository?**
+Yes! Use the `--from` option to specify a local path or GitHub URL.
 
 **Why AGENTS.md as single source of truth?**
 Centralized updates prevent drift and make it easier to maintain consistency across sessions.
 
-**Can I use these prompts in commercial projects?**
+**Can I use this in commercial projects?**
 Yes! MIT license allows commercial use. Attribution appreciated but not required.
 
-**Do these prompts work with future AI agents?**
-The `universal/` directory provides a generic prompt that should work with most agents. Customize as needed.
+**How do I update templates?**
+Run `vibe-check update --lang <language> --agent <agent>` to sync from global storage.
+
+**How do I remove local templates?**
+Run `vibe-check clear` to remove agent directories and language files from your project.
 
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
+
+## Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/heikopanjas/vibe-check.git
+cd vibe-check
+
+# Build in debug mode (for development)
+cargo build
+
+# Run tests
+cargo test
+
+# Run the application
+cargo run -- init --lang rust --agent claude
+
+# Build in release mode (optimized)
+cargo build --release
+
+# Format code
+cargo fmt
+
+# Run linter
+cargo clippy
+```
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and formatting
+5. Submit a pull request
 
 ## Acknowledgments
 
@@ -213,4 +344,4 @@ Inspired by the need for consistent, safe, and auditable AI-assisted coding work
 
 ---
 
-Last updated: October 3, 2025
+Last updated: November 9, 2025
