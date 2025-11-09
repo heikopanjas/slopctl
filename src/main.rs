@@ -23,7 +23,11 @@ enum Commands
 
         /// AI coding agent (e.g., claude, copilot, cursor, codex)
         #[arg(long)]
-        agent: String
+        agent: String,
+
+        /// Path or URL to copy/download templates from
+        #[arg(long)]
+        from: Option<String>
     },
     /// Update templates from global storage
     Update
@@ -38,7 +42,11 @@ enum Commands
 
         /// Force overwrite without confirmation
         #[arg(long, default_value = "false")]
-        force: bool
+        force: bool,
+
+        /// Path or URL to copy/download templates from
+        #[arg(long)]
+        from: Option<String>
     },
     /// Clear all templates from storage
     Clear
@@ -65,8 +73,8 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent } => manager.update(&lang, &agent, false),
-        | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
+        | Commands::Init { lang, agent, from } => manager.update(&lang, &agent, false, from.as_deref()),
+        | Commands::Update { lang, agent, force, from } => manager.update(&lang, &agent, force, from.as_deref()),
         | Commands::Clear { force } => manager.clear(force)
     };
 

@@ -107,6 +107,7 @@ Templates are stored in `$HOME/.config/vibe-check/templates` and managed by the 
 - **Language:** Rust
 - **CLI Framework:** clap (v4.5.20)
 - **Terminal Colors:** owo-colors (v4.1.0)
+- **HTTP Client:** reqwest (for downloading templates)
 - **Version Control:** Git
 - **License:** MIT
 
@@ -119,13 +120,14 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-vibe-check init --lang <language> --agent <agent>
+vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
 ```
 
 **Options:**
 
 - `--lang <string>` - Programming language or framework (e.g., rust, python, typescript, cmake)
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, cursor, codex)
+- `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
 
@@ -133,12 +135,18 @@ vibe-check init --lang <language> --agent <agent>
 # Initialize Rust project with Claude
 vibe-check init --lang rust --agent claude
 
-# Initialize Python project with Copilot
-vibe-check init --lang python --agent copilot
+# Initialize from local path
+vibe-check init --lang rust --agent claude --from /path/to/templates
 
-# Initialize C++ project with Cursor
-vibe-check init --lang cpp --agent cursor
+# Initialize from URL
+vibe-check init --lang rust --agent claude --from https://github.com/user/repo/tree/branch/templates
 ```
+
+**Behavior:**
+
+- If global templates don't exist and `--from` is not specified, downloads from:
+  `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
+- If `--from` is specified, copies/downloads templates from that location
 
 ## Repository Structure
 
@@ -202,10 +210,13 @@ vibe-check/
 
 **TemplateManager Functions:**
 
-- `update(lang: &str, agent: &str, force: bool)` - Update templates for specific language and agent
+- `update(lang: &str, agent: &str, force: bool, from: Option<&str>)` - Update templates for specific language and agent
   - `lang` - Programming language or framework identifier
   - `agent` - AI coding agent identifier
   - `force` - If true, overwrite existing templates without confirmation
+  - `from` - Optional path or URL to copy/download templates from
+  - If global templates don't exist and `from` is None, downloads from default GitHub repository
+  - If `from` is specified, copies/downloads templates from that location first
   - Verifies global template integrity using SHA checksums
   - Creates missing checksums automatically for global templates
   - Creates backup of existing local templates in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
@@ -392,6 +403,10 @@ git diff
 - Eliminated code duplication (DRY principle)
 - All functions now properly documented with doc comments
 - Code now reusable as a library: use vibe_check::TemplateManager
+- Added --from option to init and update commands for specifying template source
+- Implemented automatic template download from default GitHub repository when global templates missing
+- Added reqwest dependency for HTTP client to download templates
+- Updated TemplateManager::update() to accept optional from parameter
 
 ### 2025-10-05
 

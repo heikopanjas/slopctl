@@ -151,34 +151,84 @@ impl TemplateManager
         Ok(())
     }
 
+    /// Downloads or copies templates from a source
+    ///
+    /// Supports both local file paths and URLs. For URLs starting with http/https,
+    /// templates are downloaded. For local paths, templates are copied.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Path or URL to download/copy templates from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if download or copy operation fails
+    fn download_or_copy_templates(&self, source: &str) -> Result<()>
+    {
+        if source.starts_with("http://") || source.starts_with("https://")
+        {
+            // Download from URL
+            println!("{} Downloading templates from URL...", "→".blue());
+            
+            // For GitHub URLs, we need to download the raw files
+            // For now, return an error as full implementation requires more work
+            return Err("URL downloading not yet fully implemented. Please use a local path.".into());
+        }
+        else
+        {
+            // Copy from local path
+            let source_path = Path::new(source);
+            if !source_path.exists()
+            {
+                return Err(format!("Source path does not exist: {}", source).into());
+            }
+
+            println!("{} Copying templates from local path...", "→".blue());
+            fs::create_dir_all(&self.config_dir)?;
+            copy_dir_all(source_path, &self.config_dir)?;
+        }
+
+        Ok(())
+    }
+
     /// Updates local templates from global storage
     ///
     /// This method:
-    /// 1. Verifies global template existence and integrity
-    /// 2. Creates missing checksums for global templates
-    /// 3. Detects local modifications
-    /// 4. Creates backup of existing local files
-    /// 5. Copies templates to current directory
+    /// 1. Downloads/copies templates from source if global templates don't exist
+    /// 2. Verifies global template existence and integrity
+    /// 3. Creates missing checksums for global templates
+    /// 4. Detects local modifications
+    /// 5. Creates backup of existing local files
+    /// 6. Copies templates to current directory
     ///
     /// # Arguments
     ///
     /// * `lang` - Programming language or framework identifier
     /// * `agent` - AI coding agent identifier
     /// * `force` - If true, overwrite local modifications without warning
+    /// * `from` - Optional path or URL to copy/download templates from
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Template files don't exist
+    /// - Template files don't exist and can't be downloaded
     /// - Local modifications detected and force is false
     /// - Backup or copy operations fail
-    pub fn update(&self, lang: &str, agent: &str, force: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: &str, force: bool, from: Option<&str>) -> Result<()>
     {
         println!("{} Updating templates for {} with {}", "→".blue(), lang.green(), agent.green());
 
         // Build paths
         let lang_template = self.config_dir.join(format!("{}.md", lang));
         let agent_template = self.config_dir.join(agent).join("instructions.md");
+
+        // Check if global templates exist, if not download/copy them
+        if !self.config_dir.exists() || !lang_template.exists() || !agent_template.exists()
+        {
+            let source = from.unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
+            println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
+            self.download_or_copy_templates(source)?;
+        }
 
         // Verify global template existence
         if !lang_template.exists()
