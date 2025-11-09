@@ -11,7 +11,37 @@
 
 - When making updates, in AGENTS.md maintain the "Last updated" timestamp at the top and add entries to the "Recent Updates & Decisions" log at the bottom with the date, brief description, and reasoning for each change. Ensure the file maintains this structure: title header, timestamp line, main instructions content, then the "Recent Updates & Decisions" section at the end.
 
-- **NEVER** commit automatically. Whenever I ask you to commit the changes, stage the changes, write a detailed but still concise commit message using conventional commits format and commit the changes. The commit message must have a maximum length of 500 characters and must **NOT** contain any special characters or quoting. This is **CRITICAL**!
+## Commit Protocol - ABSOLUTELY CRITICAL
+
+**NEVER stage files or commit automatically under ANY circumstances.**
+
+You must ONLY stage and commit when the user uses one of these EXACT phrases:
+- "commit the changes"
+- "commit this"
+- "please commit"
+- "make a commit"
+
+If the user asks you to:
+- "implement X"
+- "add feature Y"
+- "update Z"
+- "fix this"
+
+You MUST:
+1. Make the code changes
+2. Build/test to verify
+3. **STOP and WAIT** - Do NOT stage or commit
+4. Inform the user the work is complete
+5. Wait for explicit commit instruction
+
+When you DO commit (after explicit instruction):
+- Stage the changes
+- Write a detailed but concise commit message using conventional commits format
+- The commit message must have a maximum length of 500 characters
+- The commit message must **NOT** contain any special characters or quoting
+- Commit the changes
+
+**Violation of this rule is unacceptable.**
 
 ## Git Guidelines
 
@@ -449,6 +479,25 @@ git diff
 - Removed support for cmake.md, general.md, git.md, python.md, typescript.md, javascript.md from clear operation
 - Updated documentation to reflect the restricted language list
 - Reasoning: Focus on core supported languages to prevent accidental removal of unrelated markdown files
+
+### 2025-11-09 (Template Download)
+
+- Implemented template download functionality using simple HTTP requests
+- Added support for downloading templates from GitHub URLs via raw.githubusercontent.com
+- Parse GitHub tree URLs and convert to raw content URLs for direct file download
+- Download known template files including AGENTS.md, language templates, and agent-specific instructions
+- Made language templates optional in update function to support repositories without language-specific files
+- Added fallback logic to try both lowercase and capitalized file names for language templates
+- Updated Cargo.toml dependencies: reqwest with json feature, serde, serde_json
+- Reasoning: Enable users to download templates from GitHub without requiring API authentication or complex setup
+
+### 2025-11-09 (Commit Protocol Clarification)
+
+- Added explicit Commit Protocol section with clear rules
+- Specified exact phrases that trigger commit actions
+- Defined workflow: implement, build, test, STOP, wait for explicit commit instruction
+- Emphasized never staging or committing automatically under any circumstances
+- Reasoning: Previous instruction was violated repeatedly, clearer protocol needed to prevent automatic commits
 
 ### 2025-10-05
 

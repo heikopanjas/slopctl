@@ -171,10 +171,7 @@ impl TemplateManager
         {
             // Download from URL
             println!("{} Downloading templates from URL...", "→".blue());
-
-            // For GitHub URLs, we need to download the raw files
-            // For now, return an error as full implementation requires more work
-            return Err("URL downloading not yet fully implemented. Please use a local path.".into());
+            self.download_templates_from_url(source)?;
         }
         else
         {
@@ -189,6 +186,163 @@ impl TemplateManager
             fs::create_dir_all(&self.config_dir)?;
             copy_dir_all(source_path, &self.config_dir)?;
         }
+
+        Ok(())
+    }
+
+    /// Converts a GitHub tree URL to raw content URLs
+    ///
+    /// Converts URLs like:
+    /// `https://github.com/owner/repo/tree/branch/path`
+    /// to:
+    /// `https://raw.githubusercontent.com/owner/repo/branch/path`
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - GitHub tree URL
+    ///
+    /// # Returns
+    ///
+    /// Returns base raw URL and path components, or None if URL is not a GitHub tree URL
+    fn parse_github_url(&self, url: &str) -> Option<(String, String, String, String)>
+    {
+        // Parse URLs like: https://github.com/owner/repo/tree/branch/path
+        if url.contains("github.com") == false
+        {
+            return None;
+        }
+
+        let parts: Vec<&str> = url.split('/').collect();
+
+        // Find the indices for owner, repo, tree, branch
+        let github_idx = parts.iter().position(|&p| p == "github.com")?;
+
+        if parts.len() < github_idx + 5
+        {
+            return None;
+        }
+
+        let owner = parts[github_idx + 1];
+        let repo = parts[github_idx + 2];
+        let tree_or_blob = parts[github_idx + 3];
+
+        if tree_or_blob != "tree" && tree_or_blob != "blob"
+        {
+            return None;
+        }
+
+        let branch = parts[github_idx + 4];
+        let path = if parts.len() > github_idx + 5
+        {
+            parts[github_idx + 5..].join("/")
+        }
+        else
+        {
+            String::new()
+        };
+
+        Some((owner.to_string(), repo.to_string(), branch.to_string(), path))
+    }
+
+    /// Downloads a file from a URL
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - URL to download from
+    /// * `dest_path` - Destination file path
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if download or file write fails
+    fn download_file(&self, url: &str, dest_path: &Path) -> Result<()>
+    {
+        let response = reqwest::blocking::get(url)?;
+
+        if response.status().is_success() == false
+        {
+            return Err(format!("Failed to download {}: HTTP {}", url, response.status()).into());
+        }
+
+        let content = response.bytes()?;
+
+        if let Some(parent) = dest_path.parent()
+        {
+            fs::create_dir_all(parent)?;
+        }
+
+        fs::write(dest_path, content)?;
+
+        Ok(())
+    }
+
+    /// Downloads templates from a GitHub URL
+    ///
+    /// Downloads known template files from a GitHub repository.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - GitHub URL to download from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if URL parsing or download fails
+    fn download_templates_from_url(&self, url: &str) -> Result<()>
+    {
+        let (owner, repo, branch, path) = self.parse_github_url(url).ok_or("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path")?;
+
+        println!("{} Repository: {}/{} (branch: {})", "→".blue(), owner.green(), repo.green(), branch.yellow());
+
+        // Build base raw URL
+        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", owner, repo, branch);
+        let url_path = if path.is_empty() == false
+        {
+            format!("/{}", path)
+        }
+        else
+        {
+            String::new()
+        };
+
+        fs::create_dir_all(&self.config_dir)?;
+
+        // Download known template files
+        let files_to_download = vec!["AGENTS.md", "C++.md", "CMake.md", "General.md", "Git.md", "Rust.md", "Swift.md", "Python.md", "TypeScript.md", "JavaScript.md"];
+
+        for file in &files_to_download
+        {
+            let file_url = format!("{}{}/{}", base_url, url_path, file);
+            let dest_path = self.config_dir.join(file);
+
+            print!("{} Downloading {}... ", "→".blue(), file.yellow());
+            io::stdout().flush()?;
+
+            match self.download_file(&file_url, &dest_path)
+            {
+                | Ok(_) => println!("{}", "✓".green()),
+                | Err(_) => println!("{} (skipped)", "✗".red())
+            }
+        }
+
+        // Download agent-specific templates
+        let agents = vec!["claude", "copilot", "cursor", "codex"];
+
+        for agent in &agents
+        {
+            let file_url = format!("{}{}/{}/instructions.md", base_url, url_path, agent);
+            let dest_dir = self.config_dir.join(agent);
+            let dest_path = dest_dir.join("instructions.md");
+
+            print!("{} Downloading {}/instructions.md... ", "→".blue(), agent.yellow());
+            io::stdout().flush()?;
+
+            match self.download_file(&file_url, &dest_path)
+            {
+                | Ok(_) => println!("{}", "✓".green()),
+                | Err(_) => println!("{} (skipped)", "✗".red())
+            }
+        }
+
+        println!("{} Templates downloaded successfully", "✓".green());
 
         Ok(())
     }
@@ -220,39 +374,63 @@ impl TemplateManager
     {
         println!("{} Updating templates for {} with {}", "→".blue(), lang.green(), agent.green());
 
-        // Build paths
-        let lang_template = self.config_dir.join(format!("{}.md", lang));
+        // Build paths - try both lowercase and capitalized versions
+        let lang_lower = lang.to_lowercase();
+        let lang_capitalized = lang.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default() + &lang[1..];
+
+        let lang_template_lower = self.config_dir.join(format!("{}.md", lang_lower));
+        let lang_template_cap = self.config_dir.join(format!("{}.md", lang_capitalized));
         let agent_template = self.config_dir.join(agent).join("instructions.md");
 
         // Check if global templates exist, if not download/copy them
-        if self.config_dir.exists() == false || lang_template.exists() == false || agent_template.exists() == false
+        if self.config_dir.exists() == false || agent_template.exists() == false
         {
             let source = from.unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
             println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
             self.download_or_copy_templates(source)?;
         }
 
-        // Verify global template existence
-        if lang_template.exists() == false
+        // Determine which language template exists (if any)
+        let lang_template = if lang_template_lower.exists()
         {
-            return Err(format!("Language template not found: {}", lang).into());
+            Some(lang_template_lower.clone())
         }
+        else if lang_template_cap.exists()
+        {
+            Some(lang_template_cap.clone())
+        }
+        else
+        {
+            None
+        };
+
+        // Verify agent template existence (required)
         if agent_template.exists() == false
         {
             return Err(format!("Agent template not found: {}", agent).into());
         }
 
         // Verify or create checksums
-        self.verify_or_create_checksum(&lang_template)?;
+        if let Some(ref lt) = lang_template
+        {
+            self.verify_or_create_checksum(lt)?;
+        }
         self.verify_or_create_checksum(&agent_template)?;
 
         // Check for local modifications
         let current_dir = std::env::current_dir()?;
-        let local_lang = current_dir.join(format!("{}.md", lang));
+        let local_lang = current_dir.join(format!("{}.md", lang_lower));
         let local_agent_dir = current_dir.join(format!(".{}", agent));
         let local_agent = local_agent_dir.join("instructions.md");
 
-        let has_lang_mods = self.has_local_modifications(&local_lang, &lang_template)?;
+        let has_lang_mods = if let Some(ref lt) = lang_template
+        {
+            self.has_local_modifications(&local_lang, lt)?
+        }
+        else
+        {
+            false
+        };
         let has_agent_mods = self.has_local_modifications(&local_agent, &agent_template)?;
 
         if (has_lang_mods || has_agent_mods) && !force
@@ -275,9 +453,22 @@ impl TemplateManager
 
         // Copy templates
         println!("{} Copying templates to current directory", "→".blue());
-        fs::copy(&lang_template, &local_lang)?;
+
+        // Copy language template if it exists
+        if let Some(ref lt) = lang_template
+        {
+            fs::copy(lt, &local_lang)?;
+            println!("  - Copied language template: {}", local_lang.display().to_string().yellow());
+        }
+        else
+        {
+            println!("  - {} No language-specific template found (skipped)", "!".yellow());
+        }
+
+        // Copy agent template (required)
         fs::create_dir_all(&local_agent_dir)?;
         fs::copy(&agent_template, &local_agent)?;
+        println!("  - Copied agent template: {}", local_agent.display().to_string().yellow());
 
         println!("{} Templates updated successfully", "✓".green());
 
@@ -348,20 +539,18 @@ impl TemplateManager
                     let name = file_name.to_string_lossy();
                     // Remove files that match common language patterns
                     // but not AGENTS.md or README.md or other important files
-                    if path.is_file() 
-                        && (name.ends_with(".md") || name.ends_with(".MD"))
-                        && name != "AGENTS.md"
-                        && name != "README.md"
-                        && name != "LICENSE.md"
-                        && name != "CHANGELOG.md"
-                        && name != "CONTRIBUTING.md"
+                    if path.is_file() &&
+                        (name.ends_with(".md") || name.ends_with(".MD")) &&
+                        name != "AGENTS.md" &&
+                        name != "README.md" &&
+                        name != "LICENSE.md" &&
+                        name != "CHANGELOG.md" &&
+                        name != "CONTRIBUTING.md"
                     {
                         // Check if it matches known template patterns
                         // Currently supported languages: c++, swift, rust
                         let lowercase = name.to_lowercase();
-                        if lowercase == "c++.md"
-                            || lowercase == "swift.md"
-                            || lowercase == "rust.md"
+                        if lowercase == "c++.md" || lowercase == "swift.md" || lowercase == "rust.md"
                         {
                             println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
                             fs::remove_file(&path)?;
