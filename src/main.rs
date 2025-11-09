@@ -48,7 +48,7 @@ enum Commands
         #[arg(long)]
         from: Option<String>
     },
-    /// Clear all templates from storage
+    /// Clear local templates from current directory
     Clear
     {
         /// Force clear without confirmation

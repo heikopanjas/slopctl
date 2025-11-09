@@ -284,7 +284,11 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Clears all templates from global storage
+    /// Clears local templates from current directory
+    ///
+    /// Removes agent instruction directories and language template files from
+    /// the current directory. Global templates in $HOME/.config/vibe-check/templates
+    /// are not affected.
     ///
     /// Creates a backup before clearing and optionally prompts for confirmation.
     ///
@@ -297,9 +301,11 @@ impl TemplateManager
     /// Returns an error if backup or deletion fails
     pub fn clear(&self, force: bool) -> Result<()>
     {
-        if !force
+        let current_dir = std::env::current_dir()?;
+
+        if force == false
         {
-            print!("{} Are you sure you want to clear all templates? (y/N): ", "?".yellow());
+            print!("{} Are you sure you want to clear local templates? (y/N): ", "?".yellow());
             io::stdout().flush()?;
 
             let mut input = String::new();
@@ -313,15 +319,67 @@ impl TemplateManager
         }
 
         // Create backup before clearing
-        self.create_backup(&self.config_dir)?;
+        self.create_backup(&current_dir)?;
 
-        if self.config_dir.exists()
+        let mut cleared_count = 0;
+
+        // Find and remove agent directories (.claude, .copilot, .cursor, .codex)
+        let agent_dirs = vec![".claude", ".copilot", ".cursor", ".codex"];
+        for agent_dir in agent_dirs
         {
-            println!("{} Clearing templates from {}", "→".blue(), self.config_dir.display().to_string().yellow());
-            fs::remove_dir_all(&self.config_dir)?;
+            let path = current_dir.join(agent_dir);
+            if path.exists()
+            {
+                println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
+                fs::remove_dir_all(&path)?;
+                cleared_count += 1;
+            }
         }
 
-        println!("{} Templates cleared successfully", "✓".green());
+        // Find and remove common language template files
+        // Check for common patterns in current directory
+        if let Ok(entries) = fs::read_dir(&current_dir)
+        {
+            for entry in entries.flatten()
+            {
+                let path = entry.path();
+                if let Some(file_name) = path.file_name()
+                {
+                    let name = file_name.to_string_lossy();
+                    // Remove files that match common language patterns
+                    // but not AGENTS.md or README.md or other important files
+                    if path.is_file() 
+                        && (name.ends_with(".md") || name.ends_with(".MD"))
+                        && name != "AGENTS.md"
+                        && name != "README.md"
+                        && name != "LICENSE.md"
+                        && name != "CHANGELOG.md"
+                        && name != "CONTRIBUTING.md"
+                    {
+                        // Check if it matches known template patterns
+                        // Currently supported languages: c++, swift, rust
+                        let lowercase = name.to_lowercase();
+                        if lowercase == "c++.md"
+                            || lowercase == "swift.md"
+                            || lowercase == "rust.md"
+                        {
+                            println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
+                            fs::remove_file(&path)?;
+                            cleared_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if cleared_count == 0
+        {
+            println!("{} No local templates found to clear", "→".blue());
+        }
+        else
+        {
+            println!("{} Cleared {} local template(s) successfully", "✓".green(), cleared_count);
+        }
 
         Ok(())
     }

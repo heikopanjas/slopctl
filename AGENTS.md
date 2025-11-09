@@ -228,9 +228,12 @@ vibe-check/
   - Detects local modifications and warns user before overwriting
   - Stops operation if local changes detected unless `force` is true
 
-- `clear(force: bool)` - Clear all templates from storage
+- `clear(force: bool)` - Clear local templates from current directory
   - `force` - If true, clear templates without confirmation
-  - Creates backup of templates before clearing in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
+  - Removes agent instruction directories (.claude, .copilot, .cursor, .codex) from current directory
+  - Removes language template files for supported languages (c++, swift, rust) from current directory
+  - Does NOT affect global templates in `$HOME/.config/vibe-check/templates`
+  - Creates backup of local templates before clearing in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
 
 ### CLI Command Implementation
 
@@ -422,6 +425,30 @@ git diff
 - Converted all boolean negations from `!condition` to `condition == false` for clarity
 - Added `#![allow(clippy::bool_comparison)]` to template_manager.rs to suppress clippy warnings
 - Reasoning: Explicit comparisons improve code readability and reduce cognitive load when scanning code
+
+### 2025-10-05
+
+- Created AGENTS.template.md as comprehensive template for use in other projects
+- Template includes all agent-specific initialization prompts embedded in one file
+- Template incorporates the basic structure from README.md Step 1
+- Added AGENTS.template.md to repository structure documentation
+- Updated file organization best practices to reference the template
+
+### 2025-11-09 (Clear Command Update)
+
+- Updated clear command to only delete local templates from current directory
+- Modified TemplateManager::clear() to remove agent directories and language template files from current directory only
+- Global templates in $HOME/.config/vibe-check/templates are now preserved
+- Added safeguards to prevent removal of important files (AGENTS.md, README.md, LICENSE.md, CHANGELOG.md, CONTRIBUTING.md)
+- Updated CLI command description to reflect local-only clearing behavior
+- Reasoning: Users should be able to clean up project-specific templates without affecting their global template storage
+
+### 2025-11-09 (Supported Languages)
+
+- Restricted clear command to only remove templates for currently supported languages: c++, swift, and rust
+- Removed support for cmake.md, general.md, git.md, python.md, typescript.md, javascript.md from clear operation
+- Updated documentation to reflect the restricted language list
+- Reasoning: Focus on core supported languages to prevent accidental removal of unrelated markdown files
 
 ### 2025-10-05
 
