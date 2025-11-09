@@ -169,7 +169,7 @@ impl TemplateManager
         {
             // Download from URL
             println!("{} Downloading templates from URL...", "→".blue());
-            
+
             // For GitHub URLs, we need to download the raw files
             // For now, return an error as full implementation requires more work
             return Err("URL downloading not yet fully implemented. Please use a local path.".into());
