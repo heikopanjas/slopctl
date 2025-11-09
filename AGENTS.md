@@ -196,6 +196,10 @@ vibe-check/
 - Keep functions small and focused
 - Document public APIs with doc comments (`///`)
 - Write unit tests alongside implementation
+- **Boolean comparisons**: Always use explicit boolean comparisons for clarity
+  - Use `if condition == true` instead of `if condition`
+  - Use `if condition == false` instead of `if !condition`
+  - Exception: clippy warnings for explicit boolean comparisons are allowed
 
 ### Template Management
 
@@ -276,10 +280,10 @@ vibe-check/
 ### Rust/Cargo Commands
 
 ```bash
-# Build the project
+# Build the project (debug - use during development)
 cargo build
 
-# Build for release
+# Build for release (optimized - use for final testing/deployment only)
 cargo build --release
 
 # Run the application
@@ -300,6 +304,8 @@ cargo fmt
 # Run clippy linter
 cargo clippy
 ```
+
+**Important**: Always use debug builds (`cargo build`) during development. Debug builds compile faster and include debugging symbols. Only use release builds (`cargo build --release`) for final testing or deployment.
 
 ### Common Git Commands
 
@@ -407,6 +413,15 @@ git diff
 - Implemented automatic template download from default GitHub repository when global templates missing
 - Added reqwest dependency for HTTP client to download templates
 - Updated TemplateManager::update() to accept optional from parameter
+
+### 2025-11-09 (Code Style)
+
+- Added .rustfmt.toml configuration with project formatting rules
+- Applied rustfmt to ensure consistent code style across project
+- Updated Rust Style conventions to enforce explicit boolean comparisons
+- Converted all boolean negations from `!condition` to `condition == false` for clarity
+- Added `#![allow(clippy::bool_comparison)]` to template_manager.rs to suppress clippy warnings
+- Reasoning: Explicit comparisons improve code readability and reduce cognitive load when scanning code
 
 ### 2025-10-05
 

@@ -1,5 +1,7 @@
 //! Template management functionality for vibe-check
 
+#![allow(clippy::bool_comparison)]
+
 use std::{
     fs,
     io::{self, Write},
@@ -85,7 +87,7 @@ impl TemplateManager
     {
         let checksum_path = template_path.with_extension("sha");
 
-        if !checksum_path.exists()
+        if checksum_path.exists() == false
         {
             println!("{} Creating missing checksum for {}", "→".blue(), template_path.display().to_string().yellow());
 
@@ -110,7 +112,7 @@ impl TemplateManager
     /// Returns `true` if files differ, `false` if identical or local doesn't exist
     fn has_local_modifications(&self, local_path: &Path, global_path: &Path) -> Result<bool>
     {
-        if !local_path.exists()
+        if local_path.exists() == false
         {
             return Ok(false);
         }
@@ -134,7 +136,7 @@ impl TemplateManager
     /// Returns an error if backup creation fails
     fn create_backup(&self, source_dir: &Path) -> Result<()>
     {
-        if !source_dir.exists()
+        if source_dir.exists() == false
         {
             return Ok(());
         }
@@ -178,7 +180,7 @@ impl TemplateManager
         {
             // Copy from local path
             let source_path = Path::new(source);
-            if !source_path.exists()
+            if source_path.exists() == false
             {
                 return Err(format!("Source path does not exist: {}", source).into());
             }
@@ -223,7 +225,7 @@ impl TemplateManager
         let agent_template = self.config_dir.join(agent).join("instructions.md");
 
         // Check if global templates exist, if not download/copy them
-        if !self.config_dir.exists() || !lang_template.exists() || !agent_template.exists()
+        if self.config_dir.exists() == false || lang_template.exists() == false || agent_template.exists() == false
         {
             let source = from.unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
             println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
@@ -231,11 +233,11 @@ impl TemplateManager
         }
 
         // Verify global template existence
-        if !lang_template.exists()
+        if lang_template.exists() == false
         {
             return Err(format!("Language template not found: {}", lang).into());
         }
-        if !agent_template.exists()
+        if agent_template.exists() == false
         {
             return Err(format!("Agent template not found: {}", agent).into());
         }
@@ -303,7 +305,7 @@ impl TemplateManager
             let mut input = String::new();
             io::stdin().read_line(&mut input)?;
 
-            if !input.trim().eq_ignore_ascii_case("y")
+            if input.trim().eq_ignore_ascii_case("y") == false
             {
                 println!("{} Operation cancelled", "→".blue());
                 return Ok(());
