@@ -1,7 +1,5 @@
 //! Template management functionality for vibe-check
 
-#![allow(clippy::bool_comparison)]
-
 use std::{
     fs,
     io::{self, Write},
