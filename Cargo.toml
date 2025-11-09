@@ -1,6 +1,11 @@
 [package]
 name = "vibe-check"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.20", features = ["derive"] }
+owo-colors = "4.1.0"
+sha2 = "0.10"
+hex = "0.4"
+chrono = "0.4"
