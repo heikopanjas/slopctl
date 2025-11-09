@@ -57,3 +57,8 @@ scratch*/
 notes-local*/
 
 # End of file
+
+
+# Added by cargo
+
+/target
