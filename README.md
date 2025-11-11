@@ -623,10 +623,6 @@ cargo fmt
 cargo clippy
 ```
 
-## Acknowledgments
-
-Inspired by the need for consistent, safe, and auditable AI-assisted coding workflows across multiple projects and agents.
-
 ---
 
 Last updated: November 12, 2025
