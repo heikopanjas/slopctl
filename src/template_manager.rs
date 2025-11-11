@@ -9,16 +9,60 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{Result, utils::copy_dir_all};
 
+/// File mapping with source and target paths
+#[derive(Debug, Serialize, Deserialize)]
+struct FileMapping
+{
+    source: String,
+    target: String
+}
+
+/// Agent instruction configuration
+#[derive(Debug, Serialize, Deserialize)]
+struct AgentInstruction
+{
+    source: String,
+    target: String
+}
+
+/// Agent configuration with instruction and prompts
+#[derive(Debug, Serialize, Deserialize)]
+struct AgentConfig
+{
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instruction: Option<AgentInstruction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompts:     Option<Vec<FileMapping>>
+}
+
+/// Language configuration with files
+#[derive(Debug, Serialize, Deserialize)]
+struct LanguageConfig
+{
+    files: Vec<FileMapping>
+}
+
+/// Template configuration structure
+#[derive(Debug, Serialize, Deserialize)]
+struct TemplateConfig
+{
+    agents:    std::collections::HashMap<String, AgentConfig>,
+    languages: std::collections::HashMap<String, LanguageConfig>,
+    general:   Vec<FileMapping>
+}
+
 /// Manages template files for coding agent instructions
 ///
 /// The `TemplateManager` handles all operations related to template storage,
-/// verification, backup, and synchronization. Templates are stored in
-/// `$HOME/.config/vibe-check/templates` and backed up to
-/// `$HOME/.cache/vibe-check/backups` before modifications.
+/// verification, backup, and synchronization. Templates are stored in the
+/// local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux,
+/// `$HOME/Library/Application Support/vibe-check/templates` on macOS) and backed up
+/// to the cache directory before modifications.
 pub struct TemplateManager
 {
     config_dir: PathBuf,
@@ -29,19 +73,101 @@ impl TemplateManager
 {
     /// Creates a new TemplateManager instance
     ///
-    /// Initializes paths to configuration and cache directories based on
-    /// the user's HOME environment variable.
+    /// Initializes paths to local data and cache directories using the `dirs` crate.
+    /// Templates are stored in the local data directory and backups in the cache directory.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HOME environment variable is not set
+    /// Returns an error if the local data directory cannot be determined
     pub fn new() -> Result<Self>
     {
-        let home = std::env::var("HOME")?;
-        let config_dir = PathBuf::from(&home).join(".config/vibe-check/templates");
-        let cache_dir = PathBuf::from(&home).join(".cache/vibe-check/backups");
+        let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
+        let cache_dir = dirs::cache_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine cache directory"))?;
+
+        let config_dir = data_dir.join("vibe-check/templates");
+        let cache_dir = cache_dir.join("vibe-check/backups");
 
         Ok(Self { config_dir, cache_dir })
+    }
+
+    /// Loads template configuration from templates.yml
+    ///
+    /// Downloads templates.yml if it doesn't exist in the global config directory.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL for downloading templates.yml from GitHub
+    /// * `url_path` - Path within the repository
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if templates.yml cannot be loaded or parsed
+    fn load_template_config(&self, base_url: Option<&str>, url_path: Option<&str>) -> Result<TemplateConfig>
+    {
+        let config_path = self.config_dir.join("templates.yml");
+
+        // If templates.yml doesn't exist and we have a URL, download it
+        if config_path.exists() == false
+        {
+            if let (Some(base), Some(path)) = (base_url, url_path)
+            {
+                let config_url = format!("{}{}/templates.yml", base, path);
+                print!("{} Downloading templates.yml... ", "→".blue());
+                io::stdout().flush()?;
+
+                match self.download_file(&config_url, &config_path)
+                {
+                    | Ok(_) => println!("{}", "✓".green()),
+                    | Err(e) =>
+                    {
+                        println!("{}", "✗".red());
+                        return Err(format!("Failed to download templates.yml: {}", e).into());
+                    }
+                }
+            }
+        }
+
+        // Try to load and parse templates.yml
+        if config_path.exists() == true
+        {
+            let content = fs::read_to_string(&config_path)?;
+            let config: TemplateConfig = serde_yaml::from_str(&content)?;
+            Ok(config)
+        }
+        else
+        {
+            // Return default configuration if file doesn't exist
+            let mut agents = std::collections::HashMap::new();
+            agents.insert("claude".to_string(), AgentConfig {
+                instruction: Some(AgentInstruction { source: "claude/CLAUDE.md".to_string(), target: "$workspace/CLAUDE.md".to_string() }),
+                prompts:     Some(vec![FileMapping {
+                    source: "claude/commands/init-session.md".to_string(),
+                    target: "$workspace/.claude/commands/init-session.md".to_string()
+                }])
+            });
+            agents.insert("copilot".to_string(), AgentConfig {
+                instruction: Some(AgentInstruction {
+                    source: "copilot/copilot-instructions.md".to_string(),
+                    target: "$workspace/.github/copilot-instructions.md".to_string()
+                }),
+                prompts:     Some(vec![FileMapping {
+                    source: "copilot/prompts/init-session.prompt.md".to_string(),
+                    target: "$workspace/.github/prompts/init-session.prompt.md".to_string()
+                }])
+            });
+
+            let mut languages = std::collections::HashMap::new();
+            languages.insert("c++".to_string(), LanguageConfig { files: vec![FileMapping { source: "c++.md".to_string(), target: "$workspace/c++.md".to_string() }] });
+
+            let general = vec![
+                FileMapping { source: "AGENTS.md".to_string(), target: "$workspace/AGENTS.md".to_string() },
+                FileMapping { source: "cmake.md".to_string(), target: "$workspace/cmake.md".to_string() },
+                FileMapping { source: "general.md".to_string(), target: "$workspace/general.md".to_string() },
+                FileMapping { source: "git.md".to_string(), target: "$workspace/git.md".to_string() },
+            ];
+
+            Ok(TemplateConfig { agents, languages, general })
+        }
     }
 
     /// Generates a timestamp string in YYYY-MM-DD_HH_MM_SS format
@@ -96,7 +222,7 @@ impl TemplateManager
 
     /// Creates a timestamped backup of a directory
     ///
-    /// Backups are stored in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
+    /// Backups are stored in the cache directory with timestamp: `backups/YYYY-MM-DD_HH_MM_SS/`
     ///
     /// # Arguments
     ///
@@ -300,7 +426,7 @@ impl TemplateManager
 
     /// Downloads templates from a GitHub URL
     ///
-    /// Downloads known template files from a GitHub repository.
+    /// Downloads template files from a GitHub repository based on templates.yml configuration.
     ///
     /// Creates SHA checksums immediately after downloading each file.
     ///
@@ -330,15 +456,16 @@ impl TemplateManager
 
         fs::create_dir_all(&self.config_dir)?;
 
-        // Download known template files
-        let files_to_download = vec!["AGENTS.md", "C++.md", "CMake.md", "General.md", "Git.md", "Rust.md", "Swift.md", "Python.md", "TypeScript.md", "JavaScript.md"];
+        // Load template configuration
+        let config = self.load_template_config(Some(&base_url), Some(&url_path))?;
 
-        for file in &files_to_download
+        // Download general templates
+        for entry in &config.general
         {
-            let file_url = format!("{}{}/{}", base_url, url_path, file);
-            let dest_path = self.config_dir.join(file);
+            let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
+            let dest_path = self.config_dir.join(&entry.source);
 
-            print!("{} Downloading {}... ", "→".blue(), file.yellow());
+            print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
             io::stdout().flush()?;
 
             match self.download_file(&file_url, &dest_path)
@@ -355,29 +482,82 @@ impl TemplateManager
             }
         }
 
-        // Download agent-specific templates
-        let agents = vec!["claude", "copilot", "cursor", "codex"];
-
-        for agent in &agents
+        // Download language templates
+        for (_lang_name, lang_config) in &config.languages
         {
-            let file_url = format!("{}{}/{}/instructions.md", base_url, url_path, agent);
-            let dest_dir = self.config_dir.join(agent);
-            let dest_path = dest_dir.join("instructions.md");
-
-            print!("{} Downloading {}/instructions.md... ", "→".blue(), agent.yellow());
-            io::stdout().flush()?;
-
-            match self.download_file(&file_url, &dest_path)
+            for file_entry in &lang_config.files
             {
-                | Ok(_) =>
+                let file_url = format!("{}{}/{}", base_url, url_path, file_entry.source);
+                let dest_path = self.config_dir.join(&file_entry.source);
+
+                print!("{} Downloading {}... ", "→".blue(), file_entry.source.yellow());
+                io::stdout().flush()?;
+
+                match self.download_file(&file_url, &dest_path)
                 {
-                    println!("{}", "✓".green());
-                    // Create checksum immediately after download
-                    let checksum = self.calculate_checksum(&dest_path)?;
-                    let checksum_path = dest_path.with_extension("sha");
-                    fs::write(&checksum_path, checksum)?;
+                    | Ok(_) =>
+                    {
+                        println!("{}", "✓".green());
+                        // Create checksum immediately after download
+                        let checksum = self.calculate_checksum(&dest_path)?;
+                        let checksum_path = dest_path.with_extension("sha");
+                        fs::write(&checksum_path, checksum)?;
+                    }
+                    | Err(_) => println!("{} (skipped)", "✗".red())
                 }
-                | Err(_) => println!("{} (skipped)", "✗".red())
+            }
+        }
+
+        // Download agent templates
+        for (_agent_name, agent_config) in &config.agents
+        {
+            // Download instruction file if present
+            if let Some(instruction) = &agent_config.instruction
+            {
+                let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
+                let dest_path = self.config_dir.join(&instruction.source);
+
+                print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
+                io::stdout().flush()?;
+
+                match self.download_file(&file_url, &dest_path)
+                {
+                    | Ok(_) =>
+                    {
+                        println!("{}", "✓".green());
+                        // Create checksum immediately after download
+                        let checksum = self.calculate_checksum(&dest_path)?;
+                        let checksum_path = dest_path.with_extension("sha");
+                        fs::write(&checksum_path, checksum)?;
+                    }
+                    | Err(_) => println!("{} (skipped)", "✗".red())
+                }
+            }
+
+            // Download prompt files if present
+            if let Some(prompts) = &agent_config.prompts
+            {
+                for prompt in prompts
+                {
+                    let file_url = format!("{}{}/{}", base_url, url_path, prompt.source);
+                    let dest_path = self.config_dir.join(&prompt.source);
+
+                    print!("{} Downloading {}... ", "→".blue(), prompt.source.yellow());
+                    io::stdout().flush()?;
+
+                    match self.download_file(&file_url, &dest_path)
+                    {
+                        | Ok(_) =>
+                        {
+                            println!("{}", "✓".green());
+                            // Create checksum immediately after download
+                            let checksum = self.calculate_checksum(&dest_path)?;
+                            let checksum_path = dest_path.with_extension("sha");
+                            fs::write(&checksum_path, checksum)?;
+                        }
+                        | Err(_) => println!("{} (skipped)", "✗".red())
+                    }
+                }
             }
         }
 
@@ -512,7 +692,7 @@ impl TemplateManager
     /// Clears local templates from current directory
     ///
     /// Removes agent instruction directories and language template files from
-    /// the current directory. Global templates in $HOME/.config/vibe-check/templates
+    /// the current directory. Global templates in the local data directory
     /// are not affected.
     ///
     /// Creates a backup before clearing and optionally prompts for confirmation.

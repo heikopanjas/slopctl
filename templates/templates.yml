@@ -1,0 +1,47 @@
+# Template Configuration
+# Defines which template files should be downloaded and managed
+#
+# Placeholders:
+#   $workspace    - Project root directory
+#   $userprofile  - User profile/home directory
+
+# Agent-specific instruction templates
+agents:
+    claude:
+        instruction:
+            source: claude/CLAUDE.md
+            target: '$workspace/CLAUDE.md'
+        prompts:
+            - source: claude/commands/init-session.md
+              target: '$workspace/.claude/commands/init-session.md'
+
+    copilot:
+        instruction:
+            source: copilot/copilot-instructions.md
+            target: '$workspace/.github/copilot-instructions.md'
+        prompts:
+            - source: copilot/prompts/init-session.prompt.md
+              target: '$workspace/.github/prompts/init-session.prompt.md'
+
+    codex:
+        prompts:
+            - source: codex/prompts/init-session.md
+              target: '$userprofile/.codex/prompts/init-session.md'
+
+# Language-specific coding standards templates
+languages:
+    c++:
+        files:
+            - source: c++.md
+              target: '$workspace/c++.md'
+
+# General templates that apply to all projects
+general:
+    - source: AGENTS.md
+      target: '$workspace/AGENTS.md'
+    - source: cmake.md
+      target: '$workspace/cmake.md'
+    - source: general.md
+      target: '$workspace/general.md'
+    - source: git.md
+      target: '$workspace/git.md'

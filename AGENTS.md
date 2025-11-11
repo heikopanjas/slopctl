@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-09
+**Last updated:** 2025-11-11
 
 ## General Instructions
 
@@ -130,7 +130,7 @@ fix: update `KString` with "nested 'quotes'" & $special chars!
 
 **vibe-check** is a manager for coding agent instruction files. It provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Cursor, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
 
-Templates are stored in `$HOME/.config/vibe-check/templates` and managed by the `TemplateManager` struct.
+Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux, `$HOME/Library/Application Support/vibe-check/templates` on macOS) and managed by the `TemplateManager` struct.
 
 ## Technology Stack
 
@@ -140,7 +140,8 @@ Templates are stored in `$HOME/.config/vibe-check/templates` and managed by the 
 - **HTTP Client:** reqwest (v0.12 with blocking and json features)
 - **Checksums:** sha2 (v0.10) and hex (v0.4)
 - **Date/Time:** chrono (v0.4)
-- **Serialization:** serde (v1.0) and serde_json (v1.0)
+- **Serialization:** serde (v1.0), serde_json (v1.0), and serde_yaml (v0.9)
+- **Directory Paths:** dirs (v5.0)
 - **Version Control:** Git
 - **License:** MIT
 
@@ -237,7 +238,7 @@ vibe-check/
 
 ### Template Management
 
-- Templates are stored in `$HOME/.config/vibe-check/templates`
+- Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux, `$HOME/Library/Application Support/vibe-check/templates` on macOS)
 - All template operations are handled through the `TemplateManager` struct
 - Template files are organized by language/framework and agent type
 - Use standard file system operations for template access
@@ -246,6 +247,17 @@ vibe-check/
 - Checksum files follow naming scheme: `template.md` -> `template.sha` in same directory
 - Checksums are automatically created immediately after downloading or copying templates to global storage
 - Checksums are not modified until the next update operation
+- Template downloads are controlled by `templates.yml` configuration file
+
+**templates.yml Configuration:**
+
+The `templates.yml` file defines which template files should be downloaded and managed. It has three main sections:
+
+- `agents` - Agent-specific instruction templates (e.g., claude/instructions.md, copilot/instructions.md)
+- `languages` - Language-specific coding standards templates (e.g., Rust.md, C++.md)
+- `general` - General templates that apply to all projects (e.g., AGENTS.md, Git.md)
+
+Each entry has a `name` and `file` field. The system attempts to download templates.yml first; if not found, it uses a default configuration with core templates.
 
 **TemplateManager Functions:**
 
@@ -258,8 +270,8 @@ vibe-check/
   - If `from` is specified, copies/downloads templates from that location first
   - Verifies global template integrity using SHA checksums
   - Creates missing checksums automatically for global templates
-  - Creates backup of existing local templates in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
-  - Copies template files from `$HOME/.config/vibe-check/templates` to current directory
+  - Creates backup of existing local templates in cache directory with timestamp
+  - Copies template files from local data directory to current directory
   - Detects local modifications and warns user before overwriting
   - Stops operation if local changes detected unless `force` is true
 
@@ -267,8 +279,8 @@ vibe-check/
   - `force` - If true, clear templates without confirmation
   - Removes agent instruction directories (.claude, .copilot, .cursor, .codex) from current directory
   - Removes language template files for supported languages (c++, swift, rust) from current directory
-  - Does NOT affect global templates in `$HOME/.config/vibe-check/templates`
-  - Creates backup of local templates before clearing in `$HOME/.cache/vibe-check/backups/YYYY-MM-DD_HH_MM_SS/`
+  - Does NOT affect global templates in local data directory
+  - Creates backup of local templates before clearing in cache directory with timestamp
 
 ### CLI Command Implementation
 
@@ -297,7 +309,7 @@ vibe-check/
 
 ### File Organization
 
-- Store reusable templates in `$HOME/.config/vibe-check/templates` (user config directory)
+- Store reusable templates in local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux, `$HOME/Library/Application Support/vibe-check/templates` on macOS)
 - Keep agent-specific instruction templates organized by agent type
 - Maintain language and framework-specific templates for quick project setup
 - Preserve file structure and formatting when updating templates
@@ -530,6 +542,28 @@ git diff
 - Specified reqwest version v0.12 with blocking and json features
 - Added .rustfmt.toml to Repository Structure documentation
 - Reasoning: Documentation should accurately reflect the current codebase state
+
+### 2025-11-11 (Template Storage Location)
+
+- Changed template storage location from `$HOME/.config/vibe-check/templates` to platform-specific local data directory
+- Added dirs crate v5.0 dependency for cross-platform directory path resolution
+- Updated TemplateManager::new() to use `dirs::data_local_dir()` instead of HOME environment variable
+- Templates now stored in `$HOME/.local/share/vibe-check/templates` on Linux and `$HOME/Library/Application Support/vibe-check/templates` on macOS
+- Cache/backups remain in platform-specific cache directory via `dirs::cache_dir()`
+- Updated all documentation to reflect new storage locations
+- Reasoning: Using platform-appropriate directories via dirs crate provides better cross-platform compatibility and follows OS-specific conventions for application data storage
+
+### 2025-11-11 (Template Configuration)
+
+- Created templates.yml configuration file to control which templates are downloaded
+- Added serde_yaml v0.9 dependency for YAML parsing
+- Added TemplateConfig and TemplateEntry structs to represent configuration
+- Implemented load_template_config() method to load and parse templates.yml
+- Updated download_templates_from_url() to use YAML configuration instead of hardcoded file lists
+- Configuration has three sections: agents, languages, and general templates
+- System downloads templates.yml first; falls back to default configuration if not found
+- Updated documentation to describe templates.yml structure and usage
+- Reasoning: YAML configuration makes template management more flexible and maintainable, allowing users to customize which templates are downloaded without modifying code
 
 ### 2025-10-03
 
