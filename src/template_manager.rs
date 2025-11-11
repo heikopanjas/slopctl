@@ -997,8 +997,8 @@ impl TemplateManager
 
         let mut cleared_count = 0;
 
-        // Find and remove agent directories (.claude, .copilot, .cursor, .codex)
-        let agent_dirs = vec![".claude", ".copilot", ".cursor", ".codex"];
+        // Find and remove agent directories (.claude, .copilot, .codex)
+        let agent_dirs = vec![".claude", ".copilot", ".codex"];
         for agent_dir in agent_dirs
         {
             let path = current_dir.join(agent_dir);

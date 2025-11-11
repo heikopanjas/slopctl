@@ -1,6 +1,6 @@
 # vibe-check
 
-**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Cursor, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
+**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
 
 ## Overview
 
@@ -11,7 +11,7 @@ vibe-check is a command-line tool that helps you:
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **Keep templates synchronized** – Update local templates from global storage
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
-- **Support multiple agents** – Works with Claude, Copilot, Cursor, Codex, and more
+- **Support multiple agents** – Works with Claude, Copilot, Codex, and more
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
 
 ## Repository Structure

@@ -8,7 +8,7 @@
 
 ### Working Together
 
-This file (`AGENTS.md`) is the primary instructions file for AI coding assistants working on this project. Agent-specific instruction files (such as `.github/copilot-instructions.md`, `CLAUDE.md`, `.cursor/rules/main.mdc`) reference this document, maintaining a single source of truth.
+This file (`AGENTS.md`) is the primary instructions file for AI coding assistants working on this project. Agent-specific instruction files (such as `.github/copilot-instructions.md`, `CLAUDE.md`) reference this document, maintaining a single source of truth.
 
 When initializing a session or analyzing the workspace, refer to instruction files in this order:
 

@@ -128,7 +128,7 @@ fix: update `KString` with "nested 'quotes'" & $special chars!
 
 ## Project Overview
 
-**vibe-check** is a manager for coding agent instruction files. It provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Cursor, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
+**vibe-check** is a manager for coding agent instruction files. It provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
 
 Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux, `$HOME/Library/Application Support/vibe-check/templates` on macOS) and managed by the `TemplateManager` struct.
 
@@ -217,14 +217,9 @@ vibe-check/
 │   ├── copilot/
 │   │   ├── copilot-instructions.md  # GitHub Copilot instructions
 │   │   └── prompts/            # Copilot initialization prompts
-│   └── cursor/
-│       └── prompts/            # Cursor AI initialization prompts
 ├── CLAUDE.md                   # Claude-specific reference
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot reference
-└── .cursor/
-    └── rules/
-        └── main.mdc            # Cursor AI reference
 ```
 
 ## Coding Conventions
@@ -323,7 +318,7 @@ The system downloads templates.yml first; if download fails, the operation stops
 
 - `clear(force: bool)` - Clear local templates from current directory
   - `force` - If true, clear templates without confirmation
-  - Removes agent instruction directories (.claude, .copilot, .cursor, .codex) from current directory
+  - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
   - Removes language template files for supported languages (c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
   - Creates backup of local templates before clearing in cache directory with timestamp
@@ -632,7 +627,7 @@ git diff
 
 - Initial AGENTS.md setup
 - Established core coding standards and conventions
-- Created agent-specific reference files (CLAUDE.md, .github/copilot-instructions.md, .cursor/rules/main.mdc)
+- Created agent-specific reference files (CLAUDE.md, .github/copilot-instructions.md)
 - Defined repository structure and governance principles
 
 ### 2025-11-12 (Template Configuration Simplification)

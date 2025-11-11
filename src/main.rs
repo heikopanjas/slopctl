@@ -21,7 +21,7 @@ enum Commands
         #[arg(long)]
         lang: String,
 
-        /// AI coding agent (e.g., claude, copilot, cursor, codex)
+        /// AI coding agent (e.g., claude, copilot, codex)
         #[arg(long)]
         agent: String,
 
