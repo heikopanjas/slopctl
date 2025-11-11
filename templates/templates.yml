@@ -45,26 +45,26 @@ languages:
     c++:
         files:
             - source: c++-coding-conventions.md
-              target: '$instructions/c++-coding-conventions.md'
+              target: '$instructions'
 
 # Integration templates for specific tools/workflows
 integration:
     git:
         files:
             - source: git-workflow-conventions.md
-              target: '$instructions/git-workflow-conventions.md'
+              target: '$instructions'
 
 # General templates that apply to all projects
 principles:
     - source: core-principles.md
-      target: '$instructions/core-principles.md'
+      target: '$instructions'
     - source: best-practices.md
-      target: '$instructions/best-practices.md'
+      target: '$instructions'
 
 mission:
     - source: mission-statement.md
-      target: '$instructions/mission-statement.md'
+      target: '$instructions'
     - source: technology-stack.md
-      target: '$instructions/technology-stack.md'
+      target: '$instructions'
     - source: build-environment.md
-      target: '$instructions/build-environment.md'
+      target: '$instructions'

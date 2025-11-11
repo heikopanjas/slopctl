@@ -1,4 +1,16 @@
 
+### Commit Protocol (CRITICAL)
+
+- **NEVER commit automatically** - always wait for explicit confirmation
+
+Whenever asked to commit changes:
+
+- Stage the changes
+- Write a detailed but concise commit message using conventional commits format
+- Commit the changes
+
+This is **CRITICAL**!
+
 ## **Commit Message Guidelines - CRITICAL**
 
 Follow these rules to prevent VSCode terminal crashes and ensure clean git history:

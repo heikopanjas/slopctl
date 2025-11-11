@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-11
+**Last updated:** 2025-11-12
 
 ## General Instructions
 
@@ -634,4 +634,15 @@ git diff
 - Established core coding standards and conventions
 - Created agent-specific reference files (CLAUDE.md, .github/copilot-instructions.md, .cursor/rules/main.mdc)
 - Defined repository structure and governance principles
+
+### 2025-11-12 (Template Configuration Simplification)
+
+- Simplified $instructions placeholder in templates.yml to remove redundant filename portion
+- Changed targets from $instructions/filename.md to just $instructions for all fragment files
+- Updated documentation in AGENTS.md and README.md to reflect fragment merging system
+- Added comprehensive documentation of six template configuration sections: main, agents, languages, integration, principles, mission
+- Documented insertion points and placeholder behavior in README.md
+- Updated repository structure listings to reflect actual template files
+- Fixed outdated storage paths in FAQ and customization sections
+- Reasoning: The filename portion in $instructions/filename.md was redundant since fragments are merged into AGENTS.md at insertion points, not copied as separate files. Simplifying to just $instructions improves clarity and reduces confusion.
 

@@ -32,10 +32,13 @@ vibe-check/
 ├── templates/                  # Template files for various languages and frameworks
 │   ├── templates.yml           # Template configuration (defines structure and mappings)
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── c++-coding-conventions.md  # C++ coding standards template
-│   ├── cmake.md                # CMake project template
-│   ├── general.md              # General coding guidelines template
-│   ├── git-workflow-conventions.md  # Git workflow template
+│   ├── best-practices.md       # Best practices template (fragment)
+│   ├── build-environment.md    # Build environment template (fragment)
+│   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
+│   ├── core-principles.md      # Core principles template (fragment)
+│   ├── git-workflow-conventions.md  # Git workflow template (fragment)
+│   ├── mission-statement.md    # Mission statement template (fragment)
+│   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
 │   │   └── commands/
@@ -125,6 +128,199 @@ vibe-check clear
 # Force clear without confirmation
 vibe-check clear --force
 ```
+
+## Complete Walkthrough: C++ Project with Claude
+
+This walkthrough demonstrates setting up a new C++ project with Claude AI assistant using vibe-check.
+
+### Step 1: Create Your Project Directory
+
+```bash
+mkdir my-cpp-project
+cd my-cpp-project
+```
+
+### Step 2: Initialize with vibe-check
+
+```bash
+vibe-check init --lang c++ --agent claude
+```
+
+**What happens:**
+
+1. **Downloads templates** (first run only):
+   - Fetches `templates.yml` from GitHub
+   - Downloads all template files to `~/Library/Application Support/vibe-check/templates/` (macOS)
+   - Creates SHA checksums for integrity verification
+
+2. **Processes configuration**:
+   - Parses `templates.yml` to determine which files to install
+   - Identifies fragments marked with `$instructions` placeholder
+
+3. **Creates main AGENTS.md**:
+   - Downloads main AGENTS.md template
+   - Merges fragments at insertion points:
+     - **Mission section**: mission-statement.md, technology-stack.md, build-environment.md
+     - **Principles section**: core-principles.md, best-practices.md
+     - **Languages section**: c++-coding-conventions.md (C++ specific)
+     - **Integration section**: git-workflow-conventions.md
+   - Saves complete merged file to `./AGENTS.md`
+
+4. **Installs Claude files**:
+   - Copies `CLAUDE.md` to project root
+   - Creates `.claude/commands/` directory
+   - Copies `init-session.md` prompt to `.claude/commands/`
+
+### Step 3: Verify Installation
+
+```bash
+ls -la
+```
+
+**Expected structure:**
+
+```text
+my-cpp-project/
+├── AGENTS.md                          # Main instruction file (merged)
+├── CLAUDE.md                          # Claude-specific reference
+└── .claude/
+    └── commands/
+        └── init-session.md            # Claude initialization prompt
+```
+
+### Step 4: Start Claude Session
+
+Open Claude and use the initialization prompt:
+
+1. Open `.claude/commands/init-session.md`
+2. Copy the contents
+3. Paste into Claude to initialize the session
+
+Alternatively, in Claude's project settings, reference `AGENTS.md` as your project instructions.
+
+### Step 5: Verify Claude Understands Instructions
+
+Ask Claude to confirm:
+
+```
+Please confirm you've read AGENTS.md and understand the project instructions.
+```
+
+Claude should acknowledge the:
+- Commit protocol (no auto-commits)
+- C++ coding conventions
+- Git workflow conventions
+- Build environment requirements
+
+### Step 6: Start Coding
+
+Now you can work with Claude following the established guidelines:
+
+```
+Claude, help me create a CMakeLists.txt for this C++ project with library and test targets.
+```
+
+Claude will follow the conventions in AGENTS.md, including:
+- Using proper C++ style
+- Following conventional commits
+- Waiting for explicit commit confirmation
+- Documenting decisions
+
+### Step 7: Update Templates Later (Optional)
+
+If templates are updated upstream:
+
+```bash
+# Update from global storage
+vibe-check update --lang c++ --agent claude
+
+# Update from specific source
+vibe-check update --lang c++ --agent claude --from https://github.com/user/repo/tree/main/templates
+```
+
+vibe-check will:
+- Check for local modifications
+- Create timestamped backup in `~/.cache/vibe-check/backups/`
+- Prompt for confirmation unless `--force` is used
+
+### Step 8: Working with Multiple Agents
+
+You can initialize multiple agents for the same project:
+
+```bash
+# Add GitHub Copilot
+vibe-check init --lang c++ --agent copilot
+
+# Project now has both Claude and Copilot instructions
+```
+
+**Updated structure:**
+
+```text
+my-cpp-project/
+├── AGENTS.md
+├── CLAUDE.md
+├── .claude/
+│   └── commands/
+│       └── init-session.md
+└── .github/
+    ├── copilot-instructions.md
+    └── prompts/
+        └── init-session.prompt.md
+```
+
+### Common Scenarios
+
+**Scenario: Modified AGENTS.md locally**
+
+```bash
+$ vibe-check update --lang c++ --agent claude
+→ Updating templates for c++ with claude
+! Local modifications detected:
+  - /path/to/my-cpp-project/AGENTS.md
+→ Backup created: ~/.cache/vibe-check/backups/2025-11-12_14_30_45/
+→ Use --force to overwrite
+✗ Local modifications detected. Aborting.
+```
+
+**Solution:** Review changes, commit them, then use `--force`:
+
+```bash
+git diff AGENTS.md              # Review changes
+git add AGENTS.md
+git commit -m "docs: customize project instructions"
+vibe-check update --lang c++ --agent claude --force
+```
+
+**Scenario: Clean up project templates**
+
+```bash
+# Remove agent directories and language templates
+vibe-check clear
+
+# Removes: .claude/, .github/, .codex/, c++-coding-conventions.md, etc.
+# Preserves: AGENTS.md, README.md, LICENSE, source code
+```
+
+**Scenario: Use custom templates**
+
+```bash
+# Your team maintains custom templates
+vibe-check init --lang c++ --agent claude --from https://github.com/yourteam/templates/tree/main/templates
+
+# Or from local path
+vibe-check init --lang c++ --agent claude --from ~/company/coding-standards/templates
+```
+
+### Tips for Success
+
+1. **Initialize early**: Run `vibe-check init` at project start before adding code
+2. **Commit instructions**: Add AGENTS.md and agent files to version control
+3. **Team consistency**: All team members should use same template source
+4. **Customize carefully**: Modify AGENTS.md as needed, but track changes in git
+5. **Update periodically**: Check for template updates monthly or quarterly
+6. **Use force sparingly**: Only use `--force` when you understand what you're overwriting
+7. **Backup important**: vibe-check creates backups, but git is your primary safety net
 
 ## CLI Commands
 
@@ -223,34 +419,69 @@ Templates are stored in platform-specific directories:
 Templates include:
 
 - **templates.yml**: Configuration file defining structure and file mappings
-- **Language templates**: Language-specific coding standards and conventions
+- **Main template**: AGENTS.md (primary instruction file)
+- **Language templates**: Language-specific coding standards (e.g., c++-coding-conventions.md)
+- **Integration templates**: Tool/workflow templates (e.g., git-workflow-conventions.md)
+- **Principle templates**: Core principles and best practices
+- **Mission templates**: Mission statement, technology stack, build environment
 - **Agent templates**: Agent-specific instruction files and prompts
-- **General templates**: AGENTS.md, cmake.md, general.md, git-workflow-conventions.md
 
 ### Template Configuration (templates.yml)
 
-The `templates.yml` file defines the template structure with three main sections:
+The `templates.yml` file defines the template structure with six main sections:
 
-1. **agents**: Agent-specific files with `instruction` (main file) and `prompts` (custom commands)
-2. **languages**: Language-specific template files
-3. **general**: General templates that apply to all projects
+1. **main**: Main AGENTS.md instruction file (primary source of truth)
+2. **agents**: Agent-specific files with `instructions` (main file) and `prompts` (custom commands)
+3. **languages**: Language-specific coding standards templates
+4. **integration**: Tool/workflow integration templates (e.g., git workflows)
+5. **principles**: Core principles and general guidelines
+6. **mission**: Mission statement, purpose, and project overview
 
 Each file entry specifies:
 
 - `source`: Path in the template repository
-- `target`: Destination path using placeholders (`$workspace` or `$userprofile`)
+- `target`: Destination path using placeholders
+
+**Placeholders:**
+
+- `$workspace` - Resolves to current directory
+- `$userprofile` - Resolves to user's home directory
+- `$instructions` - Indicates fragment to be merged into main AGENTS.md at insertion points
+
+**Fragment Merging:**
+
+Templates using `$instructions` as the target are merged into the main AGENTS.md file at specific insertion points:
+
+- `<!-- {mission} -->` - Where mission/purpose and project overview are inserted
+- `<!-- {principles} -->` - Where core principles and guidelines are inserted
+- `<!-- {languages} -->` - Where language-specific coding standards are inserted
+- `<!-- {integration} -->` - Where tool/workflow integration content is inserted
 
 Example structure:
 
 ```yaml
+main:
+    source: AGENTS.md
+    target: '$workspace/AGENTS.md'
+
 agents:
     claude:
-        instruction:
+        instructions:
             source: claude/CLAUDE.md
             target: '$workspace/CLAUDE.md'
         prompts:
             - source: claude/commands/init-session.md
               target: '$workspace/.claude/commands/init-session.md'
+
+languages:
+    c++:
+        files:
+            - source: c++-coding-conventions.md
+              target: '$instructions'
+
+principles:
+    - source: core-principles.md
+      target: '$instructions'
 ```
 
 ### Template Management
@@ -268,11 +499,13 @@ When you run `vibe-check init --lang c++ --agent claude`:
 
 1. Checks if global templates exist (downloads if needed)
 2. Loads `templates.yml` configuration
-3. Copies general templates (AGENTS.md) to project root
-4. Copies language template (`c++-coding-conventions.md`) if specified for c++ in YAML
+3. Downloads main AGENTS.md template
+4. Downloads and merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
 5. Copies Claude instruction file (CLAUDE.md) to project root
 6. Creates `.claude/commands/` directory with prompts
 7. You're ready to start coding with proper agent instructions
+
+The resulting AGENTS.md contains the complete merged content with all relevant sections for your project.
 
 ### Modification Detection
 
@@ -308,7 +541,9 @@ vibe-check init --lang c++ --agent claude --from https://github.com/yourname/you
 
 ### Modifying Global Templates
 
-1. Navigate to `~/.config/vibe-check/templates/`
+1. Navigate to platform-specific template directory:
+   - macOS: `~/Library/Application Support/vibe-check/templates/`
+   - Linux: `~/.local/share/vibe-check/templates/`
 2. Edit the templates as needed
 3. Run `vibe-check update` to sync changes to your projects
 
@@ -335,8 +570,9 @@ To add a new language or agent template:
 ## FAQ
 
 **Where are templates stored?**
-Global templates: `~/.config/vibe-check/templates/`
-Backups: `~/.cache/vibe-check/backups/`
+Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
+Global templates (Linux): `~/.local/share/vibe-check/templates/`
+Backups: `~/.cache/vibe-check/backups/` (or platform-specific cache directory)
 
 **What happens if I modify local templates?**
 vibe-check detects modifications and warns you before overwriting. Use `--force` to override.
@@ -402,4 +638,4 @@ Inspired by the need for consistent, safe, and auditable AI-assisted coding work
 
 ---
 
-Last updated: November 9, 2025
+Last updated: November 12, 2025
