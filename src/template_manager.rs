@@ -129,8 +129,7 @@ impl TemplateManager
 
         // If templates.yml doesn't exist and we have a URL, download it
         if config_path.exists() == false
-        {
-            if let (Some(base), Some(path)) = (base_url, url_path)
+            && let (Some(base), Some(path)) = (base_url, url_path)
             {
                 let config_url = format!("{}{}/templates.yml", base, path);
                 print!("{} Downloading templates.yml... ", "→".blue());
@@ -146,7 +145,6 @@ impl TemplateManager
                     }
                 }
             }
-        }
 
         // Try to load and parse templates.yml
         if config_path.exists() == false
@@ -314,14 +312,12 @@ impl TemplateManager
             {
                 // Create checksum for .md files
                 if let Some(ext) = path.extension()
-                {
-                    if ext == "md"
+                    && ext == "md"
                     {
                         let checksum = self.calculate_checksum(&path)?;
                         let checksum_path = path.with_extension("sha");
                         fs::write(&checksum_path, checksum)?;
                     }
-                }
             }
         }
 
@@ -521,7 +517,7 @@ impl TemplateManager
         }
 
         // Download language templates
-        for (_lang_name, lang_config) in &config.languages
+        for lang_config in config.languages.values()
         {
             for file_entry in &lang_config.files
             {
@@ -549,7 +545,7 @@ impl TemplateManager
         // Download integration templates
         if let Some(integration_map) = &config.integration
         {
-            for (_integration_name, integration_config) in integration_map
+            for integration_config in integration_map.values()
             {
                 for file_entry in &integration_config.files
                 {
@@ -576,7 +572,7 @@ impl TemplateManager
         }
 
         // Download agent templates
-        for (_agent_name, agent_config) in &config.agents
+        for agent_config in config.agents.values()
         {
             // Download instructions file if present
             if let Some(instructions) = &agent_config.instructions
@@ -762,7 +758,7 @@ impl TemplateManager
         // Add integration templates (fragments)
         if let Some(integration_map) = &config.integration
         {
-            for (_, integration_config) in integration_map
+            for integration_config in integration_map.values()
             {
                 for file_entry in &integration_config.files
                 {

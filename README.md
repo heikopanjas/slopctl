@@ -150,7 +150,7 @@ vibe-check init --lang c++ --agent claude
 
 1. **Downloads templates** (first run only):
    - Fetches `templates.yml` from GitHub
-   - Downloads all template files to `~/Library/Application Support/vibe-check/templates/` (macOS)
+   - Downloads all template files to platform-specific directory (e.g., `~/Library/Application Support/vibe-check/templates/` on macOS)
    - Creates SHA checksums for integrity verification
 
 2. **Processes configuration**:
@@ -413,6 +413,7 @@ Templates are stored in platform-specific directories:
 
 - **macOS**: `~/Library/Application Support/vibe-check/templates/`
 - **Linux**: `~/.local/share/vibe-check/templates/`
+- **Windows**: `%LOCALAPPDATA%\vibe-check\templates\`
 
 Templates include:
 
@@ -542,6 +543,7 @@ vibe-check init --lang c++ --agent claude --from https://github.com/yourname/you
 1. Navigate to platform-specific template directory:
    - macOS: `~/Library/Application Support/vibe-check/templates/`
    - Linux: `~/.local/share/vibe-check/templates/`
+   - Windows: `%LOCALAPPDATA%\vibe-check\templates\`
 2. Edit the templates as needed
 3. Run `vibe-check update` to sync changes to your projects
 
@@ -557,7 +559,7 @@ To add a new language or agent template:
 
 ## Technology Stack
 
-- **Language:** Rust (Edition 2021)
+- **Language:** Rust (Edition 2024)
 - **CLI Framework:** clap v4.5.20
 - **Terminal Colors:** owo-colors v4.1.0
 - **HTTP Client:** reqwest v0.12 (blocking, json)
@@ -568,9 +570,10 @@ To add a new language or agent template:
 ## FAQ
 
 **Where are templates stored?**
-Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
-Global templates (Linux): `~/.local/share/vibe-check/templates/`
-Backups: `~/.cache/vibe-check/backups/` (or platform-specific cache directory)
+- Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
+- Global templates (Linux): `~/.local/share/vibe-check/templates/`
+- Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`
+- Backups: Platform-specific cache directory
 
 **What happens if I modify local templates?**
 vibe-check detects modifications and warns you before overwriting. Use `--force` to override.
@@ -619,16 +622,6 @@ cargo fmt
 # Run linter
 cargo clippy
 ```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and formatting
-5. Submit a pull request
 
 ## Acknowledgments
 
