@@ -6,11 +6,13 @@
 
 vibe-check is a command-line tool that helps you:
 
-- **Manage templates globally** – Store templates in `~/.config/vibe-check/templates`
+- **Manage templates globally** – Store templates in platform-specific directories (e.g., `~/Library/Application Support/vibe-check/templates` on macOS)
+- **Configure via YAML** – Define template structure and file mappings in `templates.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **Keep templates synchronized** – Update local templates from global storage
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Works with Claude, Copilot, Cursor, Codex, and more
+- **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
 
 ## Repository Structure
 
@@ -28,25 +30,26 @@ vibe-check/
 ├── README.md                   # You are here
 ├── AGENTS.md                   # Primary project instructions
 ├── templates/                  # Template files for various languages and frameworks
+│   ├── templates.yml           # Template configuration (defines structure and mappings)
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── C++.md                  # C++ coding standards template
-│   ├── CMake.md                # CMake project template
-│   ├── General.md              # General coding guidelines template
-│   ├── Git.md                  # Git workflow template
+│   ├── c++.md                  # C++ coding standards template
+│   ├── cmake.md                # CMake project template
+│   ├── general.md              # General coding guidelines template
+│   ├── git.md                  # Git workflow template
 │   ├── claude/
-│   │   └── instructions.md     # Claude initialization prompts template
+│   │   ├── CLAUDE.md           # Claude main instruction file
+│   │   └── commands/
+│   │       └── init-session.md # Claude session initialization prompt
 │   ├── codex/
-│   │   └── instructions.md     # OpenAI Codex initialization prompts template
-│   ├── copilot/
-│   │   └── instructions.md     # GitHub Copilot initialization prompts template
-│   └── cursor/
-│       └── instructions.md     # Cursor AI initialization prompts template
+│   │   └── prompts/
+│   │       └── init-session.md # Codex session initialization prompt
+│   └── copilot/
+│       ├── copilot-instructions.md # Copilot main instruction file
+│       └── prompts/
+│           └── init-session.prompt.md # Copilot session prompt
 ├── CLAUDE.md                   # Claude-specific reference
-├── .github/
-│   └── copilot-instructions.md # GitHub Copilot reference
-└── .cursor/
-    └── rules/
-        └── main.mdc            # Cursor AI reference
+└── .github/
+    └── copilot-instructions.md # GitHub Copilot reference
 ```
 
 ## Philosophy
@@ -76,37 +79,41 @@ cargo install --path .
 
 ## Quick Start
 
-### Initialize a Rust project with Claude
+### Initialize a C++ project with Claude
 
 ```bash
 cd your-project
-vibe-check init --lang rust --agent claude
+vibe-check init --lang c++ --agent claude
 ```
 
 This will:
 
 1. Download templates from the default repository (if not already cached)
-2. Copy the Rust language template and Claude instructions to your project
-3. Create `.claude/instructions.md` for Claude-specific setup
+2. Download and parse `templates.yml` configuration
+3. Copy general templates (AGENTS.md) to your project
+4. Copy Claude instruction file (CLAUDE.md) to your project root
+5. Create `.claude/commands/` directory with session initialization prompt
 
 ### Initialize from a custom template source
 
 ```bash
 # From a local path
-vibe-check init --lang rust --agent copilot --from /path/to/templates
+vibe-check init --lang c++ --agent copilot --from /path/to/templates
 
 # From a GitHub URL
-vibe-check init --lang python --agent cursor --from https://github.com/user/repo/tree/branch/templates
+vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
 ```
+
+**Note:** The custom source must include a `templates.yml` file that defines the template structure.
 
 ### Update existing templates
 
 ```bash
 # Update templates for current project
-vibe-check update --lang rust --agent claude
+vibe-check update --lang c++ --agent claude
 
 # Force update (overwrite local modifications)
-vibe-check update --lang rust --agent claude --force
+vibe-check update --lang c++ --agent claude --force
 ```
 
 ### Clear local templates
@@ -131,9 +138,16 @@ vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., rust, python, typescript, cmake)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, cursor, codex)
+- `--lang <string>` - Programming language or framework (e.g., c++, cmake)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
 - `--from <string>` - Optional path or URL to copy/download templates from
+
+**Behavior:**
+
+- Downloads `templates.yml` first to determine which files to download
+- If `templates.yml` fails to download, the operation stops with an error
+- Downloads all files specified in the YAML configuration
+- Copies files to locations specified by `target` paths in YAML (using placeholders)
 
 ### `update` - Update Templates
 
@@ -149,6 +163,14 @@ vibe-check update --lang <language> --agent <agent> [--force] [--from <PATH or U
 - `--agent <string>` - AI coding agent
 - `--force` - Force overwrite without confirmation
 - `--from <string>` - Optional path or URL to copy/download templates from
+
+**Behavior:**
+
+- Loads `templates.yml` from global storage to determine which files to copy
+- Resolves placeholders in target paths (`$workspace` → current directory, `$userprofile` → home directory)
+- Copies files from global storage to locations specified in YAML
+- Detects local modifications using checksums and prompts for confirmation
+- Creates timestamped backups before overwriting files
 
 ### `clear` - Clear Local Templates
 
@@ -175,59 +197,93 @@ All templates in this repository enforce these critical rules:
 
 ## Supported Agents
 
-| Agent | Status | Template Directory | Notes |
-|-------|--------|-------------------|-------|
-| Claude | Active | [`templates/claude/`](templates/claude/) | Anthropic's Claude (Code, Sonnet, Opus) |
-| GitHub Copilot | Active | [`templates/copilot/`](templates/copilot/) | VS Code Copilot Chat & inline suggestions |
-| Cursor | Active | [`templates/cursor/`](templates/cursor/) | Cursor IDE AI assistant |
-| Codex | Active | [`templates/codex/`](templates/codex/) | OpenAI Codex-based agents |
+| Agent | Status | Configuration in templates.yml | Notes |
+|-------|--------|-------------------------------|-------|
+| Claude | Active | `agents.claude` | Main instruction: CLAUDE.md, Prompts: .claude/commands/ |
+| GitHub Copilot | Active | `agents.copilot` | Main instruction: .github/copilot-instructions.md, Prompts: .github/prompts/ |
+| Codex | Active | `agents.codex` | Prompts: $userprofile/.codex/prompts/ |
 
 ## Supported Languages
 
-- **Rust** - Rust programming language
-- **C++** - C++ programming language
-- **Swift** - Swift programming language
-- **CMake** - CMake build system
-- **General** - General coding guidelines
-- **Git** - Git workflow and commit conventions
+Currently configured in `templates.yml`:
+
+- **C++** - C++ programming language (`c++.md`)
+
+Additional language templates can be added to `templates.yml` configuration.
 
 ## How It Works
 
 ### Template Storage
 
-Templates are stored globally in `~/.config/vibe-check/templates/` and include:
+Templates are stored in platform-specific directories:
 
+- **macOS**: `~/Library/Application Support/vibe-check/templates/`
+- **Linux**: `~/.local/share/vibe-check/templates/`
+
+Templates include:
+
+- **templates.yml**: Configuration file defining structure and file mappings
 - **Language templates**: Language-specific coding standards and conventions
-- **Agent templates**: Agent-specific initialization prompts
-- **General templates**: AGENTS.md, Git guidelines, and more
+- **Agent templates**: Agent-specific instruction files and prompts
+- **General templates**: AGENTS.md, cmake.md, general.md, git.md
+
+### Template Configuration (templates.yml)
+
+The `templates.yml` file defines the template structure with three main sections:
+
+1. **agents**: Agent-specific files with `instruction` (main file) and `prompts` (custom commands)
+2. **languages**: Language-specific template files
+3. **general**: General templates that apply to all projects
+
+Each file entry specifies:
+
+- `source`: Path in the template repository
+- `target`: Destination path using placeholders (`$workspace` or `$userprofile`)
+
+Example structure:
+
+```yaml
+agents:
+    claude:
+        instruction:
+            source: claude/CLAUDE.md
+            target: '$workspace/CLAUDE.md'
+        prompts:
+            - source: claude/commands/init-session.md
+              target: '$workspace/.claude/commands/init-session.md'
+```
 
 ### Template Management
 
-1. **First run**: Downloads templates from the default GitHub repository
-2. **Local storage**: Templates are cached in `~/.config/vibe-check/templates/`
+1. **First run**: Downloads `templates.yml` and all specified files from GitHub
+2. **Local storage**: Templates are cached in platform-specific directory
 3. **Checksums**: SHA-256 checksums verify template integrity
-4. **Backups**: Automatic backups before any modifications in `~/.cache/vibe-check/backups/`
+4. **Backups**: Automatic timestamped backups in cache directory before any modifications
 5. **Updates**: Detect local modifications and warn before overwriting
+6. **Placeholders**: `$workspace` and `$userprofile` resolve to appropriate paths
 
 ### Project Initialization
 
-When you run `vibe-check init --lang rust --agent claude`:
+When you run `vibe-check init --lang c++ --agent claude`:
 
 1. Checks if global templates exist (downloads if needed)
-2. Copies the Rust language template to your project root (`Rust.md`)
-3. Creates `.claude/` directory with `instructions.md`
-4. You're ready to start coding with proper agent instructions
+2. Loads `templates.yml` configuration
+3. Copies general templates (AGENTS.md) to project root
+4. Copies language template (`c++.md`) if specified for c++ in YAML
+5. Copies Claude instruction file (CLAUDE.md) to project root
+6. Creates `.claude/commands/` directory with prompts
+7. You're ready to start coding with proper agent instructions
 
 ### Modification Detection
 
 vibe-check detects if you've modified local templates:
 
 ```bash
-$ vibe-check update --lang rust --agent claude
-→ Updating templates for rust with claude
+$ vibe-check update --lang c++ --agent claude
+→ Updating templates for c++ with claude
 ! Local modifications detected:
-  - /path/to/Rust.md
-  - /path/to/.claude/instructions.md
+  - /path/to/CLAUDE.md
+  - /path/to/.claude/commands/init-session.md
 → Use --force to overwrite
 ✗ Local modifications detected. Aborting.
 ```
@@ -242,11 +298,13 @@ You can use your own template repository:
 
 ```bash
 # From a local path
-vibe-check init --lang rust --agent claude --from /path/to/your/templates
+vibe-check init --lang c++ --agent claude --from /path/to/your/templates
 
 # From a GitHub repository
-vibe-check init --lang rust --agent claude --from https://github.com/yourname/your-templates/tree/main/templates
+vibe-check init --lang c++ --agent claude --from https://github.com/yourname/your-templates/tree/main/templates
 ```
+
+**Note:** Your custom template repository must include a `templates.yml` file that defines the template structure and file mappings.
 
 ### Modifying Global Templates
 

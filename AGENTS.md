@@ -159,28 +159,32 @@ vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., rust, python, typescript, cmake)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, cursor, codex)
+- `--lang <string>` - Programming language or framework (e.g., c++, cmake)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
 - `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
 
 ```bash
-# Initialize Rust project with Claude
-vibe-check init --lang rust --agent claude
+# Initialize C++ project with Claude
+vibe-check init --lang c++ --agent claude
 
 # Initialize from local path
-vibe-check init --lang rust --agent claude --from /path/to/templates
+vibe-check init --lang c++ --agent claude --from /path/to/templates
 
 # Initialize from URL
-vibe-check init --lang rust --agent claude --from https://github.com/user/repo/tree/branch/templates
+vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
 ```
 
 **Behavior:**
 
+- Downloads `templates.yml` configuration file to determine which templates to install
 - If global templates don't exist and `--from` is not specified, downloads from:
   `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
-- If `--from` is specified, copies/downloads templates from that location
+- If `--from` is specified, copies/downloads templates from that location first
+- Files are placed according to `templates.yml` configuration with placeholder resolution:
+  - `$workspace` resolves to current directory
+  - `$userprofile` resolves to user's home directory
 
 ## Repository Structure
 
@@ -198,19 +202,23 @@ vibe-check/
 ├── README.md                   # Main documentation
 ├── AGENTS.md                   # This file - primary instructions
 ├── templates/                  # Template files for various languages and frameworks
+│   ├── templates.yml           # YAML configuration defining template structure
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── C++.md                  # C++ coding standards template
-│   ├── CMake.md                # CMake project template
-│   ├── General.md              # General coding guidelines template
-│   ├── Git.md                  # Git workflow template
+│   ├── c++.md                  # C++ coding standards template
+│   ├── cmake.md                # CMake project template
+│   ├── general.md              # General coding guidelines template
+│   ├── git.md                  # Git workflow template
+│   ├── CLAUDE.md               # Claude initialization prompts template
 │   ├── claude/
-│   │   └── instructions.md     # Claude initialization prompts template
+│   │   └── commands/
+│   │       └── init-session.md # Claude initialization commands
 │   ├── codex/
-│   │   └── instructions.md     # OpenAI Codex initialization prompts template
+│   │   └── prompts/            # Codex initialization prompts (placed in ~/.codex/)
 │   ├── copilot/
-│   │   └── instructions.md     # GitHub Copilot initialization prompts template
+│   │   ├── copilot-instructions.md  # GitHub Copilot instructions
+│   │   └── prompts/            # Copilot initialization prompts
 │   └── cursor/
-│       └── instructions.md     # Cursor AI initialization prompts template
+│       └── prompts/            # Cursor AI initialization prompts
 ├── CLAUDE.md                   # Claude-specific reference
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot reference
@@ -251,13 +259,29 @@ vibe-check/
 
 **templates.yml Configuration:**
 
-The `templates.yml` file defines which template files should be downloaded and managed. It has three main sections:
+The `templates.yml` file defines which template files should be downloaded and where they should be placed. It has three main sections:
 
-- `agents` - Agent-specific instruction templates (e.g., claude/instructions.md, copilot/instructions.md)
-- `languages` - Language-specific coding standards templates (e.g., Rust.md, C++.md)
-- `general` - General templates that apply to all projects (e.g., AGENTS.md, Git.md)
+- `agents` - Agent-specific configurations with instruction files and optional prompts
+  - Each agent can have an `instruction` (single file) and `prompts` (multiple files)
+  - Structure: `{instruction: {source, target}, prompts: [{source, target}, ...]}`
+- `languages` - Language-specific coding standards templates
+  - Each language has a `files` array with source/target mappings
+  - Structure: `{files: [{source, target}, ...]}`
+- `general` - General templates that apply to all projects
+  - Simple array of file mappings with source/target pairs
+  - Structure: `[{source, target}, ...]`
 
-Each entry has a `name` and `file` field. The system attempts to download templates.yml first; if not found, it uses a default configuration with core templates.
+Each file entry has:
+
+- `source` - Source path in the templates repository
+- `target` - Target path where file will be placed (supports placeholders)
+
+Placeholders:
+
+- `$workspace` - Resolves to current directory
+- `$userprofile` - Resolves to user's home directory
+
+The system downloads templates.yml first; if download fails, the operation stops with an error.
 
 **TemplateManager Functions:**
 
@@ -266,14 +290,17 @@ Each entry has a `name` and `file` field. The system attempts to download templa
   - `agent` - AI coding agent identifier
   - `force` - If true, overwrite existing templates without confirmation
   - `from` - Optional path or URL to copy/download templates from
+  - Downloads and parses `templates.yml` to determine which files to update
   - If global templates don't exist and `from` is None, downloads from default GitHub repository
   - If `from` is specified, copies/downloads templates from that location first
   - Verifies global template integrity using SHA checksums
   - Creates missing checksums automatically for global templates
+  - Collects files dynamically from YAML configuration (general + language + agent)
+  - Resolves placeholders ($workspace, $userprofile) in target paths
   - Creates backup of existing local templates in cache directory with timestamp
-  - Copies template files from local data directory to current directory
-  - Detects local modifications and warns user before overwriting
+  - Detects local modifications by comparing with global templates
   - Stops operation if local changes detected unless `force` is true
+  - Copies template files from local data directory to resolved target paths
 
 - `clear(force: bool)` - Clear local templates from current directory
   - `force` - If true, clear templates without confirmation
