@@ -593,100 +593,155 @@ impl TemplateManager
     {
         println!("{} Updating templates for {} with {}", "→".blue(), lang.green(), agent.green());
 
-        // Build paths - try both lowercase and capitalized versions
-        let lang_lower = lang.to_lowercase();
-        let lang_capitalized = lang.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default() + &lang[1..];
-
-        let lang_template_lower = self.config_dir.join(format!("{}.md", lang_lower));
-        let lang_template_cap = self.config_dir.join(format!("{}.md", lang_capitalized));
-        let agent_template = self.config_dir.join(agent).join("instructions.md");
+        let templates_yml_path = self.config_dir.join("templates.yml");
 
         // Check if global templates exist, if not download/copy them
-        if self.config_dir.exists() == false || agent_template.exists() == false
+        if self.config_dir.exists() == false || templates_yml_path.exists() == false
         {
             let source = from.unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
             println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
             self.download_or_copy_templates(source)?;
         }
 
-        // Determine which language template exists (if any)
-        let lang_template = if lang_template_lower.exists()
+        // Load template configuration
+        let config = self.load_template_config(None, None)?;
+
+        // Get current working directory and user home directory
+        let workspace = std::env::current_dir()?;
+        let userprofile = dirs::home_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine home directory"))?;
+
+        // Collect files to copy
+        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+        // Add general templates
+        for entry in &config.general
         {
-            Some(lang_template_lower.clone())
+            let source_path = self.config_dir.join(&entry.source);
+            if source_path.exists() == false
+            {
+                continue;
+            }
+
+            let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+            files_to_copy.push((source_path, target_path));
         }
-        else if lang_template_cap.exists()
+
+        // Add language-specific templates
+        if let Some(lang_config) = config.languages.get(lang)
         {
-            Some(lang_template_cap.clone())
+            for file_entry in &lang_config.files
+            {
+                let source_path = self.config_dir.join(&file_entry.source);
+                if source_path.exists() == false
+                {
+                    continue;
+                }
+
+                let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
+                files_to_copy.push((source_path, target_path));
+            }
+        }
+
+        // Add agent-specific templates
+        if let Some(agent_config) = config.agents.get(agent)
+        {
+            // Add instruction file if present
+            if let Some(instruction) = &agent_config.instruction
+            {
+                let source_path = self.config_dir.join(&instruction.source);
+                if source_path.exists()
+                {
+                    let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
+                }
+            }
+
+            // Add prompt files if present
+            if let Some(prompts) = &agent_config.prompts
+            {
+                for prompt in prompts
+                {
+                    let source_path = self.config_dir.join(&prompt.source);
+                    if source_path.exists()
+                    {
+                        let target_path = self.resolve_placeholder(&prompt.target, &workspace, &userprofile);
+                        files_to_copy.push((source_path, target_path));
+                    }
+                }
+            }
         }
         else
         {
-            None
-        };
-
-        // Verify agent template existence (required)
-        if agent_template.exists() == false
-        {
-            return Err(format!("Agent template not found: {}", agent).into());
+            return Err(format!("Agent '{}' not found in templates.yml", agent).into());
         }
 
-        // Checksums are already created during download/copy, no need to verify or create here
+        if files_to_copy.is_empty()
+        {
+            println!("{} No templates found to copy", "!".yellow());
+            return Ok(());
+        }
 
         // Check for local modifications
-        let current_dir = std::env::current_dir()?;
-        let local_lang = current_dir.join(format!("{}.md", lang_lower));
-        let local_agent_dir = current_dir.join(format!(".{}", agent));
-        let local_agent = local_agent_dir.join("instructions.md");
+        let mut has_modifications = false;
+        let mut modified_files = Vec::new();
 
-        let has_lang_mods = if let Some(ref lt) = lang_template
+        for (source, target) in &files_to_copy
         {
-            self.has_local_modifications(&local_lang, lt)?
+            if target.exists() && self.has_local_modifications(target, source)?
+            {
+                has_modifications = true;
+                modified_files.push(target.clone());
+            }
         }
-        else
-        {
-            false
-        };
-        let has_agent_mods = self.has_local_modifications(&local_agent, &agent_template)?;
 
-        if (has_lang_mods || has_agent_mods) && !force
+        if has_modifications && force == false
         {
             println!("{} Local modifications detected:", "!".yellow());
-            if has_lang_mods
+            for file in &modified_files
             {
-                println!("  - {}", local_lang.display().to_string().yellow());
-            }
-            if has_agent_mods
-            {
-                println!("  - {}", local_agent.display().to_string().yellow());
+                println!("  - {}", file.display().to_string().yellow());
             }
             println!("{} Use --force to overwrite", "→".blue());
             return Err("Local modifications detected. Aborting.".into());
         }
 
         // Create backup of existing local files
-        self.create_backup(&current_dir)?;
+        self.create_backup(&workspace)?;
 
         // Copy templates
-        println!("{} Copying templates to current directory", "→".blue());
+        println!("{} Copying templates to target directories", "→".blue());
 
-        // Copy language template if it exists
-        if let Some(ref lt) = lang_template
+        for (source, target) in &files_to_copy
         {
-            fs::copy(lt, &local_lang)?;
-            println!("  - Copied language template: {}", local_lang.display().to_string().yellow());
-        }
-        else
-        {
-            println!("  - {} No language-specific template found (skipped)", "!".yellow());
-        }
+            // Create parent directory if needed
+            if let Some(parent) = target.parent()
+            {
+                fs::create_dir_all(parent)?;
+            }
 
-        // Copy agent template (required)
-        fs::create_dir_all(&local_agent_dir)?;
-        fs::copy(&agent_template, &local_agent)?;
-        println!("  - Copied agent template: {}", local_agent.display().to_string().yellow());
+            fs::copy(source, target)?;
+            println!("  - Copied: {}", target.display().to_string().yellow());
+        }
 
         println!("{} Templates updated successfully", "✓".green());
 
         Ok(())
+    }
+
+    /// Resolves placeholder variables in target paths
+    ///
+    /// Replaces $workspace with the workspace directory path
+    /// and $userprofile with the user's home directory path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path string containing placeholders
+    /// * `workspace` - Workspace directory path
+    /// * `userprofile` - User profile directory path
+    fn resolve_placeholder(&self, path: &str, workspace: &Path, userprofile: &Path) -> PathBuf
+    {
+        let resolved = path.replace("$workspace", workspace.to_str().unwrap_or("")).replace("$userprofile", userprofile.to_str().unwrap_or(""));
+        PathBuf::from(resolved)
     }
 
     /// Clears local templates from current directory
