@@ -190,11 +190,9 @@ my-cpp-project/
 
 ### Step 4: Start Claude Session
 
-Open Claude and use the initialization prompt:
+Open Claude and run the initialization prompt:
 
-1. Open `.claude/commands/init-session.md`
-2. Copy the contents
-3. Paste into Claude to initialize the session
+Simply type `/init-session` in Claude to execute the custom prompt. By placing `init-session.md` in `.claude/commands/`, vibe-check makes it available as a custom command that Claude automatically recognizes.
 
 Alternatively, in Claude's project settings, reference `AGENTS.md` as your project instructions.
 
