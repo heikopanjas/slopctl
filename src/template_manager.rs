@@ -35,9 +35,9 @@ struct AgentInstruction
 struct AgentConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
-    instruction: Option<AgentInstruction>,
+    instructions: Option<AgentInstruction>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    prompts:     Option<Vec<FileMapping>>
+    prompts:      Option<Vec<FileMapping>>
 }
 
 /// Language configuration with files
@@ -47,13 +47,34 @@ struct LanguageConfig
     files: Vec<FileMapping>
 }
 
+/// Integration configuration with files
+#[derive(Debug, Serialize, Deserialize)]
+struct IntegrationConfig
+{
+    files: Vec<FileMapping>
+}
+
+/// Main file configuration
+#[derive(Debug, Serialize, Deserialize)]
+struct MainConfig
+{
+    source: String,
+    target: String
+}
+
 /// Template configuration structure
 #[derive(Debug, Serialize, Deserialize)]
 struct TemplateConfig
 {
-    agents:    std::collections::HashMap<String, AgentConfig>,
-    languages: std::collections::HashMap<String, LanguageConfig>,
-    general:   Vec<FileMapping>
+    #[serde(skip_serializing_if = "Option::is_none")]
+    main:        Option<MainConfig>,
+    agents:      std::collections::HashMap<String, AgentConfig>,
+    languages:   std::collections::HashMap<String, LanguageConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    integration: Option<std::collections::HashMap<String, IntegrationConfig>>,
+    principles:  Vec<FileMapping>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mission:     Option<Vec<FileMapping>>
 }
 
 /// Manages template files for coding agent instructions
@@ -128,46 +149,14 @@ impl TemplateManager
         }
 
         // Try to load and parse templates.yml
-        if config_path.exists() == true
+        if config_path.exists() == false
         {
-            let content = fs::read_to_string(&config_path)?;
-            let config: TemplateConfig = serde_yaml::from_str(&content)?;
-            Ok(config)
+            return Err("templates.yml not found in global template directory".into());
         }
-        else
-        {
-            // Return default configuration if file doesn't exist
-            let mut agents = std::collections::HashMap::new();
-            agents.insert("claude".to_string(), AgentConfig {
-                instruction: Some(AgentInstruction { source: "claude/CLAUDE.md".to_string(), target: "$workspace/CLAUDE.md".to_string() }),
-                prompts:     Some(vec![FileMapping {
-                    source: "claude/commands/init-session.md".to_string(),
-                    target: "$workspace/.claude/commands/init-session.md".to_string()
-                }])
-            });
-            agents.insert("copilot".to_string(), AgentConfig {
-                instruction: Some(AgentInstruction {
-                    source: "copilot/copilot-instructions.md".to_string(),
-                    target: "$workspace/.github/copilot-instructions.md".to_string()
-                }),
-                prompts:     Some(vec![FileMapping {
-                    source: "copilot/prompts/init-session.prompt.md".to_string(),
-                    target: "$workspace/.github/prompts/init-session.prompt.md".to_string()
-                }])
-            });
 
-            let mut languages = std::collections::HashMap::new();
-            languages.insert("c++".to_string(), LanguageConfig { files: vec![FileMapping { source: "c++.md".to_string(), target: "$workspace/c++.md".to_string() }] });
-
-            let general = vec![
-                FileMapping { source: "AGENTS.md".to_string(), target: "$workspace/AGENTS.md".to_string() },
-                FileMapping { source: "cmake.md".to_string(), target: "$workspace/cmake.md".to_string() },
-                FileMapping { source: "general.md".to_string(), target: "$workspace/general.md".to_string() },
-                FileMapping { source: "git.md".to_string(), target: "$workspace/git.md".to_string() },
-            ];
-
-            Ok(TemplateConfig { agents, languages, general })
-        }
+        let content = fs::read_to_string(&config_path)?;
+        let config: TemplateConfig = serde_yaml::from_str(&content)?;
+        Ok(config)
     }
 
     /// Generates a timestamp string in YYYY-MM-DD_HH_MM_SS format
@@ -459,8 +448,31 @@ impl TemplateManager
         // Load template configuration
         let config = self.load_template_config(Some(&base_url), Some(&url_path))?;
 
-        // Download general templates
-        for entry in &config.general
+        // Download main AGENTS.md template if present
+        if let Some(main) = &config.main
+        {
+            let file_url = format!("{}{}/{}", base_url, url_path, main.source);
+            let dest_path = self.config_dir.join(&main.source);
+
+            print!("{} Downloading {}... ", "→".blue(), main.source.yellow());
+            io::stdout().flush()?;
+
+            match self.download_file(&file_url, &dest_path)
+            {
+                | Ok(_) =>
+                {
+                    println!("{}", "✓".green());
+                    // Create checksum immediately after download
+                    let checksum = self.calculate_checksum(&dest_path)?;
+                    let checksum_path = dest_path.with_extension("sha");
+                    fs::write(&checksum_path, checksum)?;
+                }
+                | Err(_) => println!("{} (skipped)", "✗".red())
+            }
+        }
+
+        // Download principles templates
+        for entry in &config.principles
         {
             let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
             let dest_path = self.config_dir.join(&entry.source);
@@ -479,6 +491,32 @@ impl TemplateManager
                     fs::write(&checksum_path, checksum)?;
                 }
                 | Err(_) => println!("{} (skipped)", "✗".red())
+            }
+        }
+
+        // Download mission templates if present
+        if let Some(mission_entries) = &config.mission
+        {
+            for entry in mission_entries
+            {
+                let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
+                let dest_path = self.config_dir.join(&entry.source);
+
+                print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
+                io::stdout().flush()?;
+
+                match self.download_file(&file_url, &dest_path)
+                {
+                    | Ok(_) =>
+                    {
+                        println!("{}", "✓".green());
+                        // Create checksum immediately after download
+                        let checksum = self.calculate_checksum(&dest_path)?;
+                        let checksum_path = dest_path.with_extension("sha");
+                        fs::write(&checksum_path, checksum)?;
+                    }
+                    | Err(_) => println!("{} (skipped)", "✗".red())
+                }
             }
         }
 
@@ -508,16 +546,45 @@ impl TemplateManager
             }
         }
 
+        // Download integration templates
+        if let Some(integration_map) = &config.integration
+        {
+            for (_integration_name, integration_config) in integration_map
+            {
+                for file_entry in &integration_config.files
+                {
+                    let file_url = format!("{}{}/{}", base_url, url_path, file_entry.source);
+                    let dest_path = self.config_dir.join(&file_entry.source);
+
+                    print!("{} Downloading {}... ", "→".blue(), file_entry.source.yellow());
+                    io::stdout().flush()?;
+
+                    match self.download_file(&file_url, &dest_path)
+                    {
+                        | Ok(_) =>
+                        {
+                            println!("{}", "✓".green());
+                            // Create checksum immediately after download
+                            let checksum = self.calculate_checksum(&dest_path)?;
+                            let checksum_path = dest_path.with_extension("sha");
+                            fs::write(&checksum_path, checksum)?;
+                        }
+                        | Err(_) => println!("{} (skipped)", "✗".red())
+                    }
+                }
+            }
+        }
+
         // Download agent templates
         for (_agent_name, agent_config) in &config.agents
         {
-            // Download instruction file if present
-            if let Some(instruction) = &agent_config.instruction
+            // Download instructions file if present
+            if let Some(instructions) = &agent_config.instructions
             {
-                let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
-                let dest_path = self.config_dir.join(&instruction.source);
+                let file_url = format!("{}{}/{}", base_url, url_path, instructions.source);
+                let dest_path = self.config_dir.join(&instructions.source);
 
-                print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
+                print!("{} Downloading {}... ", "→".blue(), instructions.source.yellow());
                 io::stdout().flush()?;
 
                 match self.download_file(&file_url, &dest_path)
@@ -612,9 +679,22 @@ impl TemplateManager
 
         // Collect files to copy
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut fragments: Vec<(PathBuf, String)> = Vec::new();
+        let mut main_template: Option<(PathBuf, PathBuf)> = None;
 
-        // Add general templates
-        for entry in &config.general
+        // Check if main AGENTS.md should be copied
+        if let Some(main) = config.main.as_ref()
+        {
+            let source_path = self.config_dir.join(&main.source);
+            if source_path.exists()
+            {
+                let target_path = self.resolve_placeholder(&main.target, &workspace, &userprofile);
+                main_template = Some((source_path, target_path));
+            }
+        }
+
+        // Add principles templates (fragments)
+        for entry in &config.principles
         {
             let source_path = self.config_dir.join(&entry.source);
             if source_path.exists() == false
@@ -622,11 +702,41 @@ impl TemplateManager
                 continue;
             }
 
-            let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-            files_to_copy.push((source_path, target_path));
+            if entry.target.starts_with("$instructions/")
+            {
+                fragments.push((source_path, "principles".to_string()));
+            }
+            else
+            {
+                let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                files_to_copy.push((source_path, target_path));
+            }
         }
 
-        // Add language-specific templates
+        // Add mission templates (fragments) if present
+        if let Some(mission_entries) = &config.mission
+        {
+            for entry in mission_entries
+            {
+                let source_path = self.config_dir.join(&entry.source);
+                if source_path.exists() == false
+                {
+                    continue;
+                }
+
+                if entry.target.starts_with("$instructions/")
+                {
+                    fragments.push((source_path, "mission".to_string()));
+                }
+                else
+                {
+                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
+                }
+            }
+        }
+
+        // Add language-specific templates (fragments)
         if let Some(lang_config) = config.languages.get(lang)
         {
             for file_entry in &lang_config.files
@@ -637,21 +747,54 @@ impl TemplateManager
                     continue;
                 }
 
-                let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
-                files_to_copy.push((source_path, target_path));
+                if file_entry.target.starts_with("$instructions/")
+                {
+                    fragments.push((source_path, "languages".to_string()));
+                }
+                else
+                {
+                    let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
+                }
+            }
+        }
+
+        // Add integration templates (fragments)
+        if let Some(integration_map) = &config.integration
+        {
+            for (_, integration_config) in integration_map
+            {
+                for file_entry in &integration_config.files
+                {
+                    let source_path = self.config_dir.join(&file_entry.source);
+                    if source_path.exists() == false
+                    {
+                        continue;
+                    }
+
+                    if file_entry.target.starts_with("$instructions/")
+                    {
+                        fragments.push((source_path, "integration".to_string()));
+                    }
+                    else
+                    {
+                        let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
+                        files_to_copy.push((source_path, target_path));
+                    }
+                }
             }
         }
 
         // Add agent-specific templates
         if let Some(agent_config) = config.agents.get(agent)
         {
-            // Add instruction file if present
-            if let Some(instruction) = &agent_config.instruction
+            // Add instructions file if present
+            if let Some(instructions) = &agent_config.instructions
             {
-                let source_path = self.config_dir.join(&instruction.source);
+                let source_path = self.config_dir.join(&instructions.source);
                 if source_path.exists()
                 {
-                    let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                    let target_path = self.resolve_placeholder(&instructions.target, &workspace, &userprofile);
                     files_to_copy.push((source_path, target_path));
                 }
             }
@@ -708,6 +851,27 @@ impl TemplateManager
         // Create backup of existing local files
         self.create_backup(&workspace)?;
 
+        // Handle main AGENTS.md with fragment merging if fragments exist
+        if let Some((main_source, main_target)) = main_template
+        {
+            if fragments.is_empty() == false
+            {
+                println!("{} Merging fragments into AGENTS.md", "→".blue());
+                self.merge_fragments(&main_source, &main_target, &fragments)?;
+                println!("  - Merged: {}", main_target.display().to_string().yellow());
+            }
+            else
+            {
+                // No fragments, just copy main file as-is
+                if let Some(parent) = main_target.parent()
+                {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::copy(&main_source, &main_target)?;
+                println!("  - Copied: {}", main_target.display().to_string().yellow());
+            }
+        }
+
         // Copy templates
         println!("{} Copying templates to target directories", "→".blue());
 
@@ -724,6 +888,56 @@ impl TemplateManager
         }
 
         println!("{} Templates updated successfully", "✓".green());
+
+        Ok(())
+    }
+
+    /// Merges fragment files into main AGENTS.md at insertion points
+    ///
+    /// Reads fragments that have `$instructions` placeholder in their target path
+    /// and inserts them into the main AGENTS.md template at the corresponding
+    /// insertion points: <!-- {mission} -->, <!-- {principles} -->, <!-- {languages} -->, <!-- {integration} -->
+    ///
+    /// The insertion point comments are preserved in the final merged file.
+    ///
+    /// # Arguments
+    ///
+    /// * `main_source` - Path to the main AGENTS.md template in global storage
+    /// * `main_target` - Path where merged AGENTS.md should be written
+    /// * `fragments` - Vector of (source_path, category) tuples where category is "mission", "principles", "languages", or "integration"
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file reading or writing fails
+    fn merge_fragments(&self, main_source: &Path, main_target: &Path, fragments: &[(PathBuf, String)]) -> Result<()>
+    {
+        // Read main AGENTS.md template
+        let mut main_content = fs::read_to_string(main_source)?;
+
+        // Process each fragment
+        for (fragment_path, category) in fragments
+        {
+            let fragment_content = fs::read_to_string(fragment_path)?;
+            let insertion_point = format!("<!-- {{{}}} -->", category);
+
+            // Replace insertion point with comment + fragment content + comment
+            if main_content.contains(&insertion_point)
+            {
+                let replacement = format!("<!-- {{{}}} -->\n\n{}\n\n<!-- {{{}}} -->", category, fragment_content.trim(), category);
+                main_content = main_content.replace(&insertion_point, &replacement);
+            }
+            else
+            {
+                println!("{} Warning: Insertion point {} not found in AGENTS.md", "!".yellow(), insertion_point.yellow());
+            }
+        }
+
+        // Write merged content to target
+        if let Some(parent) = main_target.parent()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(main_target, main_content)?;
 
         Ok(())
     }
@@ -819,7 +1033,7 @@ impl TemplateManager
                         // Check if it matches known template patterns
                         // Currently supported languages: c++, swift, rust
                         let lowercase = name.to_lowercase();
-                        if lowercase == "c++.md" || lowercase == "swift.md" || lowercase == "rust.md"
+                        if lowercase == "c++-coding-conventions.md" || lowercase == "swift.md" || lowercase == "rust.md"
                         {
                             println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
                             fs::remove_file(&path)?;

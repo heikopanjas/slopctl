@@ -2,13 +2,25 @@
 # Defines which template files should be downloaded and managed
 #
 # Placeholders:
-#   $workspace    - Project root directory
-#   $userprofile  - User profile/home directory
+#   $workspace     - Project root directory
+#   $userprofile   - User profile/home directory
+#   $instructions  - Fragment merged into main AGENTS.md at insertion points
+#
+# Insertion Points (markdown comments preserved in final AGENTS.md):
+#   <!-- {mission} -->       - Where mission/purpose fragments are inserted
+#   <!-- {principles} -->    - Where principle fragments are inserted
+#   <!-- {languages} -->     - Where language fragments are inserted
+#   <!-- {integration} -->   - Where integration/tool fragments are inserted
+
+# Main instruction file - primary source of truth
+main:
+    source: AGENTS.md
+    target: '$workspace/AGENTS.md'
 
 # Agent-specific instruction templates
 agents:
     claude:
-        instruction:
+        instructions:
             source: claude/CLAUDE.md
             target: '$workspace/CLAUDE.md'
         prompts:
@@ -16,7 +28,7 @@ agents:
               target: '$workspace/.claude/commands/init-session.md'
 
     copilot:
-        instruction:
+        instructions:
             source: copilot/copilot-instructions.md
             target: '$workspace/.github/copilot-instructions.md'
         prompts:
@@ -32,16 +44,27 @@ agents:
 languages:
     c++:
         files:
-            - source: c++.md
-              target: '$workspace/c++.md'
+            - source: c++-coding-conventions.md
+              target: '$instructions/c++-coding-conventions.md'
+
+# Integration templates for specific tools/workflows
+integration:
+    git:
+        files:
+            - source: git-workflow-conventions.md
+              target: '$instructions/git-workflow-conventions.md'
 
 # General templates that apply to all projects
-general:
-    - source: AGENTS.md
-      target: '$workspace/AGENTS.md'
-    - source: cmake.md
-      target: '$workspace/cmake.md'
-    - source: general.md
-      target: '$workspace/general.md'
-    - source: git.md
-      target: '$workspace/git.md'
+principles:
+    - source: core-principles.md
+      target: '$instructions/core-principles.md'
+    - source: best-practices.md
+      target: '$instructions/best-practices.md'
+
+mission:
+    - source: mission-statement.md
+      target: '$instructions/mission-statement.md'
+    - source: technology-stack.md
+      target: '$instructions/technology-stack.md'
+    - source: build-environment.md
+      target: '$instructions/build-environment.md'

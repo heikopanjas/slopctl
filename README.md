@@ -32,10 +32,10 @@ vibe-check/
 ├── templates/                  # Template files for various languages and frameworks
 │   ├── templates.yml           # Template configuration (defines structure and mappings)
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── c++.md                  # C++ coding standards template
+│   ├── c++-coding-conventions.md  # C++ coding standards template
 │   ├── cmake.md                # CMake project template
 │   ├── general.md              # General coding guidelines template
-│   ├── git.md                  # Git workflow template
+│   ├── git-workflow-conventions.md  # Git workflow template
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
 │   │   └── commands/
@@ -207,7 +207,7 @@ All templates in this repository enforce these critical rules:
 
 Currently configured in `templates.yml`:
 
-- **C++** - C++ programming language (`c++.md`)
+- **C++** - C++ programming language (`c++-coding-conventions.md`)
 
 Additional language templates can be added to `templates.yml` configuration.
 
@@ -225,7 +225,7 @@ Templates include:
 - **templates.yml**: Configuration file defining structure and file mappings
 - **Language templates**: Language-specific coding standards and conventions
 - **Agent templates**: Agent-specific instruction files and prompts
-- **General templates**: AGENTS.md, cmake.md, general.md, git.md
+- **General templates**: AGENTS.md, cmake.md, general.md, git-workflow-conventions.md
 
 ### Template Configuration (templates.yml)
 
@@ -269,7 +269,7 @@ When you run `vibe-check init --lang c++ --agent claude`:
 1. Checks if global templates exist (downloads if needed)
 2. Loads `templates.yml` configuration
 3. Copies general templates (AGENTS.md) to project root
-4. Copies language template (`c++.md`) if specified for c++ in YAML
+4. Copies language template (`c++-coding-conventions.md`) if specified for c++ in YAML
 5. Copies Claude instruction file (CLAUDE.md) to project root
 6. Creates `.claude/commands/` directory with prompts
 7. You're ready to start coding with proper agent instructions

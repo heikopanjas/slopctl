@@ -1,4 +1,5 @@
-### **Commit Message Guidelines - CRITICAL**
+
+## **Commit Message Guidelines - CRITICAL**
 
 Follow these rules to prevent VSCode terminal crashes and ensure clean git history:
 

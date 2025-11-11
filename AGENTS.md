@@ -204,10 +204,10 @@ vibe-check/
 ├── templates/                  # Template files for various languages and frameworks
 │   ├── templates.yml           # YAML configuration defining template structure
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── c++.md                  # C++ coding standards template
+│   ├── c++-coding-conventions.md  # C++ coding standards template
 │   ├── cmake.md                # CMake project template
 │   ├── general.md              # General coding guidelines template
-│   ├── git.md                  # Git workflow template
+│   ├── git-workflow-conventions.md  # Git workflow template
 │   ├── CLAUDE.md               # Claude initialization prompts template
 │   ├── claude/
 │   │   └── commands/
@@ -259,15 +259,23 @@ vibe-check/
 
 **templates.yml Configuration:**
 
-The `templates.yml` file defines which template files should be downloaded and where they should be placed. It has three main sections:
+The `templates.yml` file defines which template files should be downloaded and where they should be placed. It has six main sections:
 
-- `agents` - Agent-specific configurations with instruction files and optional prompts
-  - Each agent can have an `instruction` (single file) and `prompts` (multiple files)
-  - Structure: `{instruction: {source, target}, prompts: [{source, target}, ...]}`
+- `main` - Main AGENTS.md instruction file (primary source of truth)
+  - Structure: `{source, target}`
+- `agents` - Agent-specific configurations with instructions files and optional prompts
+  - Each agent can have `instructions` (single file) and `prompts` (multiple files)
+  - Structure: `{instructions: {source, target}, prompts: [{source, target}, ...]}`
 - `languages` - Language-specific coding standards templates
   - Each language has a `files` array with source/target mappings
   - Structure: `{files: [{source, target}, ...]}`
-- `general` - General templates that apply to all projects
+- `integration` - Tool/workflow integration templates (e.g., git workflows)
+  - Each integration has a `files` array with source/target mappings
+  - Structure: `{files: [{source, target}, ...]}`
+- `principles` - Core principles and general guidelines
+  - Simple array of file mappings with source/target pairs
+  - Structure: `[{source, target}, ...]`
+- `mission` - Mission statement, purpose, and project overview
   - Simple array of file mappings with source/target pairs
   - Structure: `[{source, target}, ...]`
 
@@ -280,6 +288,16 @@ Placeholders:
 
 - `$workspace` - Resolves to current directory
 - `$userprofile` - Resolves to user's home directory
+- `$instructions` - Indicates fragment to be merged into main AGENTS.md at insertion points
+
+Insertion Points (when using `$instructions` placeholder):
+
+- `<!-- {mission} -->` - Where mission/purpose and project overview are inserted
+- `<!-- {principles} -->` - Where core principles and guidelines are inserted
+- `<!-- {languages} -->` - Where language-specific coding standards are inserted
+- `<!-- {integration} -->` - Where tool/workflow integration content is inserted
+
+The insertion point comments are preserved in the final merged AGENTS.md for reference.
 
 The system downloads templates.yml first; if download fails, the operation stops with an error.
 
@@ -295,8 +313,9 @@ The system downloads templates.yml first; if download fails, the operation stops
   - If `from` is specified, copies/downloads templates from that location first
   - Verifies global template integrity using SHA checksums
   - Creates missing checksums automatically for global templates
-  - Collects files dynamically from YAML configuration (general + language + agent)
-  - Resolves placeholders ($workspace, $userprofile) in target paths
+  - Collects files dynamically from YAML configuration (main + mission + principles + languages + integration + agent)
+  - Merges fragments with `$instructions` placeholder into main AGENTS.md at insertion points
+  - Resolves placeholders ($workspace, $userprofile, $instructions) in target paths
   - Creates backup of existing local templates in cache directory with timestamp
   - Detects local modifications by comparing with global templates
   - Stops operation if local changes detected unless `force` is true
@@ -591,6 +610,23 @@ git diff
 - System downloads templates.yml first; falls back to default configuration if not found
 - Updated documentation to describe templates.yml structure and usage
 - Reasoning: YAML configuration makes template management more flexible and maintainable, allowing users to customize which templates are downloaded without modifying code
+
+### 2025-11-11 (Fragment Merging System)
+
+- Renamed 'general' section to 'principles' in templates.yml for clarity
+- Added 'main' section for AGENTS.md template (primary source of truth)
+- Added 'integration' section for tool/workflow templates (e.g., git workflows)
+- Renamed 'instruction' field to 'instructions' in agent configurations
+- Renamed c++.md to c++-coding-conventions.md and git.md to git-workflow-conventions.md
+- Implemented new $instructions placeholder for fragment files
+- Added insertion points: {languages}, {integration}, {principles}
+- Created merge_fragments() method to merge fragments into main AGENTS.md
+- Updated TemplateConfig struct with MainConfig and IntegrationConfig
+- Fragments with $instructions placeholder are merged into AGENTS.md at corresponding insertion points
+- Updated download and update logic to handle main file, integration files, and fragment merging
+- Removed fallback configuration from template manager (templates.yml now required)
+- Updated documentation in templates.yml, AGENTS.md to reflect new system
+- Reasoning: Fragment merging allows for modular, maintainable instruction files where language-specific and integration-specific content is merged into a single AGENTS.md, creating a unified instruction file for each project while maintaining template modularity
 
 ### 2025-10-03
 
