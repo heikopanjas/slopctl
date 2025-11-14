@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-12
+**Last updated:** 2025-11-14
 
 ## General Instructions
 
@@ -204,11 +204,16 @@ vibe-check/
 ├── templates/                  # Template files for various languages and frameworks
 │   ├── templates.yml           # YAML configuration defining template structure
 │   ├── AGENTS.md               # Template for project-specific agent instructions
-│   ├── c++-coding-conventions.md  # C++ coding standards template
-│   ├── cmake.md                # CMake project template
-│   ├── general.md              # General coding guidelines template
-│   ├── git-workflow-conventions.md  # Git workflow template
-│   ├── CLAUDE.md               # Claude initialization prompts template
+│   ├── best-practices.md       # Best practices template (fragment)
+│   ├── build-environment.md    # Generic build environment template (fragment)
+│   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
+│   ├── cmake-build-commands.md # CMake/C++ build commands template (fragment)
+│   ├── core-principles.md      # Core principles template (fragment)
+│   ├── git-workflow-conventions.md  # Git workflow template (fragment)
+│   ├── mission-statement.md    # Mission statement template (fragment)
+│   ├── rust-coding-conventions.md  # Rust coding standards template (fragment)
+│   ├── rust-build-commands.md  # Rust build commands template (fragment)
+│   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   └── commands/
 │   │       └── init-session.md # Claude initialization commands
@@ -637,6 +642,22 @@ git diff
 - Updated documentation in AGENTS.md and README.md to reflect fragment merging system
 - Added comprehensive documentation of six template configuration sections: main, agents, languages, integration, principles, mission
 - Documented insertion points and placeholder behavior in README.md
+- Updated repository structure listings to reflect actual template files
+- Fixed outdated storage paths in FAQ and customization sections
+- Reasoning: The filename portion in $instructions/filename.md was redundant since fragments are merged into AGENTS.md at insertion points, not copied as separate files. Simplifying to just $instructions improves clarity and reduces confusion.
+
+### 2025-11-14 (Build Command Templates)
+
+- Created rust-build-commands.md template with comprehensive Rust/Cargo build commands
+- Created cmake-build-commands.md template with comprehensive CMake/C++ build commands
+- Added both templates to languages section in templates.yml for Rust and C++ respectively
+- Templates include setup, development, build/deploy, documentation, and dependency management sections
+- Both templates emphasize using debug builds during development and release builds only for final testing/deployment
+- Updated AGENTS.md repository structure to include new template files
+- Updated README.md repository structure, supported languages section, and template storage documentation
+- Updated last modified dates in both AGENTS.md and README.md
+- Reasoning: Language-specific build command templates provide developers with quick reference to common commands and best practices, reducing cognitive load and ensuring consistent build workflows across projects. Separating Rust and CMake build commands into dedicated templates makes them more maintainable and easier to customize for different project types.
+
 - Updated repository structure listings to reflect actual template files
 - Fixed outdated storage paths in FAQ and customization sections
 - Reasoning: The filename portion in $instructions/filename.md was redundant since fragments are merged into AGENTS.md at insertion points, not copied as separate files. Simplifying to just $instructions improves clarity and reduces confusion.

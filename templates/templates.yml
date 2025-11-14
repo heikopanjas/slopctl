@@ -46,9 +46,13 @@ languages:
         files:
             - source: c++-coding-conventions.md
               target: '$instructions'
+            - source: cmake-build-commands.md
+              target: '$instructions'
     rust:
         files:
             - source: rust-coding-conventions.md
+              target: '$instructions'
+            - source: rust-build-commands.md
               target: '$instructions'
 
 # Integration templates for specific tools/workflows
@@ -69,6 +73,4 @@ mission:
     - source: mission-statement.md
       target: '$instructions'
     - source: technology-stack.md
-      target: '$instructions'
-    - source: build-environment.md
       target: '$instructions'

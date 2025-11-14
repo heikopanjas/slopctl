@@ -33,11 +33,14 @@ vibe-check/
 │   ├── templates.yml           # Template configuration (defines structure and mappings)
 │   ├── AGENTS.md               # Template for project-specific agent instructions
 │   ├── best-practices.md       # Best practices template (fragment)
-│   ├── build-environment.md    # Build environment template (fragment)
+│   ├── build-environment.md    # Generic build environment template (fragment)
 │   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
+│   ├── cmake-build-commands.md # CMake/C++ build commands template (fragment)
 │   ├── core-principles.md      # Core principles template (fragment)
 │   ├── git-workflow-conventions.md  # Git workflow template (fragment)
 │   ├── mission-statement.md    # Mission statement template (fragment)
+│   ├── rust-coding-conventions.md  # Rust coding standards template (fragment)
+│   ├── rust-build-commands.md  # Rust build commands template (fragment)
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
@@ -160,9 +163,9 @@ vibe-check init --lang c++ --agent claude
 3. **Creates main AGENTS.md**:
    - Downloads main AGENTS.md template
    - Merges fragments at insertion points:
-     - **Mission section**: mission-statement.md, technology-stack.md, build-environment.md
+     - **Mission section**: mission-statement.md, technology-stack.md
      - **Principles section**: core-principles.md, best-practices.md
-     - **Languages section**: c++-coding-conventions.md (C++ specific)
+     - **Languages section**: c++-coding-conventions.md, cmake-build-commands.md (C++ specific)
      - **Integration section**: git-workflow-conventions.md
    - Saves complete merged file to `./AGENTS.md`
 
@@ -401,7 +404,8 @@ All templates in this repository enforce these critical rules:
 
 Currently configured in `templates.yml`:
 
-- **C++** - C++ programming language (`c++-coding-conventions.md`)
+- **C++** - C++ programming language (includes `c++-coding-conventions.md` and `cmake-build-commands.md`)
+- **Rust** - Rust programming language (includes `rust-coding-conventions.md` and `rust-build-commands.md`)
 
 Additional language templates can be added to `templates.yml` configuration.
 
@@ -419,10 +423,10 @@ Templates include:
 
 - **templates.yml**: Configuration file defining structure and file mappings
 - **Main template**: AGENTS.md (primary instruction file)
-- **Language templates**: Language-specific coding standards (e.g., c++-coding-conventions.md)
+- **Language templates**: Language-specific coding standards and build commands (e.g., c++-coding-conventions.md, cmake-build-commands.md, rust-coding-conventions.md, rust-build-commands.md)
 - **Integration templates**: Tool/workflow templates (e.g., git-workflow-conventions.md)
 - **Principle templates**: Core principles and best practices
-- **Mission templates**: Mission statement, technology stack, build environment
+- **Mission templates**: Mission statement, technology stack
 - **Agent templates**: Agent-specific instruction files and prompts
 
 ### Template Configuration (templates.yml)
@@ -625,4 +629,4 @@ cargo clippy
 
 ---
 
-Last updated: November 12, 2025
+Last updated: November 14, 2025
