@@ -138,7 +138,6 @@ Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe
 - **CLI Framework:** clap (v4.5.20)
 - **Terminal Colors:** owo-colors (v4.1.0)
 - **HTTP Client:** reqwest (v0.12 with blocking and json features)
-- **Checksums:** sha2 (v0.10) and hex (v0.4)
 - **Date/Time:** chrono (v0.4)
 - **Serialization:** serde (v1.0), serde_json (v1.0), and serde_yaml (v0.9)
 - **Directory Paths:** dirs (v5.0)
@@ -154,13 +153,14 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
+vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, cmake)
+- `--lang <string>` - Programming language or framework (e.g., c++, rust)
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--force` - Force overwrite of local files without confirmation
 - `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
@@ -174,14 +174,22 @@ vibe-check init --lang c++ --agent claude --from /path/to/templates
 
 # Initialize from URL
 vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
+
+# Force overwrite existing local files
+vibe-check init --lang rust --agent copilot --force
 ```
 
 **Behavior:**
 
+- Always updates global templates first (downloads or copies from source)
 - Downloads `templates.yml` configuration file to determine which templates to install
-- If global templates don't exist and `--from` is not specified, downloads from:
+- If `--from` is not specified, downloads from:
   `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
-- If `--from` is specified, copies/downloads templates from that location first
+- If `--from` is specified, updates global templates from that location
+- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If `--force` is specified, overwrites local files regardless of modifications
+- Creates backup of existing local files before overwriting
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
@@ -250,11 +258,7 @@ vibe-check/
 - All template operations are handled through the `TemplateManager` struct
 - Template files are organized by language/framework and agent type
 - Use standard file system operations for template access
-- Validate template existence and integrity before operations
-- Template integrity is verified using SHA checksums stored alongside templates
-- Checksum files follow naming scheme: `template.md` -> `template.sha` in same directory
-- Checksums are automatically created immediately after downloading or copying templates to global storage
-- Checksums are not modified until the next update operation
+- Validate template existence before operations
 - Template downloads are controlled by `templates.yml` configuration file
 
 **templates.yml Configuration:**
@@ -311,14 +315,13 @@ The system downloads templates.yml first; if download fails, the operation stops
   - Downloads and parses `templates.yml` to determine which files to update
   - If global templates don't exist and `from` is None, downloads from default GitHub repository
   - If `from` is specified, copies/downloads templates from that location first
-  - Verifies global template integrity using SHA checksums
-  - Creates missing checksums automatically for global templates
   - Collects files dynamically from YAML configuration (main + mission + principles + languages + integration + agent)
   - Merges fragments with `$instructions` placeholder into main AGENTS.md at insertion points
+  - Removes template marker from merged AGENTS.md to indicate customization
   - Resolves placeholders ($workspace, $userprofile, $instructions) in target paths
-  - Creates backup of existing local templates in cache directory with timestamp
-  - Detects local modifications by comparing with global templates
-  - Stops operation if local changes detected unless `force` is true
+  - Creates backup of existing local files in cache directory with timestamp before any modifications
+  - Detects if AGENTS.md has been customized by checking for missing template marker
+  - Stops operation if AGENTS.md is customized and `force` is false
   - Copies template files from local data directory to resolved target paths
 
 - `clear(force: bool)` - Clear local templates from current directory
@@ -657,6 +660,41 @@ git diff
 - Updated README.md repository structure, supported languages section, and template storage documentation
 - Updated last modified dates in both AGENTS.md and README.md
 - Reasoning: Language-specific build command templates provide developers with quick reference to common commands and best practices, reducing cognitive load and ensuring consistent build workflows across projects. Separating Rust and CMake build commands into dedicated templates makes them more maintainable and easier to customize for different project types.
+
+### 2025-11-14 (Template Marker Protection)
+
+- Added template marker to templates/AGENTS.md to identify unmerged template files
+- Marker: `<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->`
+- Implemented automatic marker removal during fragment merging in merge_fragments method
+- Added is_file_customized method to check if local files have been customized by detecting missing marker
+- Updated update method to check AGENTS.md for customization before overwriting
+- Protection now works for both init and update commands
+- Modified files detected through: marker removal for AGENTS.md, checksum comparison for other files
+- Updated documentation to reflect new protection mechanism
+- Reasoning: Using a marker in the template file provides a reliable way to detect if a merged AGENTS.md has been customized by the user. When the marker is removed during merging, any subsequent update will detect the file as customized and require --force to overwrite, preventing accidental loss of user customizations.
+
+### 2025-11-14 (Init Command Enhancement)
+
+- Changed init command behavior to always update global templates first
+- Modified --force flag for init command to control local file overwriting (not global template clearing)
+- Init command now: 1) Updates global templates, 2) Checks for local modifications, 3) Updates local files
+- If local AGENTS.md is customized (marker removed) and --force not specified, init aborts with error
+- Made download_or_copy_templates public method for direct access from main
+- Updated CLI documentation to reflect new init command behavior
+- Updated examples to show --force usage for overwriting local files
+- Reasoning: Always updating global templates ensures users get the latest templates on init. The --force flag now has a clearer purpose: controlling whether to overwrite customized local files. This makes the workflow more intuitive and safer for users.
+
+### 2025-11-14 (Checksum System Removal)
+
+- Removed SHA-256 checksum system entirely (calculate_checksum, has_local_modifications, create_checksums_for_directory methods)
+- Removed sha2 and hex dependencies from Cargo.toml
+- Removed all checksum creation code after template downloads
+- Removed checksum comparison for non-AGENTS.md files
+- Only AGENTS.md is now protected using the template marker system
+- Backups are always created before any file modifications
+- Simplified modification detection: only checks AGENTS.md for missing marker
+- Updated documentation to remove all checksum references
+- Reasoning: The checksum system added unnecessary complexity. The template marker provides sufficient protection for AGENTS.md (the main file users customize), and other files (agent instructions, prompts) are rarely modified by users. Always creating backups provides safety without the overhead of checksum management.
 
 - Updated repository structure listings to reflect actual template files
 - Fixed outdated storage paths in FAQ and customization sections

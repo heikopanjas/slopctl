@@ -25,7 +25,7 @@ enum Commands
         #[arg(long)]
         agent: String,
 
-        /// Force re-download by deleting existing global templates
+        /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
         force: bool,
 
@@ -79,15 +79,18 @@ fn main()
     {
         | Commands::Init { lang, agent, force, from } =>
         {
-            if force == true
+            // Always update global templates for init command
+            let source = from.as_deref().unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
+            println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+
+            if let Err(e) = manager.download_or_copy_templates(source)
             {
-                if let Err(e) = manager.clear_global_templates()
-                {
-                    eprintln!("{} {}", "✗".red(), e.to_string().red());
-                    std::process::exit(1);
-                }
+                eprintln!("{} Failed to update global templates: {}", "✗".red(), e.to_string().red());
+                std::process::exit(1);
             }
-            manager.update(&lang, &agent, false, from.as_deref())
+
+            // Now update local templates with the force flag
+            manager.update(&lang, &agent, force, from.as_deref())
         }
         | Commands::Update { lang, agent, force, from } => manager.update(&lang, &agent, force, from.as_deref()),
         | Commands::Clear { force } => manager.clear(force)

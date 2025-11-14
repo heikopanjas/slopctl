@@ -1,3 +1,4 @@
+<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->
 # Project Instructions for AI Coding Agents
 
 **Last updated:** 2025-10-05

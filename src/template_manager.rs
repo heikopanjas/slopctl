@@ -10,7 +10,6 @@ use std::{
 use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::{Result, utils::copy_dir_all};
 
@@ -158,46 +157,30 @@ impl TemplateManager
         datetime.format("%Y-%m-%d_%H_%M_%S").to_string()
     }
 
-    /// Calculates SHA-256 checksum for a file
+    /// Checks if a local file has been customized by checking for the template marker
+    ///
+    /// If the template marker is missing from the local file, it means the file
+    /// has been merged or customized and should not be overwritten without confirmation.
     ///
     /// # Arguments
     ///
-    /// * `file_path` - Path to the file to checksum
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read
-    fn calculate_checksum(&self, file_path: &Path) -> Result<String>
-    {
-        let content = fs::read(file_path)?;
-        let mut hasher = Sha256::new();
-        hasher.update(&content);
-        Ok(hex::encode(hasher.finalize()))
-    }
-
-    /// Checks if local file has been modified compared to global template
-    ///
-    /// Compares SHA-256 checksums of local and global files.
-    ///
-    /// # Arguments
-    ///
-    /// * `local_path` - Path to local file
-    /// * `global_path` - Path to global template
+    /// * `local_path` - Path to local file to check
     ///
     /// # Returns
     ///
-    /// Returns `true` if files differ, `false` if identical or local doesn't exist
-    fn has_local_modifications(&self, local_path: &Path, global_path: &Path) -> Result<bool>
+    /// Returns `true` if file exists and marker is missing (file is customized)
+    fn is_file_customized(&self, local_path: &Path) -> Result<bool>
     {
         if local_path.exists() == false
         {
             return Ok(false);
         }
 
-        let local_checksum = self.calculate_checksum(local_path)?;
-        let global_checksum = self.calculate_checksum(global_path)?;
+        let content = fs::read_to_string(local_path)?;
+        let marker = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
 
-        Ok(local_checksum != global_checksum)
+        // If marker is missing, file has been customized
+        Ok(content.contains(marker) == false)
     }
 
     /// Creates a timestamped backup of a directory
@@ -230,7 +213,7 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Downloads or copies templates from a source
+    /// Downloads or copies templates from a source (URL or local path)
     ///
     /// Supports both local file paths and URLs. For URLs starting with http/https,
     /// templates are downloaded. For local paths, templates are copied.
@@ -243,7 +226,7 @@ impl TemplateManager
     /// # Errors
     ///
     /// Returns an error if download or copy operation fails
-    fn download_or_copy_templates(&self, source: &str) -> Result<()>
+    pub fn download_or_copy_templates(&self, source: &str) -> Result<()>
     {
         if source.starts_with("http://") || source.starts_with("https://")
         {
@@ -263,55 +246,6 @@ impl TemplateManager
             println!("{} Copying templates from local path...", "→".blue());
             fs::create_dir_all(&self.config_dir)?;
             copy_dir_all(source_path, &self.config_dir)?;
-
-            // Create checksums for all copied files
-            println!("{} Creating checksums for copied templates...", "→".blue());
-            self.create_checksums_for_directory(&self.config_dir)?;
-        }
-
-        Ok(())
-    }
-
-    /// Creates checksums for all template files in a directory
-    ///
-    /// Recursively walks through the directory and creates .sha files
-    /// for all .md files found.
-    ///
-    /// # Arguments
-    ///
-    /// * `dir` - Directory to create checksums for
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if checksum creation fails
-    fn create_checksums_for_directory(&self, dir: &Path) -> Result<()>
-    {
-        if dir.exists() == false
-        {
-            return Ok(());
-        }
-
-        for entry in fs::read_dir(dir)?
-        {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir()
-            {
-                // Recursively process subdirectories
-                self.create_checksums_for_directory(&path)?;
-            }
-            else if path.is_file()
-            {
-                // Create checksum for .md files
-                if let Some(ext) = path.extension() &&
-                    ext == "md"
-                {
-                    let checksum = self.calculate_checksum(&path)?;
-                    let checksum_path = path.with_extension("sha");
-                    fs::write(&checksum_path, checksum)?;
-                }
-            }
         }
 
         Ok(())
@@ -448,14 +382,7 @@ impl TemplateManager
 
             match self.download_file(&file_url, &dest_path)
             {
-                | Ok(_) =>
-                {
-                    println!("{}", "✓".green());
-                    // Create checksum immediately after download
-                    let checksum = self.calculate_checksum(&dest_path)?;
-                    let checksum_path = dest_path.with_extension("sha");
-                    fs::write(&checksum_path, checksum)?;
-                }
+                | Ok(_) => println!("{}", "✓".green()),
                 | Err(_) => println!("{} (skipped)", "✗".red())
             }
         }
@@ -473,14 +400,7 @@ impl TemplateManager
 
                 match self.download_file(&file_url, &dest_path)
                 {
-                    | Ok(_) =>
-                    {
-                        println!("{}", "✓".green());
-                        // Create checksum immediately after download
-                        let checksum = self.calculate_checksum(&dest_path)?;
-                        let checksum_path = dest_path.with_extension("sha");
-                        fs::write(&checksum_path, checksum)?;
-                    }
+                    | Ok(_) => println!("{}", "✓".green()),
                     | Err(_) => println!("{} (skipped)", "✗".red())
                 }
             }
@@ -499,14 +419,7 @@ impl TemplateManager
 
                 match self.download_file(&file_url, &dest_path)
                 {
-                    | Ok(_) =>
-                    {
-                        println!("{}", "✓".green());
-                        // Create checksum immediately after download
-                        let checksum = self.calculate_checksum(&dest_path)?;
-                        let checksum_path = dest_path.with_extension("sha");
-                        fs::write(&checksum_path, checksum)?;
-                    }
+                    | Ok(_) => println!("{}", "✓".green()),
                     | Err(_) => println!("{} (skipped)", "✗".red())
                 }
             }
@@ -525,14 +438,7 @@ impl TemplateManager
 
                 match self.download_file(&file_url, &dest_path)
                 {
-                    | Ok(_) =>
-                    {
-                        println!("{}", "✓".green());
-                        // Create checksum immediately after download
-                        let checksum = self.calculate_checksum(&dest_path)?;
-                        let checksum_path = dest_path.with_extension("sha");
-                        fs::write(&checksum_path, checksum)?;
-                    }
+                    | Ok(_) => println!("{}", "✓".green()),
                     | Err(_) => println!("{} (skipped)", "✗".red())
                 }
             }
@@ -553,14 +459,7 @@ impl TemplateManager
 
                     match self.download_file(&file_url, &dest_path)
                     {
-                        | Ok(_) =>
-                        {
-                            println!("{}", "✓".green());
-                            // Create checksum immediately after download
-                            let checksum = self.calculate_checksum(&dest_path)?;
-                            let checksum_path = dest_path.with_extension("sha");
-                            fs::write(&checksum_path, checksum)?;
-                        }
+                        | Ok(_) => println!("{}", "✓".green()),
                         | Err(_) => println!("{} (skipped)", "✗".red())
                     }
                 }
@@ -583,14 +482,7 @@ impl TemplateManager
 
                     match self.download_file(&file_url, &dest_path)
                     {
-                        | Ok(_) =>
-                        {
-                            println!("{}", "✓".green());
-                            // Create checksum immediately after download
-                            let checksum = self.calculate_checksum(&dest_path)?;
-                            let checksum_path = dest_path.with_extension("sha");
-                            fs::write(&checksum_path, checksum)?;
-                        }
+                        | Ok(_) => println!("{}", "✓".green()),
                         | Err(_) => println!("{} (skipped)", "✗".red())
                     }
                 }
@@ -609,14 +501,7 @@ impl TemplateManager
 
                     match self.download_file(&file_url, &dest_path)
                     {
-                        | Ok(_) =>
-                        {
-                            println!("{}", "✓".green());
-                            // Create checksum immediately after download
-                            let checksum = self.calculate_checksum(&dest_path)?;
-                            let checksum_path = dest_path.with_extension("sha");
-                            fs::write(&checksum_path, checksum)?;
-                        }
+                        | Ok(_) => println!("{}", "✓".green()),
                         | Err(_) => println!("{} (skipped)", "✗".red())
                     }
                 }
@@ -829,18 +714,19 @@ impl TemplateManager
         let mut has_modifications = false;
         let mut modified_files = Vec::new();
 
-        for (source, target) in &files_to_copy
+        // Check if main AGENTS.md has been customized (marker removed)
+        if let Some((_, main_target)) = &main_template
         {
-            if target.exists() && self.has_local_modifications(target, source)?
+            if main_target.exists() && self.is_file_customized(main_target)?
             {
                 has_modifications = true;
-                modified_files.push(target.clone());
+                modified_files.push(main_target.clone());
             }
         }
 
         if has_modifications && force == false
         {
-            println!("{} Local modifications detected:", "!".yellow());
+            println!("{} Local AGENTS.md has been customized:", "!".yellow());
             for file in &modified_files
             {
                 println!("  - {}", file.display().to_string().yellow());
@@ -849,7 +735,7 @@ impl TemplateManager
             return Err("Local modifications detected. Aborting.".into());
         }
 
-        // Create backup of existing local files
+        // Create backup of existing local files before any modifications
         self.create_backup(&workspace)?;
 
         // Handle main AGENTS.md with fragment merging if fragments exist
@@ -914,6 +800,10 @@ impl TemplateManager
     {
         // Read main AGENTS.md template
         let mut main_content = fs::read_to_string(main_source)?;
+
+        // Remove the template marker to indicate this is a merged/customized file
+        let marker = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->\n";
+        main_content = main_content.replace(marker, "");
 
         // Group fragments by category to handle multiple fragments per insertion point
         let mut fragments_by_category: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
