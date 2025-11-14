@@ -21,16 +21,16 @@ main:
 agents:
     claude:
         instructions:
-            source: claude/CLAUDE.md
-            target: '$workspace/CLAUDE.md'
+            - source: claude/CLAUDE.md
+              target: '$workspace/CLAUDE.md'
         prompts:
             - source: claude/commands/init-session.md
               target: '$workspace/.claude/commands/init-session.md'
 
     copilot:
         instructions:
-            source: copilot/copilot-instructions.md
-            target: '$workspace/.github/copilot-instructions.md'
+            - source: copilot/copilot-instructions.md
+              target: '$workspace/.github/copilot-instructions.md'
         prompts:
             - source: copilot/prompts/init-session.prompt.md
               target: '$workspace/.github/prompts/init-session.prompt.md'

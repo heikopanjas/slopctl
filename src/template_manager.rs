@@ -22,20 +22,12 @@ struct FileMapping
     target: String
 }
 
-/// Agent instruction configuration
-#[derive(Debug, Serialize, Deserialize)]
-struct AgentInstruction
-{
-    source: String,
-    target: String
-}
-
-/// Agent configuration with instruction and prompts
+/// Agent configuration with instructions and prompts
 #[derive(Debug, Serialize, Deserialize)]
 struct AgentConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<AgentInstruction>,
+    instructions: Option<Vec<FileMapping>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prompts:      Option<Vec<FileMapping>>
 }
@@ -72,7 +64,8 @@ struct TemplateConfig
     languages:   std::collections::HashMap<String, LanguageConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     integration: Option<std::collections::HashMap<String, IntegrationConfig>>,
-    principles:  Vec<FileMapping>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    principles:  Option<Vec<FileMapping>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mission:     Option<Vec<FileMapping>>
 }
@@ -128,23 +121,23 @@ impl TemplateManager
         let config_path = self.config_dir.join("templates.yml");
 
         // If templates.yml doesn't exist and we have a URL, download it
-        if config_path.exists() == false
-            && let (Some(base), Some(path)) = (base_url, url_path)
-            {
-                let config_url = format!("{}{}/templates.yml", base, path);
-                print!("{} Downloading templates.yml... ", "→".blue());
-                io::stdout().flush()?;
+        if config_path.exists() == false &&
+            let (Some(base), Some(path)) = (base_url, url_path)
+        {
+            let config_url = format!("{}{}/templates.yml", base, path);
+            print!("{} Downloading templates.yml... ", "→".blue());
+            io::stdout().flush()?;
 
-                match self.download_file(&config_url, &config_path)
+            match self.download_file(&config_url, &config_path)
+            {
+                | Ok(_) => println!("{}", "✓".green()),
+                | Err(e) =>
                 {
-                    | Ok(_) => println!("{}", "✓".green()),
-                    | Err(e) =>
-                    {
-                        println!("{}", "✗".red());
-                        return Err(format!("Failed to download templates.yml: {}", e).into());
-                    }
+                    println!("{}", "✗".red());
+                    return Err(format!("Failed to download templates.yml: {}", e).into());
                 }
             }
+        }
 
         // Try to load and parse templates.yml
         if config_path.exists() == false
@@ -311,13 +304,13 @@ impl TemplateManager
             else if path.is_file()
             {
                 // Create checksum for .md files
-                if let Some(ext) = path.extension()
-                    && ext == "md"
-                    {
-                        let checksum = self.calculate_checksum(&path)?;
-                        let checksum_path = path.with_extension("sha");
-                        fs::write(&checksum_path, checksum)?;
-                    }
+                if let Some(ext) = path.extension() &&
+                    ext == "md"
+                {
+                    let checksum = self.calculate_checksum(&path)?;
+                    let checksum_path = path.with_extension("sha");
+                    fs::write(&checksum_path, checksum)?;
+                }
             }
         }
 
@@ -467,26 +460,29 @@ impl TemplateManager
             }
         }
 
-        // Download principles templates
-        for entry in &config.principles
+        // Download principles templates if present
+        if let Some(principles_entries) = &config.principles
         {
-            let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
-            let dest_path = self.config_dir.join(&entry.source);
-
-            print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
-            io::stdout().flush()?;
-
-            match self.download_file(&file_url, &dest_path)
+            for entry in principles_entries
             {
-                | Ok(_) =>
+                let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
+                let dest_path = self.config_dir.join(&entry.source);
+
+                print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
+                io::stdout().flush()?;
+
+                match self.download_file(&file_url, &dest_path)
                 {
-                    println!("{}", "✓".green());
-                    // Create checksum immediately after download
-                    let checksum = self.calculate_checksum(&dest_path)?;
-                    let checksum_path = dest_path.with_extension("sha");
-                    fs::write(&checksum_path, checksum)?;
+                    | Ok(_) =>
+                    {
+                        println!("{}", "✓".green());
+                        // Create checksum immediately after download
+                        let checksum = self.calculate_checksum(&dest_path)?;
+                        let checksum_path = dest_path.with_extension("sha");
+                        fs::write(&checksum_path, checksum)?;
+                    }
+                    | Err(_) => println!("{} (skipped)", "✗".red())
                 }
-                | Err(_) => println!("{} (skipped)", "✗".red())
             }
         }
 
@@ -574,26 +570,29 @@ impl TemplateManager
         // Download agent templates
         for agent_config in config.agents.values()
         {
-            // Download instructions file if present
+            // Download instructions files if present
             if let Some(instructions) = &agent_config.instructions
             {
-                let file_url = format!("{}{}/{}", base_url, url_path, instructions.source);
-                let dest_path = self.config_dir.join(&instructions.source);
-
-                print!("{} Downloading {}... ", "→".blue(), instructions.source.yellow());
-                io::stdout().flush()?;
-
-                match self.download_file(&file_url, &dest_path)
+                for instruction in instructions
                 {
-                    | Ok(_) =>
+                    let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
+                    let dest_path = self.config_dir.join(&instruction.source);
+
+                    print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
+                    io::stdout().flush()?;
+
+                    match self.download_file(&file_url, &dest_path)
                     {
-                        println!("{}", "✓".green());
-                        // Create checksum immediately after download
-                        let checksum = self.calculate_checksum(&dest_path)?;
-                        let checksum_path = dest_path.with_extension("sha");
-                        fs::write(&checksum_path, checksum)?;
+                        | Ok(_) =>
+                        {
+                            println!("{}", "✓".green());
+                            // Create checksum immediately after download
+                            let checksum = self.calculate_checksum(&dest_path)?;
+                            let checksum_path = dest_path.with_extension("sha");
+                            fs::write(&checksum_path, checksum)?;
+                        }
+                        | Err(_) => println!("{} (skipped)", "✗".red())
                     }
-                    | Err(_) => println!("{} (skipped)", "✗".red())
                 }
             }
 
@@ -689,23 +688,26 @@ impl TemplateManager
             }
         }
 
-        // Add principles templates (fragments)
-        for entry in &config.principles
+        // Add principles templates (fragments) if present
+        if let Some(principles_entries) = &config.principles
         {
-            let source_path = self.config_dir.join(&entry.source);
-            if source_path.exists() == false
+            for entry in principles_entries
             {
-                continue;
-            }
+                let source_path = self.config_dir.join(&entry.source);
+                if source_path.exists() == false
+                {
+                    continue;
+                }
 
-            if entry.target.starts_with("$instructions/")
-            {
-                fragments.push((source_path, "principles".to_string()));
-            }
-            else
-            {
-                let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                files_to_copy.push((source_path, target_path));
+                if entry.target.starts_with("$instructions")
+                {
+                    fragments.push((source_path, "principles".to_string()));
+                }
+                else
+                {
+                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
+                }
             }
         }
 
@@ -720,7 +722,7 @@ impl TemplateManager
                     continue;
                 }
 
-                if entry.target.starts_with("$instructions/")
+                if entry.target.starts_with("$instructions")
                 {
                     fragments.push((source_path, "mission".to_string()));
                 }
@@ -743,7 +745,7 @@ impl TemplateManager
                     continue;
                 }
 
-                if file_entry.target.starts_with("$instructions/")
+                if file_entry.target.starts_with("$instructions")
                 {
                     fragments.push((source_path, "languages".to_string()));
                 }
@@ -768,7 +770,7 @@ impl TemplateManager
                         continue;
                     }
 
-                    if file_entry.target.starts_with("$instructions/")
+                    if file_entry.target.starts_with("$instructions")
                     {
                         fragments.push((source_path, "integration".to_string()));
                     }
@@ -784,14 +786,17 @@ impl TemplateManager
         // Add agent-specific templates
         if let Some(agent_config) = config.agents.get(agent)
         {
-            // Add instructions file if present
+            // Add instructions files if present
             if let Some(instructions) = &agent_config.instructions
             {
-                let source_path = self.config_dir.join(&instructions.source);
-                if source_path.exists()
+                for instruction in instructions
                 {
-                    let target_path = self.resolve_placeholder(&instructions.target, &workspace, &userprofile);
-                    files_to_copy.push((source_path, target_path));
+                    let source_path = self.config_dir.join(&instruction.source);
+                    if source_path.exists()
+                    {
+                        let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                        files_to_copy.push((source_path, target_path));
+                    }
                 }
             }
 
