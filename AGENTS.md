@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-14
+**Last updated:** 2025-11-15
 
 ## General Instructions
 
@@ -303,13 +303,18 @@ vibe-check/
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
+│   │   ├── CLAUDE.md           # Claude main instruction file
+│   │   ├── CLAUDE-auto-redirect.md  # Auto-redirect to AGENTS.md
 │   │   └── commands/
 │   │       └── init-session.md # Claude initialization commands
 │   ├── codex/
-│   │   └── prompts/            # Codex initialization prompts (placed in ~/.codex/)
+│   │   └── prompts/
+│   │       └── init-session.md # Codex initialization prompts (placed in ~/.codex/)
 │   ├── copilot/
 │   │   ├── copilot-instructions.md  # GitHub Copilot instructions
-│   │   └── prompts/            # Copilot initialization prompts
+│   │   ├── copilot-instructions-auto-redirect.md  # Auto-redirect to AGENTS.md
+│   │   └── prompts/
+│   │       └── init-session.prompt.md  # Copilot initialization prompts
 ├── CLAUDE.md                   # Claude-specific reference
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot reference
@@ -806,3 +811,12 @@ git diff
   - AGENTS.md is deleted normally without special handling
 - Added comprehensive clear command documentation to CLI Commands section
 - Reasoning: Users should not accidentally lose customized AGENTS.md files when clearing templates. The marker-based detection provides reliable protection, and --force flag gives users explicit control to override when needed. This is consistent with init/update command behavior for modified files.
+
+### 2025-11-15 (Auto-Redirect Templates)
+
+- Added CLAUDE-auto-redirect.md template in claude/ directory
+- Added copilot-instructions-auto-redirect.md template in copilot/ directory
+- Both auto-redirect templates contain mandatory instruction to read AGENTS.md before proceeding
+- Templates ensure agents reference the single source of truth (AGENTS.md) consistently
+- Updated repository structure documentation to include new auto-redirect templates
+- Reasoning: Auto-redirect templates provide an additional safeguard to ensure AI coding agents always consult AGENTS.md as the primary instruction source. This reinforces the single source of truth principle and prevents agents from relying solely on abbreviated instruction files.

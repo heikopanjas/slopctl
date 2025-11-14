@@ -44,6 +44,7 @@ vibe-check/
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
+│   │   ├── CLAUDE-auto-redirect.md  # Auto-redirect to AGENTS.md
 │   │   └── commands/
 │   │       └── init-session.md # Claude session initialization prompt
 │   ├── codex/
@@ -51,6 +52,7 @@ vibe-check/
 │   │       └── init-session.md # Codex session initialization prompt
 │   └── copilot/
 │       ├── copilot-instructions.md # Copilot main instruction file
+│       ├── copilot-instructions-auto-redirect.md  # Auto-redirect to AGENTS.md
 │       └── prompts/
 │           └── init-session.prompt.md # Copilot session prompt
 ├── CLAUDE.md                   # Claude-specific reference
@@ -699,4 +701,4 @@ cargo clippy
 
 ---
 
-Last updated: November 14, 2025
+Last updated: November 15, 2025
