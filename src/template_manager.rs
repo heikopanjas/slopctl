@@ -516,38 +516,33 @@ impl TemplateManager
     /// Updates local templates from global storage
     ///
     /// This method:
-    /// 1. Downloads/copies templates from source if global templates don't exist
-    /// 2. Verifies global template existence and integrity
-    /// 3. Creates missing checksums for global templates
-    /// 4. Detects local modifications
-    /// 5. Creates backup of existing local files
-    /// 6. Copies templates to current directory
+    /// 1. Verifies global templates exist
+    /// 2. Detects local modifications to AGENTS.md
+    /// 3. Creates backup of existing local files
+    /// 4. Copies templates to current directory
     ///
     /// # Arguments
     ///
     /// * `lang` - Programming language or framework identifier
     /// * `agent` - AI coding agent identifier
     /// * `force` - If true, overwrite local modifications without warning
-    /// * `from` - Optional path or URL to copy/download templates from
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - Template files don't exist and can't be downloaded
+    /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Backup or copy operations fail
-    pub fn update(&self, lang: &str, agent: &str, force: bool, from: Option<&str>) -> Result<()>
+    pub fn update(&self, lang: &str, agent: &str, force: bool) -> Result<()>
     {
         println!("{} Updating templates for {} with {}", "→".blue(), lang.green(), agent.green());
 
         let templates_yml_path = self.config_dir.join("templates.yml");
 
-        // Check if global templates exist, if not download/copy them
+        // Check if global templates exist
         if self.config_dir.exists() == false || templates_yml_path.exists() == false
         {
-            let source = from.unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
-            println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
-            self.download_or_copy_templates(source)?;
+            return Err("Global templates not found. Please run 'vibe-check init' first to download templates.".into());
         }
 
         // Load template configuration

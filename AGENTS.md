@@ -194,6 +194,46 @@ vibe-check init --lang rust --agent copilot --force
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
 
+### `update` - Update Local Templates
+
+Update local templates from global storage.
+
+**Usage:**
+
+```bash
+vibe-check update --lang <language> --agent <agent> [--force]
+```
+
+**Options:**
+
+- `--lang <string>` - Programming language or framework (e.g., c++, rust)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--force` - Force overwrite of local files without confirmation
+
+**Examples:**
+
+```bash
+# Update local templates from global storage
+vibe-check update --lang c++ --agent claude
+
+# Force overwrite customized local files
+vibe-check update --lang rust --agent copilot --force
+```
+
+**Behavior:**
+
+- Uses existing global templates (does not download new ones)
+- Requires global templates to exist (run `init` first if not present)
+- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If `--force` is specified, overwrites local files regardless of modifications
+- Creates backup of existing local files before overwriting
+- Files are placed according to `templates.yml` configuration with placeholder resolution:
+  - `$workspace` resolves to current directory
+  - `$userprofile` resolves to user's home directory
+
+**Note:** The `update` command behaves exactly like `init` except it does not download new global templates. Use `init` to refresh global templates or `update` to sync local files with existing global templates.
+
 ## Repository Structure
 
 ```text
@@ -695,6 +735,17 @@ git diff
 - Simplified modification detection: only checks AGENTS.md for missing marker
 - Updated documentation to remove all checksum references
 - Reasoning: The checksum system added unnecessary complexity. The template marker provides sufficient protection for AGENTS.md (the main file users customize), and other files (agent instructions, prompts) are rarely modified by users. Always creating backups provides safety without the overhead of checksum management.
+
+### 2025-11-14 (Update Command Simplification)
+
+- Changed update command to not download global templates automatically
+- Update command now requires global templates to exist (errors if missing)
+- Removed automatic download fallback from update method
+- Update command now behaves exactly like init except without initial download
+- Users must run init first to set up global templates
+- Added comprehensive update command documentation to CLI Commands section
+- Updated method documentation to reflect new behavior
+- Reasoning: Clear separation of concerns - init downloads and sets up, update syncs from existing global templates. This makes the behavior more predictable and prevents unexpected downloads during update operations.
 
 - Updated repository structure listings to reflect actual template files
 - Fixed outdated storage paths in FAQ and customization sections

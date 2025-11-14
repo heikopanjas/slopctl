@@ -46,11 +46,7 @@ enum Commands
 
         /// Force overwrite without confirmation
         #[arg(long, default_value = "false")]
-        force: bool,
-
-        /// Path or URL to copy/download templates from
-        #[arg(long)]
-        from: Option<String>
+        force: bool
     },
     /// Clear local templates from current directory
     Clear
@@ -90,9 +86,9 @@ fn main()
             }
 
             // Now update local templates with the force flag
-            manager.update(&lang, &agent, force, from.as_deref())
+            manager.update(&lang, &agent, force)
         }
-        | Commands::Update { lang, agent, force, from } => manager.update(&lang, &agent, force, from.as_deref()),
+        | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
         | Commands::Clear { force } => manager.clear(force)
     };
 
