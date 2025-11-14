@@ -915,16 +915,27 @@ impl TemplateManager
         // Read main AGENTS.md template
         let mut main_content = fs::read_to_string(main_source)?;
 
-        // Process each fragment
+        // Group fragments by category to handle multiple fragments per insertion point
+        let mut fragments_by_category: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
         for (fragment_path, category) in fragments
         {
             let fragment_content = fs::read_to_string(fragment_path)?;
+            fragments_by_category.entry(category.clone()).or_insert_with(Vec::new).push(fragment_content);
+        }
+
+        // Process each category
+        for (category, contents) in fragments_by_category
+        {
             let insertion_point = format!("<!-- {{{}}} -->", category);
 
-            // Replace insertion point with comment + fragment content + comment
+            // Combine all fragments for this category
+            let combined_content = contents.iter().map(|c| c.trim()).collect::<Vec<_>>().join("\n\n");
+
+            // Replace insertion point with comment + fragment content (keep single insertion point)
             if main_content.contains(&insertion_point)
             {
-                let replacement = format!("<!-- {{{}}} -->\n\n{}\n\n<!-- {{{}}} -->", category, fragment_content.trim(), category);
+                let replacement = format!("<!-- {{{}}} -->\n\n{}", category, combined_content);
                 main_content = main_content.replace(&insertion_point, &replacement);
             }
             else
@@ -959,8 +970,32 @@ impl TemplateManager
         PathBuf::from(resolved)
     }
 
-    /// Clears local templates from current directory
+    /// Clears global templates from local data directory
     ///
+    /// This method deletes all templates from the global storage directory,
+    /// forcing a fresh download on the next init or update operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be removed
+    pub fn clear_global_templates(&self) -> Result<()>
+    {
+        if self.config_dir.exists()
+        {
+            println!("{} Removing global templates from {}", "→".blue(), self.config_dir.display().to_string().yellow());
+            fs::remove_dir_all(&self.config_dir)?;
+            println!("{} Global templates cleared successfully", "✓".green());
+        }
+        else
+        {
+            println!("{} No global templates found to clear", "→".blue());
+        }
+
+        Ok(())
+    }
+
+    /// Clears local templates from current directory
+
     /// Removes agent instruction directories and language template files from
     /// the current directory. Global templates in the local data directory
     /// are not affected.

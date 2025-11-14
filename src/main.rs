@@ -25,6 +25,10 @@ enum Commands
         #[arg(long)]
         agent: String,
 
+        /// Force re-download by deleting existing global templates
+        #[arg(long, default_value = "false")]
+        force: bool,
+
         /// Path or URL to copy/download templates from
         #[arg(long)]
         from: Option<String>
@@ -73,7 +77,18 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, from } => manager.update(&lang, &agent, false, from.as_deref()),
+        | Commands::Init { lang, agent, force, from } =>
+        {
+            if force == true
+            {
+                if let Err(e) = manager.clear_global_templates()
+                {
+                    eprintln!("{} {}", "✗".red(), e.to_string().red());
+                    std::process::exit(1);
+                }
+            }
+            manager.update(&lang, &agent, false, from.as_deref())
+        }
         | Commands::Update { lang, agent, force, from } => manager.update(&lang, &agent, force, from.as_deref()),
         | Commands::Clear { force } => manager.clear(force)
     };
