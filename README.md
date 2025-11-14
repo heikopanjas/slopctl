@@ -296,11 +296,11 @@ vibe-check update --lang c++ --agent claude --force
 **Scenario: Clean up project templates**
 
 ```bash
-# Remove agent directories and language templates
+# Remove agent directories and AGENTS.md
 vibe-check clear
 
-# Removes: .claude/, .github/, .codex/, c++-coding-conventions.md, etc.
-# Preserves: AGENTS.md, README.md, LICENSE, source code
+# Removes: .claude/, .github/, .codex/, AGENTS.md (unless customized)
+# Preserves: README.md, LICENSE, source code
 ```
 
 **Scenario: Use custom templates**
@@ -329,49 +329,95 @@ vibe-check init --lang c++ --agent claude --from ~/company/coding-standards/temp
 
 Initialize instruction files for AI coding agents in your project.
 
+**Usage:**
+
 ```bash
-vibe-check init --lang <language> --agent <agent> [--from <PATH or URL>]
+vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, cmake)
+- `--lang <string>` - Programming language or framework (e.g., c++, rust)
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--force` - Force overwrite of local files without confirmation
 - `--from <string>` - Optional path or URL to copy/download templates from
+
+**Examples:**
+
+```bash
+# Initialize C++ project with Claude
+vibe-check init --lang c++ --agent claude
+
+# Initialize from local path
+vibe-check init --lang c++ --agent claude --from /path/to/templates
+
+# Initialize from URL
+vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
+
+# Force overwrite existing local files
+vibe-check init --lang rust --agent copilot --force
+```
 
 **Behavior:**
 
-- Downloads `templates.yml` first to determine which files to download
-- If `templates.yml` fails to download, the operation stops with an error
-- Downloads all files specified in the YAML configuration
-- Copies files to locations specified by `target` paths in YAML (using placeholders)
+- Always updates global templates first (downloads or copies from source)
+- Downloads `templates.yml` configuration file to determine which templates to install
+- If `--from` is not specified, downloads from:
+  `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
+- If `--from` is specified, updates global templates from that location
+- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If `--force` is specified, overwrites local files regardless of modifications
+- Creates backup of existing local files before overwriting
+- Files are placed according to `templates.yml` configuration with placeholder resolution:
+  - `$workspace` resolves to current directory
+  - `$userprofile` resolves to user's home directory
 
-### `update` - Update Templates
+### `update` - Update Local Templates
 
 Update local templates from global storage.
 
+**Usage:**
+
 ```bash
-vibe-check update --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
+vibe-check update --lang <language> --agent <agent> [--force]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework
-- `--agent <string>` - AI coding agent
-- `--force` - Force overwrite without confirmation
-- `--from <string>` - Optional path or URL to copy/download templates from
+- `--lang <string>` - Programming language or framework (e.g., c++, rust)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--force` - Force overwrite of local files without confirmation
+
+**Examples:**
+
+```bash
+# Update local templates from global storage
+vibe-check update --lang c++ --agent claude
+
+# Force overwrite customized local files
+vibe-check update --lang rust --agent copilot --force
+```
 
 **Behavior:**
 
-- Loads `templates.yml` from global storage to determine which files to copy
-- Resolves placeholders in target paths (`$workspace` → current directory, `$userprofile` → home directory)
-- Copies files from global storage to locations specified in YAML
-- Detects local modifications using checksums and prompts for confirmation
-- Creates timestamped backups before overwriting files
+- Uses existing global templates (does not download new ones)
+- Requires global templates to exist (run `init` first if not present)
+- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If `--force` is specified, overwrites local files regardless of modifications
+- Creates backup of existing local files before overwriting
+- Files are placed according to `templates.yml` configuration with placeholder resolution:
+  - `$workspace` resolves to current directory
+  - `$userprofile` resolves to user's home directory
+
+**Note:** The `update` command behaves exactly like `init` except it does not download new global templates. Use `init` to refresh global templates or `update` to sync local files with existing global templates.
 
 ### `clear` - Clear Local Templates
 
-Remove local templates from current directory.
+Clear local templates from the current directory.
+
+**Usage:**
 
 ```bash
 vibe-check clear [--force]
@@ -379,7 +425,33 @@ vibe-check clear [--force]
 
 **Options:**
 
-- `--force` - Force clear without confirmation
+- `--force` - Force clear without confirmation and delete modified AGENTS.md
+
+**Examples:**
+
+```bash
+# Clear local templates with confirmation prompt
+vibe-check clear
+
+# Force clear without confirmation
+vibe-check clear --force
+```
+
+**Behavior:**
+
+- Removes agent instruction directories (.claude, .copilot, .codex) from current directory
+- Removes AGENTS.md from current directory (unless customized and `--force` not specified)
+- Does NOT affect global templates in local data directory
+- Creates backup of local templates before clearing in cache directory with timestamp
+- **AGENTS.md Protection:**
+  - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
+    - AGENTS.md is skipped and preserved
+    - User is informed to use `--force` to delete it
+  - If AGENTS.md has been customized and `--force` IS specified:
+    - Backup is created (as with all files)
+    - AGENTS.md is deleted along with other templates
+  - If AGENTS.md has NOT been customized (still has template marker):
+    - AGENTS.md is deleted normally
 
 ## Core Governance Principles
 
@@ -404,10 +476,10 @@ All templates in this repository enforce these critical rules:
 
 Currently configured in `templates.yml`:
 
-- **C++** - C++ programming language (includes `c++-coding-conventions.md` and `cmake-build-commands.md`)
-- **Rust** - Rust programming language (includes `rust-coding-conventions.md` and `rust-build-commands.md`)
+- **C++** - C++ programming language (fragments: `c++-coding-conventions.md` and `cmake-build-commands.md` merged into AGENTS.md)
+- **Rust** - Rust programming language (fragments: `rust-coding-conventions.md` and `rust-build-commands.md` merged into AGENTS.md)
 
-Additional language templates can be added to `templates.yml` configuration.
+Additional language templates can be added to `templates.yml` configuration. Language-specific content is stored as fragments in the global templates directory and merged into AGENTS.md during init/update.
 
 ## How It Works
 
@@ -423,11 +495,11 @@ Templates include:
 
 - **templates.yml**: Configuration file defining structure and file mappings
 - **Main template**: AGENTS.md (primary instruction file)
-- **Language templates**: Language-specific coding standards and build commands (e.g., c++-coding-conventions.md, cmake-build-commands.md, rust-coding-conventions.md, rust-build-commands.md)
-- **Integration templates**: Tool/workflow templates (e.g., git-workflow-conventions.md)
-- **Principle templates**: Core principles and best practices
-- **Mission templates**: Mission statement, technology stack
-- **Agent templates**: Agent-specific instruction files and prompts
+- **Language fragments**: Language-specific coding standards and build commands (e.g., c++-coding-conventions.md, cmake-build-commands.md, rust-coding-conventions.md, rust-build-commands.md) - merged into AGENTS.md
+- **Integration fragments**: Tool/workflow templates (e.g., git-workflow-conventions.md) - merged into AGENTS.md
+- **Principle fragments**: Core principles and best practices - merged into AGENTS.md
+- **Mission fragments**: Mission statement, technology stack - merged into AGENTS.md
+- **Agent templates**: Agent-specific instruction files and prompts (copied to project directories)
 
 ### Template Configuration (templates.yml)
 
@@ -435,10 +507,10 @@ The `templates.yml` file defines the template structure with six main sections:
 
 1. **main**: Main AGENTS.md instruction file (primary source of truth)
 2. **agents**: Agent-specific files with `instructions` (main file) and `prompts` (custom commands)
-3. **languages**: Language-specific coding standards templates
-4. **integration**: Tool/workflow integration templates (e.g., git workflows)
-5. **principles**: Core principles and general guidelines
-6. **mission**: Mission statement, purpose, and project overview
+3. **languages**: Language-specific coding standards fragments (merged into AGENTS.md)
+4. **integration**: Tool/workflow integration fragments (merged into AGENTS.md, e.g., git workflows)
+5. **principles**: Core principles and general guidelines fragments (merged into AGENTS.md)
+6. **mission**: Mission statement, purpose, and project overview fragments (merged into AGENTS.md)
 
 Each file entry specifies:
 

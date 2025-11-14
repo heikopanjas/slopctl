@@ -931,6 +931,16 @@ impl TemplateManager
             }
         }
 
+        // Check if AGENTS.md exists and if it has been modified
+        let agents_md_path = current_dir.join("AGENTS.md");
+        let agents_md_customized = agents_md_path.exists() && self.is_file_customized(&agents_md_path)?;
+
+        if agents_md_customized && force == false
+        {
+            println!("{} AGENTS.md has been customized and will not be deleted", "→".yellow());
+            println!("{} Use --force to delete it anyway (backup will be created)", "→".yellow());
+        }
+
         // Find and remove common language template files
         // Check for common patterns in current directory
         if let Ok(entries) = fs::read_dir(&current_dir)
@@ -945,20 +955,35 @@ impl TemplateManager
                     // but not AGENTS.md or README.md or other important files
                     if path.is_file() &&
                         (name.ends_with(".md") || name.ends_with(".MD")) &&
-                        name != "AGENTS.md" &&
                         name != "README.md" &&
                         name != "LICENSE.md" &&
                         name != "CHANGELOG.md" &&
                         name != "CONTRIBUTING.md"
                     {
-                        // Check if it matches known template patterns
-                        // Currently supported languages: c++, swift, rust
-                        let lowercase = name.to_lowercase();
-                        if lowercase == "c++-coding-conventions.md" || lowercase == "swift.md" || lowercase == "rust.md"
+                        // Special handling for AGENTS.md
+                        if name == "AGENTS.md"
                         {
+                            // Skip if customized and not forced
+                            if agents_md_customized && force == false
+                            {
+                                continue;
+                            }
+                            // Delete if not customized or if forced
                             println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
                             fs::remove_file(&path)?;
                             cleared_count += 1;
+                        }
+                        else
+                        {
+                            // Check if it matches known template patterns
+                            // Currently supported languages: c++, swift, rust
+                            let lowercase = name.to_lowercase();
+                            if lowercase == "c++-coding-conventions.md" || lowercase == "swift.md" || lowercase == "rust.md"
+                            {
+                                println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
+                                fs::remove_file(&path)?;
+                                cleared_count += 1;
+                            }
                         }
                     }
                 }

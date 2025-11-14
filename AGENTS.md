@@ -234,6 +234,46 @@ vibe-check update --lang rust --agent copilot --force
 
 **Note:** The `update` command behaves exactly like `init` except it does not download new global templates. Use `init` to refresh global templates or `update` to sync local files with existing global templates.
 
+### `clear` - Clear Local Templates
+
+Clear local templates from the current directory.
+
+**Usage:**
+
+```bash
+vibe-check clear [--force]
+```
+
+**Options:**
+
+- `--force` - Force clear without confirmation and delete modified AGENTS.md
+
+**Examples:**
+
+```bash
+# Clear local templates with confirmation prompt
+vibe-check clear
+
+# Force clear without confirmation
+vibe-check clear --force
+```
+
+**Behavior:**
+
+- Removes agent instruction directories (.claude, .copilot, .codex) from current directory
+- Removes language template files (c++-coding-conventions.md, swift.md, rust.md) from current directory
+- Does NOT affect global templates in local data directory
+- Creates backup of local templates before clearing in cache directory with timestamp
+- **AGENTS.md Protection:**
+  - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
+    - AGENTS.md is skipped and preserved
+    - User is informed to use `--force` to delete it
+  - If AGENTS.md has been customized and `--force` IS specified:
+    - Backup is created (as with all files)
+    - AGENTS.md is deleted along with other templates
+  - If AGENTS.md has NOT been customized (still has template marker):
+    - AGENTS.md is deleted normally
+
 ## Repository Structure
 
 ```text
@@ -751,3 +791,18 @@ git diff
 - Fixed outdated storage paths in FAQ and customization sections
 - Reasoning: The filename portion in $instructions/filename.md was redundant since fragments are merged into AGENTS.md at insertion points, not copied as separate files. Simplifying to just $instructions improves clarity and reduces confusion.
 
+### 2025-11-14 (Clear Command AGENTS.md Protection)
+
+- Enhanced clear command to detect and protect customized AGENTS.md files
+- Added AGENTS.md customization check using existing is_file_customized method
+- If AGENTS.md is customized (marker removed) and --force is NOT specified:
+  - AGENTS.md is skipped and preserved
+  - User is informed with yellow warning message
+  - Suggests using --force to delete anyway
+- If AGENTS.md is customized and --force IS specified:
+  - Backup is created (as with all files at start of clear operation)
+  - AGENTS.md is deleted along with other templates
+- If AGENTS.md is NOT customized (still has template marker):
+  - AGENTS.md is deleted normally without special handling
+- Added comprehensive clear command documentation to CLI Commands section
+- Reasoning: Users should not accidentally lose customized AGENTS.md files when clearing templates. The marker-based detection provides reliable protection, and --force flag gives users explicit control to override when needed. This is consistent with init/update command behavior for modified files.
