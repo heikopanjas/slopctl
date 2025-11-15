@@ -72,14 +72,16 @@ jobs:
                   name: vibe-check-templates-temp
                   path: .
 
-            - name: Bundle binary with templates
-              shell: bash
+            - name: Bundle binary with templates (Windows)
+              if: matrix.os == 'windows-latest'
+              shell: pwsh
               run: |
-                  if [ "${{ matrix.os }}" == "windows-latest" ]; then
-                      zip -j vibe-check-${{ matrix.os }}.zip target/debug/vibe-check.exe vibe-check-templates.zip
-                  else
-                      zip -j vibe-check-${{ matrix.os }}.zip target/debug/vibe-check vibe-check-templates.zip
-                  fi
+                  Compress-Archive -Path target/debug/vibe-check.exe, vibe-check-templates.zip -DestinationPath vibe-check-${{ matrix.os }}.zip
+
+            - name: Bundle binary with templates (Unix)
+              if: matrix.os != 'windows-latest'
+              run: |
+                  zip -j vibe-check-${{ matrix.os }}.zip target/debug/vibe-check vibe-check-templates.zip
 
             - name: Upload bundled artifact
               uses: actions/upload-artifact@v4
