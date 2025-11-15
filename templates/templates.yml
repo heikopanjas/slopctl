@@ -61,6 +61,10 @@ integration:
         files:
             - source: git-workflow-conventions.md
               target: '$instructions'
+    versioning:
+        files:
+            - source: semantic-versioning.md
+              target: '$instructions'
 
 # General templates that apply to all projects
 principles:

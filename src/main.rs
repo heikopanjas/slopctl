@@ -5,6 +5,7 @@ use vibe_check::TemplateManager;
 #[derive(Parser)]
 #[command(name = "vibe-check")]
 #[command(about = "A manager for coding agent instruction files", long_about = None)]
+#[command(version)]
 struct Cli
 {
     #[command(subcommand)]
