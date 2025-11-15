@@ -52,3 +52,11 @@ jobs:
 
             - name: Run tests
               run: cargo test --verbose
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vibe-check-${{ matrix.os }}
+                  path: |
+                      target/debug/vibe-check${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+                  if-no-files-found: error
