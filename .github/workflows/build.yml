@@ -102,12 +102,12 @@ jobs:
                   echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
                   echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
-            - name: Create pre-release
+            - name: Create release
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: develop-build-${{ github.run_number }}-${{ steps.build_info.outputs.short_sha }}
                   name: Development Build #${{ github.run_number }} (${{ steps.build_info.outputs.date }})
-                  prerelease: true
+                  prerelease: false
                   draft: false
                   body: |
                       Automated pre-release from the `develop` branch.
