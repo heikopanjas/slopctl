@@ -103,6 +103,7 @@ jobs:
               id: build_info
               run: |
                   echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+                  echo "date_compact=$(date +'%Y%m%d_%H%M%S')" >> $GITHUB_OUTPUT
                   echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
                   version=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
                   echo "version=$version" >> $GITHUB_OUTPUT
@@ -111,7 +112,7 @@ jobs:
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: v${{ steps.build_info.outputs.version }}-dev.${{ github.run_number }}+${{ steps.build_info.outputs.short_sha }}
-                  name: Development Build v${{ steps.build_info.outputs.version }}-dev.${{ github.run_number }} (${{ steps.build_info.outputs.date }})
+                  name: vibe-check-build-${{ github.run_number }}-${{ steps.build_info.outputs.date_compact }}
                   prerelease: false
                   draft: false
                   make_latest: true
