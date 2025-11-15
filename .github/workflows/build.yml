@@ -53,24 +53,39 @@ jobs:
             - name: Run tests
               run: cargo test --verbose
 
-            - name: Upload build artifacts
-              uses: actions/upload-artifact@v4
-              with:
-                  name: vibe-check-${{ matrix.os }}
-                  path: |
-                      target/debug/vibe-check${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-                  if-no-files-found: error
-
             - name: Create templates archive
               if: matrix.os == 'ubuntu-latest'
               run: zip -r vibe-check-templates.zip templates/
 
-            - name: Upload templates archive
+            - name: Upload templates as artifact
               if: matrix.os == 'ubuntu-latest'
               uses: actions/upload-artifact@v4
               with:
-                  name: vibe-check-templates
+                  name: vibe-check-templates-temp
                   path: vibe-check-templates.zip
+                  if-no-files-found: error
+
+            - name: Download templates archive
+              if: matrix.os != 'ubuntu-latest'
+              uses: actions/download-artifact@v4
+              with:
+                  name: vibe-check-templates-temp
+                  path: .
+
+            - name: Bundle binary with templates
+              shell: bash
+              run: |
+                  if [ "${{ matrix.os }}" == "windows-latest" ]; then
+                      zip -j vibe-check-${{ matrix.os }}.zip target/debug/vibe-check.exe vibe-check-templates.zip
+                  else
+                      zip -j vibe-check-${{ matrix.os }}.zip target/debug/vibe-check vibe-check-templates.zip
+                  fi
+
+            - name: Upload bundled artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vibe-check-${{ matrix.os }}
+                  path: vibe-check-${{ matrix.os }}.zip
                   if-no-files-found: error
 
     release:
@@ -93,11 +108,11 @@ jobs:
             - name: Display structure of downloaded files
               run: ls -R artifacts
 
-            - name: Rename binaries for release
+            - name: Rename bundled artifacts for release
               run: |
-                  mv artifacts/vibe-check-ubuntu-latest/vibe-check artifacts/vibe-check-ubuntu-latest/vibe-check-linux
-                  mv artifacts/vibe-check-macos-latest/vibe-check artifacts/vibe-check-macos-latest/vibe-check-macos
-                  mv artifacts/vibe-check-windows-latest/vibe-check.exe artifacts/vibe-check-windows-latest/vibe-check-windows.exe
+                  mv artifacts/vibe-check-ubuntu-latest/vibe-check-ubuntu-latest.zip artifacts/vibe-check-ubuntu-latest/vibe-check-linux.zip
+                  mv artifacts/vibe-check-macos-latest/vibe-check-macos-latest.zip artifacts/vibe-check-macos-latest/vibe-check-macos.zip
+                  mv artifacts/vibe-check-windows-latest/vibe-check-windows-latest.zip artifacts/vibe-check-windows-latest/vibe-check-windows.zip
 
             - name: Generate build info
               id: build_info
@@ -125,7 +140,7 @@ jobs:
 
                       This is an automated development build. Use at your own risk.
                   files: |
-                      artifacts/vibe-check-ubuntu-latest/vibe-check-linux
-                      artifacts/vibe-check-macos-latest/vibe-check-macos
-                      artifacts/vibe-check-windows-latest/vibe-check-windows.exe
-                      artifacts/vibe-check-templates/vibe-check-templates.zip
+                      artifacts/vibe-check-ubuntu-latest/vibe-check-linux.zip
+                      artifacts/vibe-check-macos-latest/vibe-check-macos.zip
+                      artifacts/vibe-check-windows-latest/vibe-check-windows.zip
+                      artifacts/vibe-check-templates-temp/vibe-check-templates.zip
