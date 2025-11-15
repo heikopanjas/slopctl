@@ -90,6 +90,12 @@ jobs:
             - name: Display structure of downloaded files
               run: ls -R artifacts
 
+            - name: Rename binaries for release
+              run: |
+                  mv artifacts/vibe-check-ubuntu-latest/vibe-check artifacts/vibe-check-ubuntu-latest/vibe-check-linux
+                  mv artifacts/vibe-check-macos-latest/vibe-check artifacts/vibe-check-macos-latest/vibe-check-macos
+                  mv artifacts/vibe-check-windows-latest/vibe-check.exe artifacts/vibe-check-windows-latest/vibe-check-windows.exe
+
             - name: Generate build info
               id: build_info
               run: |
@@ -112,7 +118,7 @@ jobs:
 
                       This is an automated development build. Use at your own risk.
                   files: |
-                      artifacts/vibe-check-ubuntu-latest/vibe-check
-                      artifacts/vibe-check-macos-latest/vibe-check
-                      artifacts/vibe-check-windows-latest/vibe-check.exe
+                      artifacts/vibe-check-ubuntu-latest/vibe-check-linux
+                      artifacts/vibe-check-macos-latest/vibe-check-macos
+                      artifacts/vibe-check-windows-latest/vibe-check-windows.exe
                       artifacts/vibe-check-templates/vibe-check-templates.zip
