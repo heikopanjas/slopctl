@@ -113,7 +113,7 @@ jobs:
               with:
                   tag_name: R${{ steps.build_info.outputs.version }}_BUILD_${{ github.run_number }}_${{ steps.build_info.outputs.date_compact }}
                   name: vibe-check-build-${{ github.run_number }}-${{ steps.build_info.outputs.date_compact }}
-                  prerelease: false
+                  prerelease: true
                   draft: false
                   make_latest: true
                   body: |
