@@ -1,5 +1,15 @@
-# Claude Code Instructions
+# ⚠️ SESSION NOT INITIALIZED PROPERLY
 
-**For complete project instructions, please refer to [`AGENTS.md`](../AGENTS.md) in the project root.**
+If you're reading this, the user probably forgot to run `/init-session`.
 
-This file serves as a reference point for Claude Code. All comprehensive development guidelines, architecture patterns, and coding standards are maintained in the primary `AGENTS.md` file.
+**STOP IMMEDIATELY and ask:**
+"Should I run /init-session first to properly initialize this session?"
+
+If the user confirms, run the slash command. If they say no, then:
+- READ AGENTS.md
+- Proceed with their request
+
+DO NOT proceed with commits or code changes without either:
+  1. Running /init-session, OR
+  2. Reading AGENTS.md
+

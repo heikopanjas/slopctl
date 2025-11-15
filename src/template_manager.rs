@@ -710,13 +710,12 @@ impl TemplateManager
         let mut modified_files = Vec::new();
 
         // Check if main AGENTS.md has been customized (marker removed)
-        if let Some((_, main_target)) = &main_template
+        if let Some((_, main_target)) = &main_template &&
+            main_target.exists() &&
+            self.is_file_customized(main_target)?
         {
-            if main_target.exists() && self.is_file_customized(main_target)?
-            {
-                has_modifications = true;
-                modified_files.push(main_target.clone());
-            }
+            has_modifications = true;
+            modified_files.push(main_target.clone());
         }
 
         if has_modifications && force == false
@@ -806,7 +805,7 @@ impl TemplateManager
         for (fragment_path, category) in fragments
         {
             let fragment_content = fs::read_to_string(fragment_path)?;
-            fragments_by_category.entry(category.clone()).or_insert_with(Vec::new).push(fragment_content);
+            fragments_by_category.entry(category.clone()).or_default().push(fragment_content);
         }
 
         // Process each category
@@ -880,7 +879,7 @@ impl TemplateManager
     }
 
     /// Clears local templates from current directory
-
+    ///
     /// Removes agent instruction directories and language template files from
     /// the current directory. Global templates in the local data directory
     /// are not affected.

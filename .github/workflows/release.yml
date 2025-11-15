@@ -1,0 +1,143 @@
+name: Release
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        name: Build Release
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                rust: [nightly]
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Rust toolchain
+              uses: dtolnay/rust-toolchain@nightly
+              with:
+                  toolchain: ${{ matrix.rust }}
+                  components: rustfmt, clippy
+
+            - name: Cache dependencies
+              uses: Swatinem/rust-cache@v2
+              with:
+                  key: ${{ matrix.os }}-${{ matrix.rust }}
+
+            - name: Check formatting
+              run: cargo fmt --check
+
+            - name: Run clippy
+              run: cargo clippy -- -D warnings
+
+            - name: Check compilation
+              run: cargo check --verbose
+
+            - name: Build project (release)
+              run: cargo build --release --verbose
+
+            - name: Run tests
+              run: cargo test --verbose
+
+            - name: Create templates archive
+              if: matrix.os == 'ubuntu-latest'
+              run: zip -r vibe-check-templates.zip templates/
+
+            - name: Upload templates as artifact
+              if: matrix.os == 'ubuntu-latest'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vibe-check-templates-temp
+                  path: vibe-check-templates.zip
+                  if-no-files-found: error
+
+            - name: Download templates archive
+              if: matrix.os != 'ubuntu-latest'
+              uses: actions/download-artifact@v4
+              with:
+                  name: vibe-check-templates-temp
+                  path: .
+
+            - name: Bundle binary with templates (Windows)
+              if: matrix.os == 'windows-latest'
+              shell: pwsh
+              run: |
+                  Compress-Archive -Path target/release/vibe-check.exe, vibe-check-templates.zip -DestinationPath vibe-check-${{ matrix.os }}.zip
+
+            - name: Bundle binary with templates (Unix)
+              if: matrix.os != 'windows-latest'
+              run: |
+                  zip -j vibe-check-${{ matrix.os }}.zip target/release/vibe-check vibe-check-templates.zip
+
+            - name: Upload bundled artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vibe-check-${{ matrix.os }}
+                  path: vibe-check-${{ matrix.os }}.zip
+                  if-no-files-found: error
+
+    release:
+        name: Create Release
+        needs: build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: artifacts
+
+            - name: Display structure of downloaded files
+              run: ls -R artifacts
+
+            - name: Rename bundled artifacts for release
+              run: |
+                  mv artifacts/vibe-check-ubuntu-latest/vibe-check-ubuntu-latest.zip artifacts/vibe-check-ubuntu-latest/vibe-check-linux.zip
+                  mv artifacts/vibe-check-macos-latest/vibe-check-macos-latest.zip artifacts/vibe-check-macos-latest/vibe-check-macos.zip
+                  mv artifacts/vibe-check-windows-latest/vibe-check-windows-latest.zip artifacts/vibe-check-windows-latest/vibe-check-windows.zip
+
+            - name: Generate release info
+              id: release_info
+              run: |
+                  version=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+                  echo "version=$version" >> $GITHUB_OUTPUT
+                  echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+
+            - name: Create release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: v${{ steps.release_info.outputs.version }}
+                  name: vibe-check v${{ steps.release_info.outputs.version }}
+                  prerelease: false
+                  draft: false
+                  make_latest: true
+                  body: |
+                      Release v${{ steps.release_info.outputs.version }}
+
+                      **Release Date:** ${{ steps.release_info.outputs.date }}
+                      **Commit:** ${{ github.sha }}
+
+                      This is a stable release.
+                  files: |
+                      artifacts/vibe-check-ubuntu-latest/vibe-check-linux.zip
+                      artifacts/vibe-check-macos-latest/vibe-check-macos.zip
+                      artifacts/vibe-check-windows-latest/vibe-check-windows.zip
+                      artifacts/vibe-check-templates-temp/vibe-check-templates.zip

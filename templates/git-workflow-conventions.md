@@ -1,5 +1,5 @@
 
-### Commit Protocol (CRITICAL)
+## Commit Protocol (CRITICAL)
 
 - **NEVER commit automatically** - always wait for explicit confirmation
 

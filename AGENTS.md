@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-14
+**Last updated:** 2025-11-15
 
 ## General Instructions
 
@@ -42,6 +42,47 @@ When you DO commit (after explicit instruction):
 - Commit the changes
 
 **Violation of this rule is unacceptable.**
+
+## Semantic Versioning Protocol
+
+**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
+
+The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
+
+### Version Format: MAJOR.MINOR.PATCH
+
+**When to increment:**
+
+1. **PATCH version** (X.Y.Z → X.Y.Z+1)
+   - Bug fixes and minor corrections
+   - Performance improvements without API changes
+   - Documentation updates
+   - Internal refactoring that doesn't affect public API
+   - Example: `1.0.0` → `1.0.1`
+
+2. **MINOR version** (X.Y.Z → X.Y+1.0)
+   - New features added
+   - New CLI commands or options
+   - New functionality that maintains backward compatibility
+   - Example: `1.0.1` → `1.1.0`
+
+3. **MAJOR version** (X.Y.Z → X+1.0.0)
+   - Breaking changes to public API
+   - Removal of features or commands
+   - Changes that require user action or code updates
+   - Incompatible CLI changes
+   - Example: `1.1.0` → `2.0.0`
+
+### Process
+
+After making ANY code changes:
+
+1. Determine the type of change (fix, feature, or breaking change)
+2. Update the version in `Cargo.toml` accordingly
+3. Include the version change in the same commit as the code change
+4. Mention version bump in commit message footer if significant
+
+**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
 
 ## Git Guidelines
 
@@ -125,6 +166,47 @@ Bad (special characters):
 ```text
 fix: update `KString` with "nested 'quotes'" & $special chars!
 ```
+
+## Semantic Versioning Protocol
+
+**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
+
+The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
+
+### Version Format: MAJOR.MINOR.PATCH
+
+**When to increment:**
+
+1. **PATCH version** (X.Y.Z → X.Y.Z+1)
+   - Bug fixes and minor corrections
+   - Performance improvements without API changes
+   - Documentation updates
+   - Internal refactoring that doesn't affect public API
+   - Example: `1.0.0` → `1.0.1`
+
+2. **MINOR version** (X.Y.Z → X.Y+1.0)
+   - New features added
+   - New CLI commands or options
+   - New functionality that maintains backward compatibility
+   - Example: `1.0.1` → `1.1.0`
+
+3. **MAJOR version** (X.Y.Z → X+1.0.0)
+   - Breaking changes to public API
+   - Removal of features or commands
+   - Changes that require user action or code updates
+   - Incompatible CLI changes
+   - Example: `1.1.0` → `2.0.0`
+
+### Process
+
+After making ANY code changes:
+
+1. Determine the type of change (fix, feature, or breaking change)
+2. Update the version in `Cargo.toml` accordingly
+3. Include the version change in the same commit as the code change
+4. Mention version bump in commit message footer if significant
+
+**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
 
 ## Project Overview
 
@@ -303,13 +385,18 @@ vibe-check/
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
+│   │   ├── CLAUDE.md           # Claude main instruction file
+│   │   ├── CLAUDE-auto-redirect.md  # Auto-redirect to AGENTS.md
 │   │   └── commands/
 │   │       └── init-session.md # Claude initialization commands
 │   ├── codex/
-│   │   └── prompts/            # Codex initialization prompts (placed in ~/.codex/)
+│   │   └── prompts/
+│   │       └── init-session.md # Codex initialization prompts (placed in ~/.codex/)
 │   ├── copilot/
 │   │   ├── copilot-instructions.md  # GitHub Copilot instructions
-│   │   └── prompts/            # Copilot initialization prompts
+│   │   ├── copilot-instructions-auto-redirect.md  # Auto-redirect to AGENTS.md
+│   │   └── prompts/
+│   │       └── init-session.prompt.md  # Copilot initialization prompts
 ├── CLAUDE.md                   # Claude-specific reference
 ├── .github/
 │   └── copilot-instructions.md # GitHub Copilot reference
@@ -407,7 +494,7 @@ The system downloads templates.yml first; if download fails, the operation stops
 - `clear(force: bool)` - Clear local templates from current directory
   - `force` - If true, clear templates without confirmation
   - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
-  - Removes language template files for supported languages (c++, swift, rust) from current directory
+  - Removes language template files for supported languages (c, c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
   - Creates backup of local templates before clearing in cache directory with timestamp
 
@@ -806,3 +893,31 @@ git diff
   - AGENTS.md is deleted normally without special handling
 - Added comprehensive clear command documentation to CLI Commands section
 - Reasoning: Users should not accidentally lose customized AGENTS.md files when clearing templates. The marker-based detection provides reliable protection, and --force flag gives users explicit control to override when needed. This is consistent with init/update command behavior for modified files.
+
+### 2025-11-15 (Auto-Redirect Templates)
+
+- Added CLAUDE-auto-redirect.md template in claude/ directory
+- Added copilot-instructions-auto-redirect.md template in copilot/ directory
+- Both auto-redirect templates contain mandatory instruction to read AGENTS.md before proceeding
+- Templates ensure agents reference the single source of truth (AGENTS.md) consistently
+- Updated repository structure documentation to include new auto-redirect templates
+- Reasoning: Auto-redirect templates provide an additional safeguard to ensure AI coding agents always consult AGENTS.md as the primary instruction source. This reinforces the single source of truth principle and prevents agents from relying solely on abbreviated instruction files.
+
+### 2025-11-15 (Semantic Versioning Protocol)
+
+- Added Semantic Versioning Protocol section to AGENTS.md
+- Defined version format MAJOR.MINOR.PATCH with clear increment rules
+- PATCH for bug fixes, MINOR for new features, MAJOR for breaking changes
+- Specified process: determine change type, update Cargo.toml, include in same commit
+- Version changes included with code changes, not as separate commits
+- Added examples for each version type increment
+- Reasoning: Automatic semantic versioning tracking ensures consistent version management and clear communication of change significance. Including version bumps in the same commit as code changes maintains atomic commits and simplifies version history tracking.
+
+### 2025-11-15 (C Coding Conventions Template)
+
+- Created c-coding-conventions.md template based on KString project coding standards
+- Added comprehensive C17 coding conventions including const correctness, constant-left comparisons, secure API design
+- Documented naming conventions, memory management, error handling, and platform portability guidelines
+- Added C language entry to templates.yml with c-coding-conventions.md and cmake-build-commands.md
+- Updated supported languages list in AGENTS.md to include C (c, c++, swift, rust)
+- Reasoning: C language template provides standardized coding conventions for C projects following modern best practices from real-world C library implementation (KString). The template emphasizes security (explicit sizes, const correctness), portability (C17 standard, cross-platform), and maintainability (clear naming, defensive programming), making it valuable for any C project development.

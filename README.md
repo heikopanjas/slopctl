@@ -44,6 +44,7 @@ vibe-check/
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
+│   │   ├── CLAUDE-auto-redirect.md  # Auto-redirect to AGENTS.md
 │   │   └── commands/
 │   │       └── init-session.md # Claude session initialization prompt
 │   ├── codex/
@@ -51,6 +52,7 @@ vibe-check/
 │   │       └── init-session.md # Codex session initialization prompt
 │   └── copilot/
 │       ├── copilot-instructions.md # Copilot main instruction file
+│       ├── copilot-instructions-auto-redirect.md  # Auto-redirect to AGENTS.md
 │       └── prompts/
 │           └── init-session.prompt.md # Copilot session prompt
 ├── CLAUDE.md                   # Claude-specific reference
@@ -154,7 +156,6 @@ vibe-check init --lang c++ --agent claude
 1. **Downloads templates** (first run only):
    - Fetches `templates.yml` from GitHub
    - Downloads all template files to platform-specific directory (e.g., `~/Library/Application Support/vibe-check/templates/` on macOS)
-   - Creates SHA checksums for integrity verification
 
 2. **Processes configuration**:
    - Parses `templates.yml` to determine which files to install
@@ -232,16 +233,16 @@ Claude will follow the conventions in AGENTS.md, including:
 If templates are updated upstream:
 
 ```bash
-# Update from global storage
-vibe-check update --lang c++ --agent claude
+# First, refresh global templates with init
+vibe-check init --lang c++ --agent claude
 
-# Update from specific source
-vibe-check update --lang c++ --agent claude --from https://github.com/user/repo/tree/main/templates
+# Or update from global storage without downloading new templates
+vibe-check update --lang c++ --agent claude
 ```
 
 vibe-check will:
-- Check for local modifications
-- Create timestamped backup in `~/.cache/vibe-check/backups/`
+- Check if AGENTS.md has been customized (template marker removed)
+- Create timestamped backup in cache directory
 - Prompt for confirmation unless `--force` is used
 
 ### Step 8: Working with Multiple Agents
@@ -277,11 +278,9 @@ my-cpp-project/
 ```bash
 $ vibe-check update --lang c++ --agent claude
 → Updating templates for c++ with claude
-! Local modifications detected:
-  - /path/to/my-cpp-project/AGENTS.md
-→ Backup created: ~/.cache/vibe-check/backups/2025-11-12_14_30_45/
+! AGENTS.md has been customized (template marker removed)
 → Use --force to overwrite
-✗ Local modifications detected. Aborting.
+✗ Customized AGENTS.md detected. Aborting.
 ```
 
 **Solution:** Review changes, commit them, then use `--force`:
@@ -299,8 +298,8 @@ vibe-check update --lang c++ --agent claude --force
 # Remove agent directories and AGENTS.md
 vibe-check clear
 
-# Removes: .claude/, .github/, .codex/, AGENTS.md (unless customized)
-# Preserves: README.md, LICENSE, source code
+# Removes: .claude/, .github/, .codex/, AGENTS.md (unless customized without --force)
+# Preserves: README.md, LICENSE, source code, and customized AGENTS.md (unless --force)
 ```
 
 **Scenario: Use custom templates**
@@ -363,7 +362,7 @@ vibe-check init --lang rust --agent copilot --force
 - Always updates global templates first (downloads or copies from source)
 - Downloads `templates.yml` configuration file to determine which templates to install
 - If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
+  `https://github.com/heikopanjas/vibe-check/tree/main/templates`
 - If `--from` is specified, updates global templates from that location
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error
@@ -440,7 +439,9 @@ vibe-check clear --force
 **Behavior:**
 
 - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
+- Removes agent instruction files (CLAUDE.md, .github/copilot-instructions.md) from current directory
 - Removes AGENTS.md from current directory (unless customized and `--force` not specified)
+- Does NOT remove language-specific fragment files (they are merged into AGENTS.md, not stored separately)
 - Does NOT affect global templates in local data directory
 - Creates backup of local templates before clearing in cache directory with timestamp
 - **AGENTS.md Protection:**
@@ -497,8 +498,8 @@ Templates include:
 - **Main template**: AGENTS.md (primary instruction file)
 - **Language fragments**: Language-specific coding standards and build commands (e.g., c++-coding-conventions.md, cmake-build-commands.md, rust-coding-conventions.md, rust-build-commands.md) - merged into AGENTS.md
 - **Integration fragments**: Tool/workflow templates (e.g., git-workflow-conventions.md) - merged into AGENTS.md
-- **Principle fragments**: Core principles and best practices - merged into AGENTS.md
-- **Mission fragments**: Mission statement, technology stack - merged into AGENTS.md
+- **Principle fragments**: Core principles and best practices (e.g., core-principles.md, best-practices.md) - merged into AGENTS.md
+- **Mission fragments**: Mission statement, technology stack (e.g., mission-statement.md, technology-stack.md) - merged into AGENTS.md
 - **Agent templates**: Agent-specific instruction files and prompts (copied to project directories)
 
 ### Template Configuration (templates.yml)
@@ -563,9 +564,9 @@ principles:
 
 1. **First run**: Downloads `templates.yml` and all specified files from GitHub
 2. **Local storage**: Templates are cached in platform-specific directory
-3. **Checksums**: SHA-256 checksums verify template integrity
-4. **Backups**: Automatic timestamped backups in cache directory before any modifications
-5. **Updates**: Detect local modifications and warn before overwriting
+3. **Backups**: Automatic timestamped backups in cache directory before any modifications
+4. **Protection**: Template marker in AGENTS.md detects customization and prevents accidental overwrites
+5. **Updates**: Detect AGENTS.md customization and warn before overwriting
 6. **Placeholders**: `$workspace` and `$userprofile` resolve to appropriate paths
 
 ### Project Initialization
@@ -584,19 +585,18 @@ The resulting AGENTS.md contains the complete merged content with all relevant s
 
 ### Modification Detection
 
-vibe-check detects if you've modified local templates:
+vibe-check detects if you've customized AGENTS.md by checking for the template marker:
 
 ```bash
 $ vibe-check update --lang c++ --agent claude
 → Updating templates for c++ with claude
-! Local modifications detected:
-  - /path/to/CLAUDE.md
-  - /path/to/.claude/commands/init-session.md
+! AGENTS.md has been customized (template marker removed)
+→ Backup will be created before overwriting
 → Use --force to overwrite
-✗ Local modifications detected. Aborting.
+✗ Customized AGENTS.md detected. Aborting.
 ```
 
-Use `--force` to override and update anyway.
+The template marker is automatically removed when fragments are merged into AGENTS.md during initialization. This marks the file as customized and prevents accidental overwrites. Use `--force` to override and update anyway.
 
 ## Customization
 
@@ -639,9 +639,9 @@ To add a new language or agent template:
 - **CLI Framework:** clap v4.5.20
 - **Terminal Colors:** owo-colors v4.1.0
 - **HTTP Client:** reqwest v0.12 (blocking, json)
-- **Checksums:** sha2 v0.10, hex v0.4
 - **Date/Time:** chrono v0.4
-- **Serialization:** serde v1.0, serde_json v1.0
+- **Serialization:** serde v1.0, serde_json v1.0, serde_yaml v0.9
+- **Directory Paths:** dirs v5.0
 
 ## FAQ
 
@@ -651,11 +651,11 @@ To add a new language or agent template:
 - Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`
 - Backups: Platform-specific cache directory
 
-**What happens if I modify local templates?**
-vibe-check detects modifications and warns you before overwriting. Use `--force` to override.
+**What happens if I modify AGENTS.md?**
+vibe-check detects customization via template marker removal and warns you before overwriting. Use `--force` to override.
 
 **Can I use my own template repository?**
-Yes! Use the `--from` option to specify a local path or GitHub URL.
+Yes! Use the `--from` option with the `init` command to specify a local path or GitHub URL.
 
 **Why AGENTS.md as single source of truth?**
 Centralized updates prevent drift and make it easier to maintain consistency across sessions.
@@ -701,4 +701,4 @@ cargo clippy
 
 ---
 
-Last updated: November 14, 2025
+Last updated: November 15, 2025
