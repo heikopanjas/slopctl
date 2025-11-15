@@ -72,3 +72,40 @@ jobs:
                   name: vibe-check-templates
                   path: vibe-check-templates.zip
                   if-no-files-found: error
+
+    release:
+        name: Create Pre-Release
+        needs: build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: artifacts
+
+            - name: Display structure of downloaded files
+              run: ls -R artifacts
+
+            - name: Create pre-release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: develop-latest
+                  name: Development Build (Latest)
+                  prerelease: true
+                  draft: false
+                  body: |
+                      Automated pre-release from the `develop` branch.
+
+                      **Commit:** ${{ github.sha }}
+                      **Date:** ${{ github.event.head_commit.timestamp }}
+
+                      This is an automated development build. Use at your own risk.
+                  files: |
+                      artifacts/vibe-check-ubuntu-latest/vibe-check
+                      artifacts/vibe-check-macos-latest/vibe-check
+                      artifacts/vibe-check-windows-latest/vibe-check.exe
+                      artifacts/vibe-check-templates/vibe-check-templates.zip
