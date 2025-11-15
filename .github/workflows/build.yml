@@ -1,0 +1,54 @@
+name: Build and Test
+
+on:
+    push:
+        branches:
+            - develop
+            - feature/**
+    pull_request:
+        branches:
+            - develop
+            - feature/**
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        name: Build and Test
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                rust: [stable]
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  toolchain: ${{ matrix.rust }}
+                  components: rustfmt, clippy
+
+            - name: Cache dependencies
+              uses: Swatinem/rust-cache@v2
+              with:
+                  key: ${{ matrix.os }}-${{ matrix.rust }}
+
+            - name: Check formatting
+              run: cargo fmt --check
+
+            - name: Run clippy
+              run: cargo clippy -- -D warnings
+
+            - name: Check compilation
+              run: cargo check --verbose
+
+            - name: Build project
+              run: cargo build --verbose
+
+            - name: Run tests
+              run: cargo test --verbose
