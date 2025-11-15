@@ -42,6 +42,12 @@ agents:
 
 # Language-specific coding standards templates
 languages:
+    c:
+        files:
+            - source: c-coding-conventions.md
+              target: '$instructions'
+            - source: cmake-build-commands.md
+              target: '$instructions'
     c++:
         files:
             - source: c++-coding-conventions.md

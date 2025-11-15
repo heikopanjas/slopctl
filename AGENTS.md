@@ -494,7 +494,7 @@ The system downloads templates.yml first; if download fails, the operation stops
 - `clear(force: bool)` - Clear local templates from current directory
   - `force` - If true, clear templates without confirmation
   - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
-  - Removes language template files for supported languages (c++, swift, rust) from current directory
+  - Removes language template files for supported languages (c, c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
   - Creates backup of local templates before clearing in cache directory with timestamp
 
@@ -912,3 +912,12 @@ git diff
 - Version changes included with code changes, not as separate commits
 - Added examples for each version type increment
 - Reasoning: Automatic semantic versioning tracking ensures consistent version management and clear communication of change significance. Including version bumps in the same commit as code changes maintains atomic commits and simplifies version history tracking.
+
+### 2025-11-15 (C Coding Conventions Template)
+
+- Created c-coding-conventions.md template based on KString project coding standards
+- Added comprehensive C17 coding conventions including const correctness, constant-left comparisons, secure API design
+- Documented naming conventions, memory management, error handling, and platform portability guidelines
+- Added C language entry to templates.yml with c-coding-conventions.md and cmake-build-commands.md
+- Updated supported languages list in AGENTS.md to include C (c, c++, swift, rust)
+- Reasoning: C language template provides standardized coding conventions for C projects following modern best practices from real-world C library implementation (KString). The template emphasizes security (explicit sizes, const correctness), portability (C17 standard, cross-platform), and maintainability (clear naming, defensive programming), making it valuable for any C project development.
