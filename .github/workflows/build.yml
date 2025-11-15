@@ -76,7 +76,7 @@ jobs:
     release:
         name: Create Pre-Release
         needs: build
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/'))
         runs-on: ubuntu-latest
         permissions:
             contents: write
