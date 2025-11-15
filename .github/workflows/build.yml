@@ -90,18 +90,25 @@ jobs:
             - name: Display structure of downloaded files
               run: ls -R artifacts
 
+            - name: Generate build info
+              id: build_info
+              run: |
+                  echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+                  echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
             - name: Create pre-release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: develop-latest
-                  name: Development Build (Latest)
+                  tag_name: develop-build-${{ github.run_number }}-${{ steps.build_info.outputs.short_sha }}
+                  name: Development Build #${{ github.run_number }} (${{ steps.build_info.outputs.date }})
                   prerelease: true
                   draft: false
                   body: |
                       Automated pre-release from the `develop` branch.
 
+                      **Build Number:** ${{ github.run_number }}
+                      **Build Date:** ${{ steps.build_info.outputs.date }}
                       **Commit:** ${{ github.sha }}
-                      **Date:** ${{ github.event.head_commit.timestamp }}
 
                       This is an automated development build. Use at your own risk.
                   files: |
