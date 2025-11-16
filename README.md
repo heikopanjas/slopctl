@@ -204,11 +204,12 @@ Alternatively, in Claude's project settings, reference `AGENTS.md` as your proje
 
 Ask Claude to confirm:
 
-```
+```text
 Please confirm you've read AGENTS.md and understand the project instructions.
 ```
 
 Claude should acknowledge the:
+
 - Commit protocol (no auto-commits)
 - C++ coding conventions
 - Git workflow conventions
@@ -218,11 +219,12 @@ Claude should acknowledge the:
 
 Now you can work with Claude following the established guidelines:
 
-```
+```text
 Claude, help me create a CMakeLists.txt for this C++ project with library and test targets.
 ```
 
 Claude will follow the conventions in AGENTS.md, including:
+
 - Using proper C++ style
 - Following conventional commits
 - Waiting for explicit commit confirmation
@@ -241,6 +243,7 @@ vibe-check update --lang c++ --agent claude
 ```
 
 vibe-check will:
+
 - Check if AGENTS.md has been customized (template marker removed)
 - Create timestamped backup in cache directory
 - Prompt for confirmation unless `--force` is used
@@ -646,6 +649,7 @@ To add a new language or agent template:
 ## FAQ
 
 **Where are templates stored?**
+
 - Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
 - Global templates (Linux): `~/.local/share/vibe-check/templates/`
 - Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`

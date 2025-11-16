@@ -16,18 +16,21 @@
 **NEVER stage files or commit automatically under ANY circumstances.**
 
 You must ONLY stage and commit when the user uses one of these EXACT phrases:
+
 - "commit the changes"
 - "commit this"
 - "please commit"
 - "make a commit"
 
 If the user asks you to:
+
 - "implement X"
 - "add feature Y"
 - "update Z"
 - "fix this"
 
 You MUST:
+
 1. Make the code changes
 2. Build/test to verify
 3. **STOP and WAIT** - Do NOT stage or commit
@@ -35,6 +38,7 @@ You MUST:
 5. Wait for explicit commit instruction
 
 When you DO commit (after explicit instruction):
+
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - The commit message must have a maximum length of 500 characters
