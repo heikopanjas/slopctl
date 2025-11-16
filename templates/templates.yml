@@ -43,7 +43,7 @@ agents:
     cursor:
         prompts:
             - source: cursor/commands/init-session.md
-              target: '$userprofile/.cursor/commands/init-session.md'
+              target: '$workspace/.cursor/commands/init-session.md'
 
 # Language-specific coding standards templates
 languages:

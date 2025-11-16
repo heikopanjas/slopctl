@@ -119,9 +119,8 @@ impl TemplateManager
     {
         let config_path = self.config_dir.join("templates.yml");
 
-        // If templates.yml doesn't exist and we have a URL, download it
-        if config_path.exists() == false &&
-            let (Some(base), Some(path)) = (base_url, url_path)
+        // If we have a URL, always download templates.yml to get latest version
+        if let (Some(base), Some(path)) = (base_url, url_path)
         {
             let config_url = format!("{}{}/templates.yml", base, path);
             print!("{} Downloading templates.yml... ", "→".blue());
