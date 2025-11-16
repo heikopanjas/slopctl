@@ -362,7 +362,7 @@ vibe-check init --lang rust --agent copilot --force
 - Always updates global templates first (downloads or copies from source)
 - Downloads `templates.yml` configuration file to determine which templates to install
 - If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/main/templates`
+  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
 - If `--from` is specified, updates global templates from that location
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error

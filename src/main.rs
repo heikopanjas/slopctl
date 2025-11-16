@@ -77,7 +77,7 @@ fn main()
         | Commands::Init { lang, agent, force, from } =>
         {
             // Always update global templates for init command
-            let source = from.as_deref().unwrap_or("https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates");
+            let source = from.as_deref().unwrap_or("https://github.com/heikopanjas/vibe-check/tree/develop/templates");
             println!("{} Updating global templates from {}", "→".blue(), source.yellow());
 
             if let Err(e) = manager.download_or_copy_templates(source)
