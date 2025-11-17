@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-15
+**Last updated:** 2025-11-17
 
 ## General Instructions
 
@@ -16,18 +16,21 @@
 **NEVER stage files or commit automatically under ANY circumstances.**
 
 You must ONLY stage and commit when the user uses one of these EXACT phrases:
+
 - "commit the changes"
 - "commit this"
 - "please commit"
 - "make a commit"
 
 If the user asks you to:
+
 - "implement X"
 - "add feature Y"
 - "update Z"
 - "fix this"
 
 You MUST:
+
 1. Make the code changes
 2. Build/test to verify
 3. **STOP and WAIT** - Do NOT stage or commit
@@ -35,6 +38,7 @@ You MUST:
 5. Wait for explicit commit instruction
 
 When you DO commit (after explicit instruction):
+
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - The commit message must have a maximum length of 500 characters
@@ -266,7 +270,7 @@ vibe-check init --lang rust --agent copilot --force
 - Always updates global templates first (downloads or copies from source)
 - Downloads `templates.yml` configuration file to determine which templates to install
 - If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/feature/template-management/templates`
+  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
 - If `--from` is specified, updates global templates from that location
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error
@@ -921,3 +925,24 @@ git diff
 - Added C language entry to templates.yml with c-coding-conventions.md and cmake-build-commands.md
 - Updated supported languages list in AGENTS.md to include C (c, c++, swift, rust)
 - Reasoning: C language template provides standardized coding conventions for C projects following modern best practices from real-world C library implementation (KString). The template emphasizes security (explicit sizes, const correctness), portability (C17 standard, cross-platform), and maintainability (clear naming, defensive programming), making it valuable for any C project development.
+
+### 2025-11-16 (Template Source Update)
+
+- Updated default template download URL from feature/template-management branch to develop branch
+- Changed URL in src/main.rs from tree/feature/template-management/templates to tree/develop/templates
+- Updated documentation in AGENTS.md and README.md to reflect new default URL
+- Added Cursor agent support with initialization prompts
+- Added Swift language support with coding conventions and build commands templates
+- Bumped version from 1.1.1 to 1.2.0 (MINOR version for new features: Cursor agent and Swift language)
+- Reasoning: The develop branch is now the primary development branch for templates, making it more appropriate as the default source. This ensures users get the latest stable template updates without needing to specify a custom URL. New agent and language support are new features that maintain backward compatibility, requiring MINOR version increment per Semantic Versioning Protocol.
+
+### 2025-11-17 (Init/Update Command Bug Fix)
+
+- Fixed bug where init and update commands would abort entire operation when AGENTS.md was customized
+- Modified update method in template_manager.rs to skip only AGENTS.md instead of aborting completely
+- Changed behavior: if AGENTS.md is customized and --force is not specified, skip AGENTS.md but continue copying other files
+- Added clear user messaging explaining which files are being skipped and which are being updated
+- Maintained backup behavior for all existing files before modifications
+- --force flag still overwrites customized AGENTS.md when specified
+- Bumped version from 1.2.0 to 1.2.1 (PATCH version for bug fix)
+- Reasoning: Previous behavior was too aggressive - users couldn't update agent instructions or prompts without either overwriting their customized AGENTS.md or having the entire operation fail. New behavior is more flexible and user-friendly, allowing partial updates while protecting customized content. This aligns with the clear command's behavior for customized files.

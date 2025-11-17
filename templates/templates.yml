@@ -40,6 +40,11 @@ agents:
             - source: codex/prompts/init-session.md
               target: '$userprofile/.codex/prompts/init-session.md'
 
+    cursor:
+        prompts:
+            - source: cursor/commands/init-session.md
+              target: '$workspace/.cursor/commands/init-session.md'
+
 # Language-specific coding standards templates
 languages:
     c:
@@ -59,6 +64,13 @@ languages:
             - source: rust-coding-conventions.md
               target: '$instructions'
             - source: rust-build-commands.md
+              target: '$instructions'
+
+    swift:
+        files:
+            - source: swift-coding-conventions.md
+              target: '$instructions'
+            - source: swift-build-commands.md
               target: '$instructions'
 
 # Integration templates for specific tools/workflows

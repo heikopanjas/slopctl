@@ -2,6 +2,13 @@
 
 **A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants (Claude, GitHub Copilot, Codex, and others) with built-in governance guardrails and human-in-the-loop controls.
 
+![MIT License](https://img.shields.io/badge/-MIT%20License-000000?style=flat-square&logo=opensource&logoColor=white)
+![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=zsh&logoColor=white)
+![Rust](https://img.shields.io/badge/-Rust-000000?style=flat-square&logo=rust&logoColor=white)
+![Claude](https://img.shields.io/badge/-Claude-000000?style=flat-square&logo=anthropic&logoColor=white)
+![GitHub Copilot](https://img.shields.io/badge/-GitHub%20Copilot-000000?style=flat-square&logo=github&logoColor=white)
+![Codex](https://img.shields.io/badge/-Codex-000000?style=flat-square&logo=openai&logoColor=white)
+
 ## Overview
 
 vibe-check is a command-line tool that helps you:
@@ -204,11 +211,12 @@ Alternatively, in Claude's project settings, reference `AGENTS.md` as your proje
 
 Ask Claude to confirm:
 
-```
+```text
 Please confirm you've read AGENTS.md and understand the project instructions.
 ```
 
 Claude should acknowledge the:
+
 - Commit protocol (no auto-commits)
 - C++ coding conventions
 - Git workflow conventions
@@ -218,11 +226,12 @@ Claude should acknowledge the:
 
 Now you can work with Claude following the established guidelines:
 
-```
+```text
 Claude, help me create a CMakeLists.txt for this C++ project with library and test targets.
 ```
 
 Claude will follow the conventions in AGENTS.md, including:
+
 - Using proper C++ style
 - Following conventional commits
 - Waiting for explicit commit confirmation
@@ -241,6 +250,7 @@ vibe-check update --lang c++ --agent claude
 ```
 
 vibe-check will:
+
 - Check if AGENTS.md has been customized (template marker removed)
 - Create timestamped backup in cache directory
 - Prompt for confirmation unless `--force` is used
@@ -362,7 +372,7 @@ vibe-check init --lang rust --agent copilot --force
 - Always updates global templates first (downloads or copies from source)
 - Downloads `templates.yml` configuration file to determine which templates to install
 - If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/main/templates`
+  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
 - If `--from` is specified, updates global templates from that location
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error
@@ -646,6 +656,7 @@ To add a new language or agent template:
 ## FAQ
 
 **Where are templates stored?**
+
 - Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
 - Global templates (Linux): `~/.local/share/vibe-check/templates/`
 - Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`

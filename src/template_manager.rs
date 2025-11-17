@@ -119,9 +119,8 @@ impl TemplateManager
     {
         let config_path = self.config_dir.join("templates.yml");
 
-        // If templates.yml doesn't exist and we have a URL, download it
-        if config_path.exists() == false &&
-            let (Some(base), Some(path)) = (base_url, url_path)
+        // If we have a URL, always download templates.yml to get latest version
+        if let (Some(base), Some(path)) = (base_url, url_path)
         {
             let config_url = format!("{}{}/templates.yml", base, path);
             print!("{} Downloading templates.yml... ", "→".blue());
@@ -705,28 +704,21 @@ impl TemplateManager
             return Ok(());
         }
 
-        // Check for local modifications
-        let mut has_modifications = false;
-        let mut modified_files = Vec::new();
-
         // Check if main AGENTS.md has been customized (marker removed)
-        if let Some((_, main_target)) = &main_template &&
-            main_target.exists() &&
-            self.is_file_customized(main_target)?
+        let skip_agents_md = if let Some((_, main_target)) = &main_template
         {
-            has_modifications = true;
-            modified_files.push(main_target.clone());
+            main_target.exists() && self.is_file_customized(main_target)?
         }
-
-        if has_modifications && force == false
+        else
         {
-            println!("{} Local AGENTS.md has been customized:", "!".yellow());
-            for file in &modified_files
-            {
-                println!("  - {}", file.display().to_string().yellow());
-            }
-            println!("{} Use --force to overwrite", "→".blue());
-            return Err("Local modifications detected. Aborting.".into());
+            false
+        };
+
+        if skip_agents_md && force == false
+        {
+            println!("{} Local AGENTS.md has been customized and will be skipped", "!".yellow());
+            println!("{} Other files will still be updated", "→".blue());
+            println!("{} Use --force to overwrite AGENTS.md", "→".blue());
         }
 
         // Create backup of existing local files before any modifications
@@ -735,7 +727,12 @@ impl TemplateManager
         // Handle main AGENTS.md with fragment merging if fragments exist
         if let Some((main_source, main_target)) = main_template
         {
-            if fragments.is_empty() == false
+            // Skip AGENTS.md if customized and force is false
+            if skip_agents_md && force == false
+            {
+                println!("{} Skipping AGENTS.md (customized)", "→".blue());
+            }
+            else if fragments.is_empty() == false
             {
                 println!("{} Merging fragments into AGENTS.md", "→".blue());
                 self.merge_fragments(&main_source, &main_target, &fragments)?;
