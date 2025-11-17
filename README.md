@@ -433,7 +433,7 @@ vibe-check update --lang rust --agent copilot --force
 
 ### `clear` - Clear Local Templates
 
-Clear local templates from the current directory.
+Clear all local templates from the current directory.
 
 **Usage:**
 
@@ -443,7 +443,7 @@ vibe-check clear [--force]
 
 **Options:**
 
-- `--force` - Force clear without confirmation and delete modified AGENTS.md
+- `--force` - Force clear without confirmation and delete customized AGENTS.md
 
 **Examples:**
 
@@ -457,10 +457,10 @@ vibe-check clear --force
 
 **Behavior:**
 
-- Removes agent instruction directories (.claude, .copilot, .codex) from current directory
-- Removes agent instruction files (CLAUDE.md, .github/copilot-instructions.md) from current directory
-- Removes AGENTS.md from current directory (unless customized and `--force` not specified)
-- Does NOT remove language-specific fragment files (they are merged into AGENTS.md, not stored separately)
+- Uses Bill of Materials (BoM) from templates.yml to discover all agent-specific files
+- Removes all agent-specific files from all agents (instructions, prompts, directories)
+- Removes AGENTS.md from current directory
+- Automatically cleans up empty parent directories after file removal
 - Does NOT affect global templates in local data directory
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
@@ -470,6 +470,57 @@ vibe-check clear --force
     - AGENTS.md is deleted along with other templates
   - If AGENTS.md has NOT been customized (still has template marker):
     - AGENTS.md is deleted normally
+
+### `remove` - Remove Agent-Specific Files
+
+Remove agent-specific files from the current directory based on the Bill of Materials (BoM).
+
+**Usage:**
+
+```bash
+# Remove specific agent's files
+vibe-check remove --agent <agent> [--force]
+
+# Remove all agent-specific files (keeps AGENTS.md)
+vibe-check remove --all [--force]
+```
+
+**Options:**
+
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
+- `--all` - Remove all agent-specific files (cannot be used with --agent)
+- `--force` - Force removal without confirmation
+
+**Examples:**
+
+```bash
+# Remove Claude-specific files with confirmation
+vibe-check remove --agent claude
+
+# Remove Copilot files without confirmation
+vibe-check remove --agent copilot --force
+
+# Remove all agent-specific files (keeps AGENTS.md)
+vibe-check remove --all
+
+# Remove all agents with force
+vibe-check remove --all --force
+```
+
+**Behavior:**
+
+- Loads templates.yml from global storage to build Bill of Materials (BoM)
+- BoM maps agent names to their target file paths in the workspace
+- Only removes files that exist in the current directory
+- Shows list of files to be removed before deletion
+- Asks for confirmation unless `--force` is specified
+- Removes agent-specific files (instructions and prompts)
+- Automatically cleans up empty parent directories
+- **NEVER touches AGENTS.md** (use `clear` command to remove AGENTS.md)
+- Does NOT affect global templates in local data directory
+- If agent not found in BoM, shows list of available agents
+- Cannot specify both `--agent` and `--all` (mutually exclusive)
+- Must specify either `--agent` or `--all`
 
 ## Core Governance Principles
 

@@ -61,7 +61,11 @@ enum Commands
     {
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(long)]
-        agent: String,
+        agent: Option<String>,
+
+        /// Remove all agent-specific files (cannot be used with --agent)
+        #[arg(long, default_value = "false")]
+        all: bool,
 
         /// Force removal without confirmation
         #[arg(long, default_value = "false")]
@@ -125,7 +129,26 @@ fn main()
         }
         | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
         | Commands::Clear { force } => manager.clear(force),
-        | Commands::Remove { agent, force } => manager.remove(&agent, force)
+        | Commands::Remove { agent, all, force } =>
+        {
+            // Validate mutually exclusive options
+            if all == true && agent.is_some() == true
+            {
+                Err("Cannot specify both --agent and --all options".to_string().into())
+            }
+            else if all == false && agent.is_none() == true
+            {
+                Err("Must specify either --agent <name> or --all".to_string().into())
+            }
+            else if all == true
+            {
+                manager.remove_all(force)
+            }
+            else
+            {
+                manager.remove(agent.as_ref().unwrap(), force)
+            }
+        }
     };
 
     if let Err(e) = result
