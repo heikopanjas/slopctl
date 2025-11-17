@@ -330,7 +330,7 @@ vibe-check update --lang rust --agent copilot --force
 
 ### `clear` - Clear Local Templates
 
-Clear local templates from the current directory.
+Clear all local templates from the current directory.
 
 **Usage:**
 
@@ -340,7 +340,7 @@ vibe-check clear [--force]
 
 **Options:**
 
-- `--force` - Force clear without confirmation and delete modified AGENTS.md
+- `--force` - Force clear without confirmation and delete customized AGENTS.md
 
 **Examples:**
 
@@ -354,8 +354,10 @@ vibe-check clear --force
 
 **Behavior:**
 
-- Removes agent instruction directories (.claude, .copilot, .codex) from current directory
-- Removes language template files (c++-coding-conventions.md, swift.md, rust.md) from current directory
+- Uses Bill of Materials (BoM) from templates.yml to discover all agent-specific files
+- Removes all agent-specific files from all agents (instructions, prompts, directories)
+- Removes AGENTS.md from current directory
+- Automatically cleans up empty parent directories after file removal
 - Does NOT affect global templates in local data directory
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
@@ -373,12 +375,17 @@ Remove agent-specific files from the current directory based on the Bill of Mate
 **Usage:**
 
 ```bash
+# Remove specific agent's files
 vibe-check remove --agent <agent> [--force]
+
+# Remove all agent-specific files (keeps AGENTS.md)
+vibe-check remove --all [--force]
 ```
 
 **Options:**
 
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
+- `--all` - Remove all agent-specific files (cannot be used with --agent)
 - `--force` - Force removal without confirmation
 
 **Examples:**
@@ -390,8 +397,11 @@ vibe-check remove --agent claude
 # Remove Copilot files without confirmation
 vibe-check remove --agent copilot --force
 
-# Remove Cursor files
-vibe-check remove --agent cursor
+# Remove all agent-specific files (keeps AGENTS.md)
+vibe-check remove --all
+
+# Remove all agents with force
+vibe-check remove --all --force
 ```
 
 **Behavior:**
@@ -403,8 +413,11 @@ vibe-check remove --agent cursor
 - Asks for confirmation unless `--force` is specified
 - Removes agent-specific files (instructions and prompts)
 - Automatically cleans up empty parent directories
+- **NEVER touches AGENTS.md** (use `clear` command to remove AGENTS.md)
 - Does NOT affect global templates in local data directory
 - If agent not found in BoM, shows list of available agents
+- Cannot specify both `--agent` and `--all` (mutually exclusive)
+- Must specify either `--agent` or `--all`
 
 ## Repository Structure
 
@@ -1041,3 +1054,41 @@ git diff
 - Updated init command documentation in both AGENTS.md and README.md
 - Added new usage examples showing download-only mode
 - Reasoning: Separating template download from installation provides better flexibility. Users can pre-download templates or update their global template cache without modifying their current project. This is useful for offline work, template caching, or simply exploring available templates before committing to a specific language/agent combination. The feature maintains backward compatibility (old usage still works) while enabling new workflows.
+
+### 2025-11-17 (Remove Command --all Option)
+
+- Added `--all` option to `remove` command for removing all agent-specific files
+- Changed `--agent` parameter from required to optional in CLI definition
+- Implemented mutual exclusion validation between `--agent` and `--all`
+- Added `remove_all()` method in TemplateManager (135 lines)
+- Method loads BoM, collects files from all agents, deduplicates, and removes files
+- Prompts for confirmation unless `--force` is specified
+- Cleans up empty parent directories automatically
+- **NEVER touches AGENTS.md** (consistent with single-agent remove behavior)
+- Updated CLI help text and command documentation in AGENTS.md and README.md
+- Bumped version from 2.0.0 to 2.0.0 (MINOR change - new feature, backward compatible)
+- Reasoning: The `remove --all` option fills the gap between surgical single-agent removal and nuclear `clear` command. It removes all agent-specific files while preserving customized AGENTS.md and language templates. This provides users with more granular control over cleanup operations.
+
+### 2025-11-17 (Clear Command BoM Integration)
+
+- Updated `clear` command to use Bill of Materials instead of hardcoded agent names
+- Removed hardcoded agent directory list (`.claude`, `.copilot`, `.codex`)
+- Clear command now dynamically discovers agents from templates.yml
+- Uses same BoM-based approach as `remove` command for consistency
+- Gracefully handles missing templates.yml (skips agent removal, continues with AGENTS.md)
+- All three removal commands now use BoM system consistently
+- Improved code maintainability and eliminated hardcoded agent names
+- Reasoning: Using BoM makes the codebase future-proof - new agents added to templates.yml are automatically supported without code changes. This ensures consistency across all removal operations and reduces maintenance burden.
+
+### 2025-11-17 (Clear Command Simplification - Breaking Change)
+
+- Removed 30+ lines of outdated language template scanning logic from `clear` command
+- Removed hardcoded checks for legacy files (c++-coding-conventions.md, swift.md, rust.md)
+- Simplified AGENTS.md handling logic (direct check instead of directory scanning)
+- Clear command now only removes: 1) agent-specific files (via BoM), 2) AGENTS.md
+- Language templates are no longer standalone files (merged into AGENTS.md via $instructions placeholder)
+- Legacy scanning code was dead code looking for files that no longer exist
+- Bumped version from 2.0.0 to 3.0.0 (MAJOR version for breaking change)
+- **Breaking Change:** Clear command now always targets AGENTS.md for removal (with protection for customized files)
+- Users who want to keep AGENTS.md should use `remove --all` instead
+- Reasoning: The language template scanning was legacy code from when templates were separate files. Modern vibe-check merges language templates into AGENTS.md as fragments, making the scanning logic obsolete. Removing it simplifies the codebase and clarifies the command's purpose: complete local cleanup of all vibe-check files. This is a breaking change because the command behavior changed - it now always attempts to remove AGENTS.md instead of only agent-specific files.

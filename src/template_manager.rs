@@ -777,19 +777,16 @@ impl TemplateManager
 
     /// Clears local templates from current directory
     ///
-    /// Removes agent instruction directories and language template files from
-    /// the current directory. Global templates in the local data directory
-    /// are not affected.
-    ///
-    /// Creates a backup before clearing and optionally prompts for confirmation.
+    /// Removes all agent-specific files and AGENTS.md from the current directory.
+    /// Global templates in the local data directory are never affected.
     ///
     /// # Arguments
     ///
-    /// * `force` - If true, clear without confirmation prompt
+    /// * `force` - If true, clear without confirmation prompt and delete customized AGENTS.md
     ///
     /// # Errors
     ///
-    /// Returns an error if backup or deletion fails
+    /// Returns an error if file deletion fails or templates.yml cannot be loaded
     pub fn clear(&self, force: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
@@ -811,75 +808,74 @@ impl TemplateManager
 
         let mut cleared_count = 0;
 
-        // Find and remove agent directories (.claude, .copilot, .codex)
-        let agent_dirs = vec![".claude", ".copilot", ".codex"];
-        for agent_dir in agent_dirs
+        // Load templates.yml and build Bill of Materials to get agent files
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(&config_file)
         {
-            let path = current_dir.join(agent_dir);
-            if path.exists()
+            let agent_names = bom.get_agent_names();
+
+            // Collect all agent-specific files
+            let mut agent_files: Vec<PathBuf> = Vec::new();
+            for agent in &agent_names
             {
-                println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
-                fs::remove_dir_all(&path)?;
-                cleared_count += 1;
-            }
-        }
-
-        // Check if AGENTS.md exists and if it has been modified
-        let agents_md_path = current_dir.join("AGENTS.md");
-        let agents_md_customized = agents_md_path.exists() && self.is_file_customized(&agents_md_path)?;
-
-        if agents_md_customized && force == false
-        {
-            println!("{} AGENTS.md has been customized and will not be deleted", "→".yellow());
-            println!("{} Use --force to delete it anyway (backup will be created)", "→".yellow());
-        }
-
-        // Find and remove common language template files
-        // Check for common patterns in current directory
-        if let Ok(entries) = fs::read_dir(&current_dir)
-        {
-            for entry in entries.flatten()
-            {
-                let path = entry.path();
-                if let Some(file_name) = path.file_name()
+                if let Some(files) = bom.get_agent_files(agent)
                 {
-                    let name = file_name.to_string_lossy();
-                    // Remove files that match common language patterns
-                    // but not AGENTS.md or README.md or other important files
-                    if path.is_file() &&
-                        (name.ends_with(".md") || name.ends_with(".MD")) &&
-                        name != "README.md" &&
-                        name != "LICENSE.md" &&
-                        name != "CHANGELOG.md" &&
-                        name != "CONTRIBUTING.md"
+                    for file in files
                     {
-                        // Special handling for AGENTS.md
-                        if name == "AGENTS.md"
+                        if file.exists() == true
                         {
-                            // Skip if customized and not forced
-                            if agents_md_customized && force == false
-                            {
-                                continue;
-                            }
-                            // Delete if not customized or if forced
-                            println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
-                            fs::remove_file(&path)?;
-                            cleared_count += 1;
-                        }
-                        else
-                        {
-                            // Check if it matches known template patterns
-                            // Currently supported languages: c++, swift, rust
-                            let lowercase = name.to_lowercase();
-                            if lowercase == "c++-coding-conventions.md" || lowercase == "swift.md" || lowercase == "rust.md"
-                            {
-                                println!("{} Removing {}", "→".blue(), path.display().to_string().yellow());
-                                fs::remove_file(&path)?;
-                                cleared_count += 1;
-                            }
+                            agent_files.push(file.clone());
                         }
                     }
                 }
+            }
+
+            // Remove duplicates
+            agent_files.sort();
+            agent_files.dedup();
+
+            // Remove agent files
+            for file in agent_files
+            {
+                println!("{} Removing {}", "→".blue(), file.display().to_string().yellow());
+                if let Err(e) = fs::remove_file(&file)
+                {
+                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+                }
+                else
+                {
+                    cleared_count += 1;
+
+                    // Try to remove empty parent directories
+                    if let Some(parent) = file.parent()
+                    {
+                        let _ = fs::remove_dir(parent);
+                        if let Some(grandparent) = parent.parent()
+                        {
+                            let _ = fs::remove_dir(grandparent);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove AGENTS.md
+        let agents_md_path = current_dir.join("AGENTS.md");
+        if agents_md_path.exists() == true
+        {
+            let agents_md_customized = self.is_file_customized(&agents_md_path)?;
+
+            if agents_md_customized == true && force == false
+            {
+                println!("{} AGENTS.md has been customized and will not be deleted", "→".yellow());
+                println!("{} Use --force to delete it anyway", "→".yellow());
+            }
+            else
+            {
+                println!("{} Removing {}", "→".blue(), agents_md_path.display().to_string().yellow());
+                fs::remove_file(&agents_md_path)?;
+                cleared_count += 1;
             }
         }
 
@@ -1000,6 +996,128 @@ impl TemplateManager
         }
 
         println!("\n{} Removed {} file(s) for agent '{}'", "✓".green(), removed_count, agent.yellow());
+
+        Ok(())
+    }
+
+    /// Remove all agent-specific files from the current directory
+    ///
+    /// Deletes all files associated with all agents based on the
+    /// Bill of Materials built from templates.yml in global storage.
+    /// AGENTS.md is never touched by this operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `force` - If true, skip confirmation prompt
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if files were successfully removed or if no files were found
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if templates.yml cannot be loaded
+    pub fn remove_all(&self, force: bool) -> Result<()>
+    {
+        // Load templates.yml and build Bill of Materials
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == false
+        {
+            return Err("Global templates not found. Run 'vibe-check init' first to set up templates.".to_string().into());
+        }
+
+        println!("{} Building Bill of Materials from templates.yml", "→".blue());
+        let bom = BillOfMaterials::from_config(&config_file)?;
+
+        // Get all agent names
+        let agent_names = bom.get_agent_names();
+
+        if agent_names.is_empty() == true
+        {
+            println!("{} No agents found in Bill of Materials", "→".blue());
+            return Ok(());
+        }
+
+        // Collect all files from all agents
+        let mut all_files: Vec<PathBuf> = Vec::new();
+        for agent in &agent_names
+        {
+            if let Some(agent_files) = bom.get_agent_files(agent)
+            {
+                for file in agent_files
+                {
+                    // Only include files that exist
+                    if file.exists() == true
+                    {
+                        all_files.push(file.clone());
+                    }
+                }
+            }
+        }
+
+        // Remove duplicates (in case multiple agents reference same file)
+        all_files.sort();
+        all_files.dedup();
+
+        if all_files.is_empty() == true
+        {
+            println!("{} No agent-specific files found in current directory", "→".blue());
+            return Ok(());
+        }
+
+        // Show files to be removed
+        println!("\n{} Files to be removed for all agents:", "→".blue());
+        for file in &all_files
+        {
+            println!("  • {}", file.display().to_string().yellow());
+        }
+        println!();
+
+        // Ask for confirmation unless force is true
+        if force == false
+        {
+            print!("{} Proceed with removal? [y/N]: ", "?".yellow());
+            io::stdout().flush()?;
+
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+
+            if input.trim().to_lowercase() != "y"
+            {
+                println!("{} Operation cancelled", "✗".red());
+                return Ok(());
+            }
+        }
+
+        // Remove files
+        let mut removed_count = 0;
+        for file in all_files
+        {
+            match fs::remove_file(&file)
+            {
+                | Ok(_) =>
+                {
+                    println!("{} Removed {}", "✓".green(), file.display());
+                    removed_count += 1;
+
+                    // Try to remove empty parent directories
+                    if let Some(parent) = file.parent()
+                    {
+                        let _ = fs::remove_dir(parent); // Ignore errors - directory might not be empty
+                        if let Some(grandparent) = parent.parent()
+                        {
+                            let _ = fs::remove_dir(grandparent); // Try grandparent too
+                        }
+                    }
+                }
+                | Err(e) =>
+                {
+                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+                }
+            }
+        }
+
+        println!("\n{} Removed {} file(s) for all agents", "✓".green(), removed_count);
 
         Ok(())
     }
