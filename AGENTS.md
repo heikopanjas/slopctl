@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-16
+**Last updated:** 2025-11-17
 
 ## General Instructions
 
@@ -935,3 +935,14 @@ git diff
 - Added Swift language support with coding conventions and build commands templates
 - Bumped version from 1.1.1 to 1.2.0 (MINOR version for new features: Cursor agent and Swift language)
 - Reasoning: The develop branch is now the primary development branch for templates, making it more appropriate as the default source. This ensures users get the latest stable template updates without needing to specify a custom URL. New agent and language support are new features that maintain backward compatibility, requiring MINOR version increment per Semantic Versioning Protocol.
+
+### 2025-11-17 (Init/Update Command Bug Fix)
+
+- Fixed bug where init and update commands would abort entire operation when AGENTS.md was customized
+- Modified update method in template_manager.rs to skip only AGENTS.md instead of aborting completely
+- Changed behavior: if AGENTS.md is customized and --force is not specified, skip AGENTS.md but continue copying other files
+- Added clear user messaging explaining which files are being skipped and which are being updated
+- Maintained backup behavior for all existing files before modifications
+- --force flag still overwrites customized AGENTS.md when specified
+- Bumped version from 1.2.0 to 1.2.1 (PATCH version for bug fix)
+- Reasoning: Previous behavior was too aggressive - users couldn't update agent instructions or prompts without either overwriting their customized AGENTS.md or having the entire operation fail. New behavior is more flexible and user-friendly, allowing partial updates while protecting customized content. This aligns with the clear command's behavior for customized files.
