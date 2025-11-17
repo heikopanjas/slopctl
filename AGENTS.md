@@ -224,7 +224,6 @@ Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe
 - **CLI Framework:** clap (v4.5.20)
 - **Terminal Colors:** owo-colors (v4.1.0)
 - **HTTP Client:** reqwest (v0.12 with blocking and json features)
-- **Date/Time:** chrono (v0.4)
 - **Serialization:** serde (v1.0), serde_json (v1.0), and serde_yaml (v0.9)
 - **Directory Paths:** dirs (v5.0)
 - **Version Control:** Git
@@ -239,19 +238,26 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
+# Download global templates only
+vibe-check init [--from <PATH or URL>]
+
+# Download and install templates for a project
 vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--lang <string>` - (Optional) Programming language or framework (e.g., c++, rust)
+- `--agent <string>` - (Optional) AI coding agent (e.g., claude, copilot, codex)
 - `--force` - Force overwrite of local files without confirmation
 - `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
 
 ```bash
+# Download global templates only (no local installation)
+vibe-check init
+
 # Initialize C++ project with Claude
 vibe-check init --lang c++ --agent claude
 
@@ -272,13 +278,16 @@ vibe-check init --lang rust --agent copilot --force
 - If `--from` is not specified, downloads from:
   `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
 - If `--from` is specified, updates global templates from that location
-- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
-- If `--force` is specified, overwrites local files regardless of modifications
-- Creates backup of existing local files before overwriting
-- Files are placed according to `templates.yml` configuration with placeholder resolution:
-  - `$workspace` resolves to current directory
-  - `$userprofile` resolves to user's home directory
+- **If `--lang` and `--agent` are provided:**
+  - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+  - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
+  - If `--force` is specified, overwrites local files regardless of modifications
+  - Files are placed according to `templates.yml` configuration with placeholder resolution:
+    - `$workspace` resolves to current directory
+    - `$userprofile` resolves to user's home directory
+- **If `--lang` and `--agent` are omitted:**
+  - Only downloads global templates (no local installation)
+  - Use this to pre-download templates or update global template cache
 
 ### `update` - Update Local Templates
 
@@ -313,7 +322,6 @@ vibe-check update --lang rust --agent copilot --force
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error
 - If `--force` is specified, overwrites local files regardless of modifications
-- Creates backup of existing local files before overwriting
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
@@ -349,13 +357,11 @@ vibe-check clear --force
 - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
 - Removes language template files (c++-coding-conventions.md, swift.md, rust.md) from current directory
 - Does NOT affect global templates in local data directory
-- Creates backup of local templates before clearing in cache directory with timestamp
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
     - AGENTS.md is skipped and preserved
     - User is informed to use `--force` to delete it
   - If AGENTS.md has been customized and `--force` IS specified:
-    - Backup is created (as with all files)
     - AGENTS.md is deleted along with other templates
   - If AGENTS.md has NOT been customized (still has template marker):
     - AGENTS.md is deleted normally
@@ -395,7 +401,6 @@ vibe-check remove --agent cursor
 - Only removes files that exist in the current directory
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
-- Creates backup of current directory before removal
 - Removes agent-specific files (instructions and prompts)
 - Automatically cleans up empty parent directories
 - Does NOT affect global templates in local data directory
@@ -532,7 +537,6 @@ The system downloads templates.yml first; if download fails, the operation stops
   - Merges fragments with `$instructions` placeholder into main AGENTS.md at insertion points
   - Removes template marker from merged AGENTS.md to indicate customization
   - Resolves placeholders ($workspace, $userprofile, $instructions) in target paths
-  - Creates backup of existing local files in cache directory with timestamp before any modifications
   - Detects if AGENTS.md has been customized by checking for missing template marker
   - Stops operation if AGENTS.md is customized and `force` is false
   - Copies template files from local data directory to resolved target paths
@@ -542,7 +546,6 @@ The system downloads templates.yml first; if download fails, the operation stops
   - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
   - Removes language template files for supported languages (c, c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
-  - Creates backup of local templates before clearing in cache directory with timestamp
 
 ### CLI Command Implementation
 
@@ -1007,3 +1010,34 @@ git diff
 - Bumped version from 1.2.1 to 1.3.0 (MINOR version for new feature)
 - Reasoning: The remove command provides users with a clean way to remove agent-specific files without affecting other templates or the main AGENTS.md file. Separating BoM logic into its own module improves code organization and maintainability. The BoM-based approach ensures accurate file tracking and makes the system extensible for future features. This is a new feature that maintains backward compatibility, requiring MINOR version increment per Semantic Versioning Protocol.
 
+### 2025-11-17 (Backup Feature Removal)
+
+- Removed automatic backup functionality from all commands (init, update, clear, remove)
+- Removed `cache_dir` field from `TemplateManager` struct
+- Removed `create_backup()` method and `get_timestamp()` helper function
+- Removed `chrono` dependency from Cargo.toml (no longer needed for timestamps)
+- Removed all calls to `create_backup()` in update, clear, and remove methods
+- Updated all documentation to remove references to backups and cache directory
+- Updated Technology Stack section to remove chrono dependency
+- Bumped version from 1.3.0 to 2.0.0 (MAJOR version for breaking change)
+- Reasoning: The automatic backup feature added complexity without clear evidence of usefulness. Users can rely on version control (git) for tracking changes to their workspace files. Removing this feature simplifies the codebase and eliminates the chrono dependency. This is a breaking change because users may have been relying on automatic backups, requiring MAJOR version increment per Semantic Versioning Protocol. The decision to remove backups will be revisited if user feedback indicates the feature was valuable.
+
+### 2025-11-17 (Clippy Warning Fixes)
+
+- Added `Default` implementation for `BillOfMaterials` struct in src/bom.rs
+- Changed useless `format!()` to `.to_string()` in src/template_manager.rs
+- All clippy warnings now resolved
+- Reasoning: Following clippy suggestions improves code quality and idiomatic Rust usage. The Default trait implementation provides a standard way to create an empty BillOfMaterials, and using .to_string() instead of format!() is more efficient when no formatting is needed.
+
+### 2025-11-17 (Optional Init Parameters)
+
+- Made `--lang` and `--agent` parameters optional for init command
+- Changed Init struct fields from `String` to `Option<String>` in src/main.rs
+- Implemented pattern matching logic to handle all parameter combinations
+- When both parameters provided: downloads global templates and installs to project
+- When only one parameter provided: displays warning message (both required for installation)
+- When neither parameter provided: only downloads global templates (no local installation)
+- Updated CLI help text to show parameters as optional: `vibe-check init [OPTIONS]`
+- Updated init command documentation in both AGENTS.md and README.md
+- Added new usage examples showing download-only mode
+- Reasoning: Separating template download from installation provides better flexibility. Users can pre-download templates or update their global template cache without modifying their current project. This is useful for offline work, template caching, or simply exploring available templates before committing to a specific language/agent combination. The feature maintains backward compatibility (old usage still works) while enabling new workflows.

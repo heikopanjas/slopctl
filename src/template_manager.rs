@@ -3,11 +3,9 @@
 use std::{
     fs,
     io::{self, Write},
-    path::{Path, PathBuf},
-    time::SystemTime
+    path::{Path, PathBuf}
 };
 
-use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
 
 use crate::{
@@ -19,22 +17,20 @@ use crate::{
 /// Manages template files for coding agent instructions
 ///
 /// The `TemplateManager` handles all operations related to template storage,
-/// verification, backup, and synchronization. Templates are stored in the
+/// verification, and synchronization. Templates are stored in the
 /// local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux,
-/// `$HOME/Library/Application Support/vibe-check/templates` on macOS) and backed up
-/// to the cache directory before modifications.
+/// `$HOME/Library/Application Support/vibe-check/templates` on macOS).
 pub struct TemplateManager
 {
-    config_dir: PathBuf,
-    cache_dir:  PathBuf
+    config_dir: PathBuf
 }
 
 impl TemplateManager
 {
     /// Creates a new TemplateManager instance
     ///
-    /// Initializes paths to local data and cache directories using the `dirs` crate.
-    /// Templates are stored in the local data directory and backups in the cache directory.
+    /// Initializes path to local data directory using the `dirs` crate.
+    /// Templates are stored in the local data directory.
     ///
     /// # Errors
     ///
@@ -42,12 +38,10 @@ impl TemplateManager
     pub fn new() -> Result<Self>
     {
         let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
-        let cache_dir = dirs::cache_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine cache directory"))?;
 
         let config_dir = data_dir.join("vibe-check/templates");
-        let cache_dir = cache_dir.join("vibe-check/backups");
 
-        Ok(Self { config_dir, cache_dir })
+        Ok(Self { config_dir })
     }
 
     /// Loads template configuration from templates.yml
@@ -95,14 +89,6 @@ impl TemplateManager
         Ok(config)
     }
 
-    /// Generates a timestamp string in YYYY-MM-DD_HH_MM_SS format
-    fn get_timestamp() -> String
-    {
-        let now = SystemTime::now();
-        let datetime: DateTime<Utc> = now.into();
-        datetime.format("%Y-%m-%d_%H_%M_%S").to_string()
-    }
-
     /// Checks if a local file has been customized by checking for the template marker
     ///
     /// If the template marker is missing from the local file, it means the file
@@ -127,36 +113,6 @@ impl TemplateManager
 
         // If marker is missing, file has been customized
         Ok(content.contains(marker) == false)
-    }
-
-    /// Creates a timestamped backup of a directory
-    ///
-    /// Backups are stored in the cache directory with timestamp: `backups/YYYY-MM-DD_HH_MM_SS/`
-    ///
-    /// # Arguments
-    ///
-    /// * `source_dir` - Directory to backup
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if backup creation fails
-    fn create_backup(&self, source_dir: &Path) -> Result<()>
-    {
-        if source_dir.exists() == false
-        {
-            return Ok(());
-        }
-
-        let timestamp = Self::get_timestamp();
-        let backup_dir = self.cache_dir.join(timestamp);
-
-        fs::create_dir_all(&backup_dir)?;
-
-        println!("{} Creating backup in {}", "→".blue(), backup_dir.display().to_string().yellow());
-
-        copy_dir_all(source_dir, &backup_dir)?;
-
-        Ok(())
     }
 
     /// Downloads or copies templates from a source (URL or local path)
@@ -668,9 +624,6 @@ impl TemplateManager
             println!("{} Use --force to overwrite AGENTS.md", "→".blue());
         }
 
-        // Create backup of existing local files before any modifications
-        self.create_backup(&workspace)?;
-
         // Handle main AGENTS.md with fragment merging if fragments exist
         if let Some((main_source, main_target)) = main_template
         {
@@ -856,9 +809,6 @@ impl TemplateManager
             }
         }
 
-        // Create backup before clearing
-        self.create_backup(&current_dir)?;
-
         let mut cleared_count = 0;
 
         // Find and remove agent directories (.claude, .copilot, .codex)
@@ -972,7 +922,7 @@ impl TemplateManager
         let config_file = self.config_dir.join("templates.yml");
         if config_file.exists() == false
         {
-            return Err(format!("Global templates not found. Run 'vibe-check init' first to set up templates.").into());
+            return Err("Global templates not found. Run 'vibe-check init' first to set up templates.".to_string().into());
         }
 
         println!("{} Building Bill of Materials from templates.yml", "→".blue());
@@ -1020,11 +970,6 @@ impl TemplateManager
                 return Ok(());
             }
         }
-
-        // Create backup before removing (backup current directory)
-        let current_dir = PathBuf::from(".");
-        self.create_backup(&current_dir)?;
-        println!("{} Backup created", "✓".green());
 
         // Remove files
         let mut removed_count = 0;

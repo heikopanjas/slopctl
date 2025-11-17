@@ -20,11 +20,11 @@ enum Commands
     {
         /// Programming language or framework (e.g., rust, python, typescript)
         #[arg(long)]
-        lang: String,
+        lang: Option<String>,
 
         /// AI coding agent (e.g., claude, copilot, codex)
         #[arg(long)]
-        agent: String,
+        agent: Option<String>,
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
@@ -97,8 +97,31 @@ fn main()
                 std::process::exit(1);
             }
 
-            // Now update local templates with the force flag
-            manager.update(&lang, &agent, force)
+            // If lang and agent are provided, update local templates
+            match (lang, agent)
+            {
+                | (Some(l), Some(a)) =>
+                {
+                    println!("{} Installing templates for {} with {}", "→".blue(), l.green(), a.green());
+                    manager.update(&l, &a, force)
+                }
+                | (Some(_), None) =>
+                {
+                    println!("{} Language specified without agent. Use both --lang and --agent to install templates.", "!".yellow());
+                    Ok(())
+                }
+                | (None, Some(_)) =>
+                {
+                    println!("{} Agent specified without language. Use both --lang and --agent to install templates.", "!".yellow());
+                    Ok(())
+                }
+                | (None, None) =>
+                {
+                    println!("{} Global templates downloaded successfully", "✓".green());
+                    println!("{} Run with --lang and --agent to install templates to your project", "→".blue());
+                    Ok(())
+                }
+            }
         }
         | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
         | Commands::Clear { force } => manager.clear(force),

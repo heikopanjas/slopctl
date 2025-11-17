@@ -73,6 +73,14 @@ pub struct BillOfMaterials
     agent_files: HashMap<String, Vec<PathBuf>>
 }
 
+impl Default for BillOfMaterials
+{
+    fn default() -> Self
+    {
+        Self::new()
+    }
+}
+
 impl BillOfMaterials
 {
     /// Create a new empty Bill of Materials
