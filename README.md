@@ -252,7 +252,6 @@ vibe-check update --lang c++ --agent claude
 vibe-check will:
 
 - Check if AGENTS.md has been customized (template marker removed)
-- Create timestamped backup in cache directory
 - Prompt for confirmation unless `--force` is used
 
 ### Step 8: Working with Multiple Agents
@@ -330,7 +329,7 @@ vibe-check init --lang c++ --agent claude --from ~/company/coding-standards/temp
 4. **Customize carefully**: Modify AGENTS.md as needed, but track changes in git
 5. **Update periodically**: Check for template updates monthly or quarterly
 6. **Use force sparingly**: Only use `--force` when you understand what you're overwriting
-7. **Backup important**: vibe-check creates backups, but git is your primary safety net
+7. **Use version control**: Git is your primary safety net for tracking changes
 
 ## CLI Commands
 
@@ -341,19 +340,26 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
+# Download global templates only
+vibe-check init [--from <PATH or URL>]
+
+# Download and install templates for a project
 vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
+- `--lang <string>` - (Optional) Programming language or framework (e.g., c++, rust)
+- `--agent <string>` - (Optional) AI coding agent (e.g., claude, copilot, codex)
 - `--force` - Force overwrite of local files without confirmation
 - `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
 
 ```bash
+# Download global templates only (no local installation)
+vibe-check init
+
 # Initialize C++ project with Claude
 vibe-check init --lang c++ --agent claude
 
@@ -374,12 +380,16 @@ vibe-check init --lang rust --agent copilot --force
 - If `--from` is not specified, downloads from:
   `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
 - If `--from` is specified, updates global templates from that location
-- Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
-- If `--force` is specified, overwrites local files regardless of modifications
-- Creates backup of existing local files before overwriting
-- Files are placed according to `templates.yml` configuration with placeholder resolution:
-  - `$workspace` resolves to current directory
+- **If `--lang` and `--agent` are provided:**
+  - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
+  - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
+  - If `--force` is specified, overwrites local files regardless of modifications
+  - Files are placed according to `templates.yml` configuration with placeholder resolution:
+    - `$workspace` resolves to current directory
+    - `$userprofile` resolves to user's home directory
+- **If `--lang` and `--agent` are omitted:**
+  - Only downloads global templates (no local installation)
+  - Use this to pre-download templates or update global template cache
   - `$userprofile` resolves to user's home directory
 
 ### `update` - Update Local Templates
@@ -415,7 +425,6 @@ vibe-check update --lang rust --agent copilot --force
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, aborts with error
 - If `--force` is specified, overwrites local files regardless of modifications
-- Creates backup of existing local files before overwriting
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
@@ -453,13 +462,11 @@ vibe-check clear --force
 - Removes AGENTS.md from current directory (unless customized and `--force` not specified)
 - Does NOT remove language-specific fragment files (they are merged into AGENTS.md, not stored separately)
 - Does NOT affect global templates in local data directory
-- Creates backup of local templates before clearing in cache directory with timestamp
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
     - AGENTS.md is skipped and preserved
     - User is informed to use `--force` to delete it
   - If AGENTS.md has been customized and `--force` IS specified:
-    - Backup is created (as with all files)
     - AGENTS.md is deleted along with other templates
   - If AGENTS.md has NOT been customized (still has template marker):
     - AGENTS.md is deleted normally
@@ -574,10 +581,9 @@ principles:
 
 1. **First run**: Downloads `templates.yml` and all specified files from GitHub
 2. **Local storage**: Templates are cached in platform-specific directory
-3. **Backups**: Automatic timestamped backups in cache directory before any modifications
-4. **Protection**: Template marker in AGENTS.md detects customization and prevents accidental overwrites
-5. **Updates**: Detect AGENTS.md customization and warn before overwriting
-6. **Placeholders**: `$workspace` and `$userprofile` resolve to appropriate paths
+3. **Protection**: Template marker in AGENTS.md detects customization and prevents accidental overwrites
+4. **Updates**: Detect AGENTS.md customization and warn before overwriting
+5. **Placeholders**: `$workspace` and `$userprofile` resolve to appropriate paths
 
 ### Project Initialization
 
@@ -601,7 +607,6 @@ vibe-check detects if you've customized AGENTS.md by checking for the template m
 $ vibe-check update --lang c++ --agent claude
 → Updating templates for c++ with claude
 ! AGENTS.md has been customized (template marker removed)
-→ Backup will be created before overwriting
 → Use --force to overwrite
 ✗ Customized AGENTS.md detected. Aborting.
 ```
@@ -649,7 +654,6 @@ To add a new language or agent template:
 - **CLI Framework:** clap v4.5.20
 - **Terminal Colors:** owo-colors v4.1.0
 - **HTTP Client:** reqwest v0.12 (blocking, json)
-- **Date/Time:** chrono v0.4
 - **Serialization:** serde v1.0, serde_json v1.0, serde_yaml v0.9
 - **Directory Paths:** dirs v5.0
 
@@ -660,7 +664,6 @@ To add a new language or agent template:
 - Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
 - Global templates (Linux): `~/.local/share/vibe-check/templates/`
 - Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`
-- Backups: Platform-specific cache directory
 
 **What happens if I modify AGENTS.md?**
 vibe-check detects customization via template marker removal and warns you before overwriting. Use `--force` to override.
@@ -712,4 +715,4 @@ cargo clippy
 
 ---
 
-Last updated: November 15, 2025
+Last updated: November 17, 2025
