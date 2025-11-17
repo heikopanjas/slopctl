@@ -360,6 +360,47 @@ vibe-check clear --force
   - If AGENTS.md has NOT been customized (still has template marker):
     - AGENTS.md is deleted normally
 
+### `remove` - Remove Agent-Specific Files
+
+Remove agent-specific files from the current directory based on the Bill of Materials (BoM).
+
+**Usage:**
+
+```bash
+vibe-check remove --agent <agent> [--force]
+```
+
+**Options:**
+
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
+- `--force` - Force removal without confirmation
+
+**Examples:**
+
+```bash
+# Remove Claude-specific files with confirmation
+vibe-check remove --agent claude
+
+# Remove Copilot files without confirmation
+vibe-check remove --agent copilot --force
+
+# Remove Cursor files
+vibe-check remove --agent cursor
+```
+
+**Behavior:**
+
+- Loads templates.yml from global storage to build Bill of Materials (BoM)
+- BoM maps agent names to their target file paths in the workspace
+- Only removes files that exist in the current directory
+- Shows list of files to be removed before deletion
+- Asks for confirmation unless `--force` is specified
+- Creates backup of current directory before removal
+- Removes agent-specific files (instructions and prompts)
+- Automatically cleans up empty parent directories
+- Does NOT affect global templates in local data directory
+- If agent not found in BoM, shows list of available agents
+
 ## Repository Structure
 
 ```text
@@ -370,6 +411,7 @@ vibe-check/
 ├── src/                        # Rust source code
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
+│   ├── bom.rs                  # Bill of Materials structures and functions
 │   ├── template_manager.rs    # TemplateManager implementation
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
@@ -946,3 +988,22 @@ git diff
 - --force flag still overwrites customized AGENTS.md when specified
 - Bumped version from 1.2.0 to 1.2.1 (PATCH version for bug fix)
 - Reasoning: Previous behavior was too aggressive - users couldn't update agent instructions or prompts without either overwriting their customized AGENTS.md or having the entire operation fail. New behavior is more flexible and user-friendly, allowing partial updates while protecting customized content. This aligns with the clear command's behavior for customized files.
+
+### 2025-11-17 (Remove Command and BoM Module)
+
+- Created new `src/bom.rs` module for Bill of Materials (BoM) structures and functions
+- Added `BillOfMaterials` struct that maps agent names to their workspace file paths
+- Implemented `BillOfMaterials::from_config()` to parse templates.yml and build BoM
+- Moved template configuration structures (FileMapping, TemplateConfig, AgentConfig, etc.) from template_manager.rs to bom.rs
+- Refactored template_manager.rs to use bom module, reducing code duplication
+- Added new `remove` CLI command with `--agent` and `--force` options
+- Implemented `TemplateManager::remove()` method to delete agent-specific files based on BoM
+- Remove command loads BoM from global templates.yml and removes only existing files for specified agent
+- Shows file list and prompts for confirmation unless --force is specified
+- Creates backup before removal and automatically cleans up empty parent directories
+- Updated lib.rs to expose BillOfMaterials in public API
+- Added comprehensive remove command documentation to AGENTS.md
+- Updated repository structure documentation to include bom.rs module
+- Bumped version from 1.2.1 to 1.3.0 (MINOR version for new feature)
+- Reasoning: The remove command provides users with a clean way to remove agent-specific files without affecting other templates or the main AGENTS.md file. Separating BoM logic into its own module improves code organization and maintainability. The BoM-based approach ensures accurate file tracking and makes the system extensible for future features. This is a new feature that maintains backward compatibility, requiring MINOR version increment per Semantic Versioning Protocol.
+

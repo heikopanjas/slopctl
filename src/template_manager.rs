@@ -9,65 +9,12 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
-use serde::{Deserialize, Serialize};
 
-use crate::{Result, utils::copy_dir_all};
-
-/// File mapping with source and target paths
-#[derive(Debug, Serialize, Deserialize)]
-struct FileMapping
-{
-    source: String,
-    target: String
-}
-
-/// Agent configuration with instructions and prompts
-#[derive(Debug, Serialize, Deserialize)]
-struct AgentConfig
-{
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<Vec<FileMapping>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prompts:      Option<Vec<FileMapping>>
-}
-
-/// Language configuration with files
-#[derive(Debug, Serialize, Deserialize)]
-struct LanguageConfig
-{
-    files: Vec<FileMapping>
-}
-
-/// Integration configuration with files
-#[derive(Debug, Serialize, Deserialize)]
-struct IntegrationConfig
-{
-    files: Vec<FileMapping>
-}
-
-/// Main file configuration
-#[derive(Debug, Serialize, Deserialize)]
-struct MainConfig
-{
-    source: String,
-    target: String
-}
-
-/// Template configuration structure
-#[derive(Debug, Serialize, Deserialize)]
-struct TemplateConfig
-{
-    #[serde(skip_serializing_if = "Option::is_none")]
-    main:        Option<MainConfig>,
-    agents:      std::collections::HashMap<String, AgentConfig>,
-    languages:   std::collections::HashMap<String, LanguageConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    integration: Option<std::collections::HashMap<String, IntegrationConfig>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    principles:  Option<Vec<FileMapping>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    mission:     Option<Vec<FileMapping>>
-}
+use crate::{
+    Result,
+    bom::{BillOfMaterials, TemplateConfig},
+    utils::copy_dir_all
+};
 
 /// Manages template files for coding agent instructions
 ///
@@ -994,6 +941,120 @@ impl TemplateManager
         {
             println!("{} Cleared {} local template(s) successfully", "✓".green(), cleared_count);
         }
+
+        Ok(())
+    }
+
+    /// Remove agent-specific files from the current directory
+    ///
+    /// Deletes all files associated with the specified agent based on the
+    /// Bill of Materials built from templates.yml in global storage.
+    ///
+    /// # Arguments
+    ///
+    /// * `agent` - AI coding agent name (e.g., "claude", "copilot", "codex", "cursor")
+    /// * `force` - If true, skip confirmation prompt
+    ///
+    /// # Returns
+    ///
+    /// Ok(()) if files were successfully removed or if no files were found
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - templates.yml cannot be loaded
+    /// - Agent name is not found in the BoM
+    /// - Backup creation fails
+    /// - File deletion fails
+    pub fn remove(&self, agent: &str, force: bool) -> Result<()>
+    {
+        // Load templates.yml and build Bill of Materials
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == false
+        {
+            return Err(format!("Global templates not found. Run 'vibe-check init' first to set up templates.").into());
+        }
+
+        println!("{} Building Bill of Materials from templates.yml", "→".blue());
+        let bom = BillOfMaterials::from_config(&config_file)?;
+
+        // Check if agent exists in BoM
+        if bom.has_agent(agent) == false
+        {
+            let available_agents = bom.get_agent_names();
+            return Err(format!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent, available_agents.join(", ")).into());
+        }
+
+        // Get files for this agent
+        let agent_files = bom.get_agent_files(agent).unwrap();
+
+        // Check which files actually exist
+        let existing_files: Vec<&PathBuf> = agent_files.iter().filter(|f| f.exists()).collect();
+
+        if existing_files.is_empty() == true
+        {
+            println!("{} No files found for agent '{}' in current directory", "→".blue(), agent.yellow());
+            return Ok(());
+        }
+
+        // Show files to be removed
+        println!("\n{} Files to be removed for agent '{}':", "→".blue(), agent.yellow());
+        for file in &existing_files
+        {
+            println!("  • {}", file.display().to_string().yellow());
+        }
+        println!();
+
+        // Ask for confirmation unless force is true
+        if force == false
+        {
+            print!("{} Proceed with removal? [y/N]: ", "?".yellow());
+            io::stdout().flush()?;
+
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+
+            if input.trim().to_lowercase() != "y"
+            {
+                println!("{} Operation cancelled", "✗".red());
+                return Ok(());
+            }
+        }
+
+        // Create backup before removing (backup current directory)
+        let current_dir = PathBuf::from(".");
+        self.create_backup(&current_dir)?;
+        println!("{} Backup created", "✓".green());
+
+        // Remove files
+        let mut removed_count = 0;
+        for file in existing_files
+        {
+            match fs::remove_file(file)
+            {
+                | Ok(_) =>
+                {
+                    println!("{} Removed {}", "✓".green(), file.display());
+                    removed_count += 1;
+
+                    // Try to remove empty parent directories
+                    if let Some(parent) = file.parent()
+                    {
+                        let _ = fs::remove_dir(parent); // Ignore errors - directory might not be empty
+                        if let Some(grandparent) = parent.parent()
+                        {
+                            let _ = fs::remove_dir(grandparent); // Try grandparent too
+                        }
+                    }
+                }
+                | Err(e) =>
+                {
+                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+                }
+            }
+        }
+
+        println!("\n{} Removed {} file(s) for agent '{}'", "✓".green(), removed_count, agent.yellow());
 
         Ok(())
     }

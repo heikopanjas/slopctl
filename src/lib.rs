@@ -3,9 +3,11 @@
 //! This library provides functionality to manage, organize, and maintain
 //! initialization prompts and instruction files for AI coding assistants.
 
+mod bom;
 mod template_manager;
 mod utils;
 
+pub use bom::BillOfMaterials;
 pub use template_manager::TemplateManager;
 pub use utils::copy_dir_all;
 

@@ -55,6 +55,17 @@ enum Commands
         /// Force clear without confirmation
         #[arg(long, default_value = "false")]
         force: bool
+    },
+    /// Remove agent-specific files from current directory
+    Remove
+    {
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        #[arg(long)]
+        agent: String,
+
+        /// Force removal without confirmation
+        #[arg(long, default_value = "false")]
+        force: bool
     }
 }
 
@@ -90,7 +101,8 @@ fn main()
             manager.update(&lang, &agent, force)
         }
         | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
-        | Commands::Clear { force } => manager.clear(force)
+        | Commands::Clear { force } => manager.clear(force),
+        | Commands::Remove { agent, force } => manager.remove(&agent, force)
     };
 
     if let Err(e) = result
