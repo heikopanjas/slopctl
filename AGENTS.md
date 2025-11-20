@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-17
+**Last updated:** 2025-11-20
 
 ## General Instructions
 
@@ -1092,3 +1092,20 @@ git diff
 - **Breaking Change:** Clear command now always targets AGENTS.md for removal (with protection for customized files)
 - Users who want to keep AGENTS.md should use `remove --all` instead
 - Reasoning: The language template scanning was legacy code from when templates were separate files. Modern vibe-check merges language templates into AGENTS.md as fragments, making the scanning logic obsolete. Removing it simplifies the codebase and clarifies the command's purpose: complete local cleanup of all vibe-check files. This is a breaking change because the command behavior changed - it now always attempts to remove AGENTS.md instead of only agent-specific files.
+
+### 2025-11-20 (Documentation Cleanup)
+
+- Removed outdated SHA checksum references from documentation comments in template_manager.rs
+- Removed "Creates SHA checksums" line from download_or_copy_templates() doc comment
+- Removed "Creates SHA checksums" line from download_templates_from_url() doc comment
+- No code changes, only documentation cleanup
+- Version remains 3.0.0 (documentation-only change, no version bump needed)
+- Reasoning: The checksum system was removed on 2025-11-14, but outdated documentation comments remained in the code. This cleanup ensures documentation accurately reflects the current implementation and prevents confusion for developers reading the code.
+
+### 2025-11-20 (Init Command Output Cleanup)
+
+- Removed redundant "Global templates downloaded successfully" message from init command
+- When running init without --lang and --agent, only "Templates downloaded successfully" is shown (from download_or_copy_templates)
+- Followed by informational message about running with --lang and --agent
+- No version bump (PATCH-level change, cosmetic output improvement)
+- Reasoning: The init command was displaying two success messages when downloading templates without installing to a project. The message from download_or_copy_templates already confirms successful download, making the additional message redundant and cluttering the output.

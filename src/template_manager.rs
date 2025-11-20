@@ -119,7 +119,6 @@ impl TemplateManager
     ///
     /// Supports both local file paths and URLs. For URLs starting with http/https,
     /// templates are downloaded. For local paths, templates are copied.
-    /// Creates SHA checksums immediately after downloading or copying.
     ///
     /// # Arguments
     ///
@@ -241,8 +240,6 @@ impl TemplateManager
     /// Downloads templates from a GitHub URL
     ///
     /// Downloads template files from a GitHub repository based on templates.yml configuration.
-    ///
-    /// Creates SHA checksums immediately after downloading each file.
     ///
     /// # Arguments
     ///

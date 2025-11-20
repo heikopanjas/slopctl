@@ -121,7 +121,6 @@ fn main()
                 }
                 | (None, None) =>
                 {
-                    println!("{} Global templates downloaded successfully", "✓".green());
                     println!("{} Run with --lang and --agent to install templates to your project", "→".blue());
                     Ok(())
                 }
