@@ -270,13 +270,12 @@ impl TemplateManager
         // Load template configuration
         let config = self.load_template_config(Some(&base_url), Some(&url_path))?;
 
-        // Download main AGENTS.md template if present
-        if let Some(main) = &config.main
-        {
-            let file_url = format!("{}{}/{}", base_url, url_path, main.source);
-            let dest_path = self.config_dir.join(&main.source);
+        // Helper closure to download a file entry
+        let download_entry = |source: &str| -> Result<()> {
+            let file_url = format!("{}{}/{}", base_url, url_path, source);
+            let dest_path = self.config_dir.join(source);
 
-            print!("{} Downloading {}... ", "→".blue(), main.source.yellow());
+            print!("{} Downloading {}... ", "→".blue(), source.yellow());
             io::stdout().flush()?;
 
             match self.download_file(&file_url, &dest_path)
@@ -284,6 +283,13 @@ impl TemplateManager
                 | Ok(_) => println!("{}", "✓".green()),
                 | Err(_) => println!("{} (skipped)", "✗".red())
             }
+            Ok(())
+        };
+
+        // Download main AGENTS.md template if present
+        if let Some(main) = &config.main
+        {
+            download_entry(&main.source)?;
         }
 
         // Download principles templates if present
@@ -291,17 +297,7 @@ impl TemplateManager
         {
             for entry in principles_entries
             {
-                let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
-                let dest_path = self.config_dir.join(&entry.source);
-
-                print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
-                io::stdout().flush()?;
-
-                match self.download_file(&file_url, &dest_path)
-                {
-                    | Ok(_) => println!("{}", "✓".green()),
-                    | Err(_) => println!("{} (skipped)", "✗".red())
-                }
+                download_entry(&entry.source)?;
             }
         }
 
@@ -310,17 +306,7 @@ impl TemplateManager
         {
             for entry in mission_entries
             {
-                let file_url = format!("{}{}/{}", base_url, url_path, entry.source);
-                let dest_path = self.config_dir.join(&entry.source);
-
-                print!("{} Downloading {}... ", "→".blue(), entry.source.yellow());
-                io::stdout().flush()?;
-
-                match self.download_file(&file_url, &dest_path)
-                {
-                    | Ok(_) => println!("{}", "✓".green()),
-                    | Err(_) => println!("{} (skipped)", "✗".red())
-                }
+                download_entry(&entry.source)?;
             }
         }
 
@@ -329,17 +315,7 @@ impl TemplateManager
         {
             for file_entry in &lang_config.files
             {
-                let file_url = format!("{}{}/{}", base_url, url_path, file_entry.source);
-                let dest_path = self.config_dir.join(&file_entry.source);
-
-                print!("{} Downloading {}... ", "→".blue(), file_entry.source.yellow());
-                io::stdout().flush()?;
-
-                match self.download_file(&file_url, &dest_path)
-                {
-                    | Ok(_) => println!("{}", "✓".green()),
-                    | Err(_) => println!("{} (skipped)", "✗".red())
-                }
+                download_entry(&file_entry.source)?;
             }
         }
 
@@ -350,17 +326,7 @@ impl TemplateManager
             {
                 for file_entry in &integration_config.files
                 {
-                    let file_url = format!("{}{}/{}", base_url, url_path, file_entry.source);
-                    let dest_path = self.config_dir.join(&file_entry.source);
-
-                    print!("{} Downloading {}... ", "→".blue(), file_entry.source.yellow());
-                    io::stdout().flush()?;
-
-                    match self.download_file(&file_url, &dest_path)
-                    {
-                        | Ok(_) => println!("{}", "✓".green()),
-                        | Err(_) => println!("{} (skipped)", "✗".red())
-                    }
+                    download_entry(&file_entry.source)?;
                 }
             }
         }
@@ -467,26 +433,31 @@ impl TemplateManager
             }
         }
 
+        // Helper closure to process file entries
+        let mut process_entry = |source: &str, target: &str, category: &str| {
+            let source_path = self.config_dir.join(source);
+            if source_path.exists() == false
+            {
+                return;
+            }
+
+            if target.starts_with("$instructions")
+            {
+                fragments.push((source_path, category.to_string()));
+            }
+            else
+            {
+                let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
+                files_to_copy.push((source_path, target_path));
+            }
+        };
+
         // Add principles templates (fragments) if present
         if let Some(principles_entries) = &config.principles
         {
             for entry in principles_entries
             {
-                let source_path = self.config_dir.join(&entry.source);
-                if source_path.exists() == false
-                {
-                    continue;
-                }
-
-                if entry.target.starts_with("$instructions")
-                {
-                    fragments.push((source_path, "principles".to_string()));
-                }
-                else
-                {
-                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                    files_to_copy.push((source_path, target_path));
-                }
+                process_entry(&entry.source, &entry.target, "principles");
             }
         }
 
@@ -495,21 +466,7 @@ impl TemplateManager
         {
             for entry in mission_entries
             {
-                let source_path = self.config_dir.join(&entry.source);
-                if source_path.exists() == false
-                {
-                    continue;
-                }
-
-                if entry.target.starts_with("$instructions")
-                {
-                    fragments.push((source_path, "mission".to_string()));
-                }
-                else
-                {
-                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                    files_to_copy.push((source_path, target_path));
-                }
+                process_entry(&entry.source, &entry.target, "mission");
             }
         }
 
@@ -518,21 +475,7 @@ impl TemplateManager
         {
             for file_entry in &lang_config.files
             {
-                let source_path = self.config_dir.join(&file_entry.source);
-                if source_path.exists() == false
-                {
-                    continue;
-                }
-
-                if file_entry.target.starts_with("$instructions")
-                {
-                    fragments.push((source_path, "languages".to_string()));
-                }
-                else
-                {
-                    let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
-                    files_to_copy.push((source_path, target_path));
-                }
+                process_entry(&file_entry.source, &file_entry.target, "languages");
             }
         }
 
@@ -543,21 +486,7 @@ impl TemplateManager
             {
                 for file_entry in &integration_config.files
                 {
-                    let source_path = self.config_dir.join(&file_entry.source);
-                    if source_path.exists() == false
-                    {
-                        continue;
-                    }
-
-                    if file_entry.target.starts_with("$instructions")
-                    {
-                        fragments.push((source_path, "integration".to_string()));
-                    }
-                    else
-                    {
-                        let target_path = self.resolve_placeholder(&file_entry.target, &workspace, &userprofile);
-                        files_to_copy.push((source_path, target_path));
-                    }
+                    process_entry(&file_entry.source, &file_entry.target, "integration");
                 }
             }
         }

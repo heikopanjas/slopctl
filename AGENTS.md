@@ -1109,3 +1109,13 @@ git diff
 - Followed by informational message about running with --lang and --agent
 - No version bump (PATCH-level change, cosmetic output improvement)
 - Reasoning: The init command was displaying two success messages when downloading templates without installing to a project. The message from download_or_copy_templates already confirms successful download, making the additional message redundant and cluttering the output.
+
+### 2025-11-20 (Code Refactoring - DRY Principle)
+
+- Extracted common code duplication in template_manager.rs using closures
+- Created download_entry closure in download_templates_from_url to eliminate repetitive download logic
+- Created process_entry closure in update to eliminate repetitive file processing logic
+- Reduced code duplication for processing principles, missions, languages, and integrations
+- No behavioral changes, only code organization improvement
+- Bumped version from 3.0.0 to 3.0.1 (PATCH version for internal improvements)
+- Reasoning: Both download_templates_from_url and update functions contained nearly identical code blocks for processing principles, missions, languages, and integrations. Using closures eliminates this duplication, makes the code more maintainable, and follows the DRY principle as specified in General Instructions. The refactoring reduces approximately 120 lines of repetitive code while maintaining identical functionality. Version bump allows distinguishing this improved codebase from the released 3.0.0.
