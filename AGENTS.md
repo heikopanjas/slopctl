@@ -443,11 +443,14 @@ vibe-check/
 │   ├── c-coding-conventions.md # C coding standards template (fragment)
 │   ├── c-editor-config.ini     # EditorConfig for C projects
 │   ├── c-format-instructions.yml  # clang-format config for C
+│   ├── c-git-ignore.txt        # C .gitignore template
 │   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
 │   ├── c++-editor-config.ini   # EditorConfig for C++ projects
 │   ├── c++-format-instructions.yml  # clang-format config for C++
+│   ├── c++-git-ignore.txt      # C++ .gitignore template
 │   ├── cmake-build-commands.md # CMake build commands template (fragment)
 │   ├── core-principles.md      # Core principles template (fragment)
+│   ├── git-attributes-common.txt  # Common .gitattributes template (cross-platform)
 │   ├── git-workflow-conventions.md  # Git workflow template (fragment)
 │   ├── make-build-commands.md  # Make build commands template (fragment)
 │   ├── mission-statement.md    # Mission statement template (fragment)
@@ -455,11 +458,13 @@ vibe-check/
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
 │   ├── rust-editor-config.ini  # EditorConfig for Rust projects
 │   ├── rust-format-instructions.toml  # rustfmt config for Rust
+│   ├── rust-git-ignore.txt     # Rust .gitignore template
 │   ├── semantic-versioning.md  # Semantic versioning template (fragment)
 │   ├── swift-coding-conventions.md  # Swift coding standards template (fragment)
 │   ├── swift-build-commands.md # Swift build commands template (fragment)
 │   ├── swift-editor-config.ini # EditorConfig for Swift projects
 │   ├── swift-format-instructions.json  # swift-format config for Swift
+│   ├── swift-git-ignore.txt    # Swift .gitignore template
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
@@ -719,6 +724,47 @@ git diff
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
+
+---
+
+## Quick Wins TODO List
+
+**Priority improvements to enhance vibe-check usability and functionality:**
+
+- [ ] **Add `vibe-check list` command** - Show available languages, agents, and what's installed locally
+  - Display all supported languages from templates.yml
+  - Display all supported agents from templates.yml
+  - Show which global templates are downloaded
+  - Show which local templates are installed in current directory
+  - Include file paths and installation status
+
+- [ ] **Add `vibe-check validate` command** - Verify local installation is complete and consistent
+  - Check if global templates exist and are complete
+  - Verify local AGENTS.md exists and is properly formatted
+  - Validate agent-specific files are present for configured agent
+  - Check language-specific files match selected language
+  - Report missing or inconsistent files with actionable suggestions
+
+- [ ] **Add template preview functionality** - Let users see what will be installed before running init
+  - Add `--preview` flag to init and update commands
+  - Display list of files that would be created/modified
+  - Show file paths with resolved placeholders
+  - Include file sizes and brief descriptions
+  - No actual file operations performed in preview mode
+
+- [ ] **Add selective installation option** - Allow users to skip specific template types
+  - Add `--skip` flag accepting comma-separated list (e.g., `--skip editorconfig,gitignore`)
+  - Skip options: `editorconfig`, `format`, `gitignore`, `gitattributes`
+  - Maintain AGENTS.md and agent instructions (never skippable)
+  - Document skip options in CLI help text
+
+**Implementation Notes:**
+
+- Each TODO should be completed as a separate commit
+- Update this list as items are completed (check boxes)
+- Add new Quick Wins to the list as they are identified
+- Include version bump in the same commit (MINOR for new features)
+- Add detailed entry to Recent Updates & Decisions section when complete
 
 ---
 
@@ -1177,3 +1223,21 @@ git diff
 - Updated AGENTS.md repository structure to include all new template files
 - Added Code Formatting Tools section with documentation links
 - Reasoning: Format instructions provide language-specific code formatting rules that complement EditorConfig's cross-editor baseline settings. EditorConfig handles charset control (critical for C projects using latin1), line endings, and trailing whitespace - settings that language-specific formatters cannot manage. The make-build-commands.md complements cmake-build-commands.md for projects using Make instead of CMake. All templates follow consistent structure and emphasize best practices.
+
+### 2025-11-24 (Git Support - .gitignore and .gitattributes)
+
+- Created git-attributes-common.txt template for cross-platform line ending normalization
+- Template uses `* text=auto` for automatic line ending handling on both Windows and Unix
+- Explicitly marks text files for normalization and binary files to prevent conversion
+- Sets diff drivers for C, C++, Rust, and Swift source files
+- Created language-specific .gitignore templates with both Windows and Unix patterns
+- Created c-git-ignore.txt with C artifacts (object files, static/shared libraries, executables, CMake cache)
+- Created c++-git-ignore.txt with C++ artifacts (similar to C plus C++-specific patterns)
+- Created rust-git-ignore.txt with Rust artifacts (target/, executables, Cargo.lock for binaries)
+- Created swift-git-ignore.txt with Swift artifacts (.build/, swiftmodule files, platform-specific)
+- Each .gitignore includes common OS files (.DS_Store, Thumbs.db) and editor files (.vscode/, .idea/)
+- Added git-attributes-common.txt to integration.git.files section in templates.yml
+- Added language-specific .gitignore templates to each language section in templates.yml
+- Updated AGENTS.md repository structure to include new git-related template files
+- No version bump required (template-only changes, no code changes)
+- Reasoning: Git version control templates are essential for maintaining consistent repository behavior across platforms and team members. The common .gitattributes file ensures proper line ending handling when the repository is cloned on different platforms, while language-specific .gitignore files prevent build artifacts and editor files from being committed. Cross-platform support is critical as developers may use Windows, macOS, or Linux, and both .gitignore templates and .gitattributes must work correctly on all platforms once committed to the repository.

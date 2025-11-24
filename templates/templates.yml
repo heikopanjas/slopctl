@@ -57,6 +57,8 @@ languages:
               target: '$workspace/.clang-format'
             - source: c-editor-config.ini
               target: '$workspace/.editorconfig'
+            - source: c-git-ignore.txt
+              target: '$workspace/.gitignore'
     c++:
         files:
             - source: c++-coding-conventions.md
@@ -67,6 +69,8 @@ languages:
               target: '$workspace/.clang-format'
             - source: c++-editor-config.ini
               target: '$workspace/.editorconfig'
+            - source: c++-git-ignore.txt
+              target: '$workspace/.gitignore'
     rust:
         files:
             - source: rust-coding-conventions.md
@@ -77,6 +81,8 @@ languages:
               target: '$workspace/.rustfmt.toml'
             - source: rust-editor-config.ini
               target: '$workspace/.editorconfig'
+            - source: rust-git-ignore.txt
+              target: '$workspace/.gitignore'
     swift:
         files:
             - source: swift-coding-conventions.md
@@ -87,6 +93,8 @@ languages:
               target: '$workspace/.swift-format'
             - source: swift-editor-config.ini
               target: '$workspace/.editorconfig'
+            - source: swift-git-ignore.txt
+              target: '$workspace/.gitignore'
 
 # Integration templates for specific tools/workflows
 integration:
@@ -94,6 +102,8 @@ integration:
         files:
             - source: git-workflow-conventions.md
               target: '$instructions'
+            - source: git-attributes-common.txt
+              target: '$workspace/.gitattributes'
     versioning:
         files:
             - source: semantic-versioning.md
