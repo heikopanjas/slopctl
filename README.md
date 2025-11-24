@@ -41,13 +41,26 @@ vibe-check/
 │   ├── AGENTS.md               # Template for project-specific agent instructions
 │   ├── best-practices.md       # Best practices template (fragment)
 │   ├── build-environment.md    # Generic build environment template (fragment)
+│   ├── c-coding-conventions.md # C coding standards template (fragment)
+│   ├── c-editor-config.ini     # EditorConfig for C projects
+│   ├── c-format-instructions.yml  # clang-format config for C
 │   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
-│   ├── cmake-build-commands.md # CMake/C++ build commands template (fragment)
+│   ├── c++-editor-config.ini   # EditorConfig for C++ projects
+│   ├── c++-format-instructions.yml  # clang-format config for C++
+│   ├── cmake-build-commands.md # CMake build commands template (fragment)
 │   ├── core-principles.md      # Core principles template (fragment)
 │   ├── git-workflow-conventions.md  # Git workflow template (fragment)
+│   ├── make-build-commands.md  # Make build commands template (fragment)
 │   ├── mission-statement.md    # Mission statement template (fragment)
 │   ├── rust-coding-conventions.md  # Rust coding standards template (fragment)
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
+│   ├── rust-editor-config.ini  # EditorConfig for Rust projects
+│   ├── rust-format-instructions.toml  # rustfmt config for Rust
+│   ├── semantic-versioning.md  # Semantic versioning template (fragment)
+│   ├── swift-coding-conventions.md  # Swift coding standards template (fragment)
+│   ├── swift-build-commands.md # Swift build commands template (fragment)
+│   ├── swift-editor-config.ini # EditorConfig for Swift projects
+│   ├── swift-format-instructions.json  # swift-format config for Swift
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file

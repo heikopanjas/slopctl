@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-20
+**Last updated:** 2025-11-24
 
 ## General Instructions
 
@@ -440,13 +440,26 @@ vibe-check/
 │   ├── AGENTS.md               # Template for project-specific agent instructions
 │   ├── best-practices.md       # Best practices template (fragment)
 │   ├── build-environment.md    # Generic build environment template (fragment)
+│   ├── c-coding-conventions.md # C coding standards template (fragment)
+│   ├── c-editor-config.ini     # EditorConfig for C projects
+│   ├── c-format-instructions.yml  # clang-format config for C
 │   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
-│   ├── cmake-build-commands.md # CMake/C++ build commands template (fragment)
+│   ├── c++-editor-config.ini   # EditorConfig for C++ projects
+│   ├── c++-format-instructions.yml  # clang-format config for C++
+│   ├── cmake-build-commands.md # CMake build commands template (fragment)
 │   ├── core-principles.md      # Core principles template (fragment)
 │   ├── git-workflow-conventions.md  # Git workflow template (fragment)
+│   ├── make-build-commands.md  # Make build commands template (fragment)
 │   ├── mission-statement.md    # Mission statement template (fragment)
 │   ├── rust-coding-conventions.md  # Rust coding standards template (fragment)
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
+│   ├── rust-editor-config.ini  # EditorConfig for Rust projects
+│   ├── rust-format-instructions.toml  # rustfmt config for Rust
+│   ├── semantic-versioning.md  # Semantic versioning template (fragment)
+│   ├── swift-coding-conventions.md  # Swift coding standards template (fragment)
+│   ├── swift-build-commands.md # Swift build commands template (fragment)
+│   ├── swift-editor-config.ini # EditorConfig for Swift projects
+│   ├── swift-format-instructions.json  # swift-format config for Swift
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
@@ -567,6 +580,33 @@ The system downloads templates.yml first; if download fails, the operation stops
 - Validate arguments early and provide clear error messages
 - Use `owo-colors` for user-friendly terminal output
 - Provide helpful examples in `--help` output
+
+### Code Formatting Tools
+
+The project includes language-specific formatting configurations:
+
+- **C/C++**: Uses clang-format
+  - Configuration: `.clang-format` (YAML format)
+  - Documentation: <https://clang.llvm.org/docs/ClangFormatStyleOptions.html>
+  - C uses 120 character line limit, C17 standard
+  - C++ uses 160 character line limit, latest standard
+
+- **Rust**: Uses rustfmt
+  - Configuration: `.rustfmt.toml` (TOML format)
+  - Documentation: <https://rust-lang.github.io/rustfmt/>
+  - Edition 2024, 167 character line limit
+
+- **Swift**: Uses swift-format
+  - Configuration: `.swift-format` (JSON format)
+  - Documentation: <https://github.com/apple/swift-format/blob/main/Documentation/Configuration.md>
+  - 147 character line limit
+
+- **EditorConfig**: Cross-editor baseline formatting
+  - Configuration: `.editorconfig` (INI format)
+  - Documentation: <https://editorconfig.org/>
+  - Provides charset control (C uses latin1, others use utf-8)
+  - Handles line endings, trailing whitespace, final newline
+  - Complements language-specific formatters
 
 ### Markdown Style
 
@@ -1119,3 +1159,21 @@ git diff
 - No behavioral changes, only code organization improvement
 - Bumped version from 3.0.0 to 3.0.1 (PATCH version for internal improvements)
 - Reasoning: Both download_templates_from_url and update functions contained nearly identical code blocks for processing principles, missions, languages, and integrations. Using closures eliminates this duplication, makes the code more maintainable, and follows the DRY principle as specified in General Instructions. The refactoring reduces approximately 120 lines of repetitive code while maintaining identical functionality. Version bump allows distinguishing this improved codebase from the released 3.0.0.
+
+### 2025-11-24 (Format Instructions and EditorConfig Templates)
+
+- Added language-specific format instruction templates for C, C++, Rust, and Swift
+- Created c-format-instructions.yml with 120 char limit and C17 standard
+- Created c++-format-instructions.yml with 160 char limit and latest C++ standard
+- Created rust-format-instructions.toml with 167 char limit and edition 2024
+- Created swift-format-instructions.json with 147 char limit
+- Added language-specific EditorConfig templates for all supported languages
+- Created c-editor-config.ini with latin1 charset for C source files
+- Created c++-editor-config.ini with utf-8 charset for modern C++
+- Created rust-editor-config.ini with utf-8 charset (enforced by compiler)
+- Created swift-editor-config.ini with utf-8 charset for Swift projects
+- Added make-build-commands.md template for Make/Makefile workflows
+- Updated templates.yml to include format instructions and EditorConfig for all languages
+- Updated AGENTS.md repository structure to include all new template files
+- Added Code Formatting Tools section with documentation links
+- Reasoning: Format instructions provide language-specific code formatting rules that complement EditorConfig's cross-editor baseline settings. EditorConfig handles charset control (critical for C projects using latin1), line endings, and trailing whitespace - settings that language-specific formatters cannot manage. The make-build-commands.md complements cmake-build-commands.md for projects using Make instead of CMake. All templates follow consistent structure and emphasize best practices.
