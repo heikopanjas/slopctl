@@ -55,6 +55,8 @@ languages:
               target: '$instructions'
             - source: c-format-instructions.yml
               target: '$workspace/.clang-format'
+            - source: c-editor-config.ini
+              target: '$workspace/.editorconfig'
     c++:
         files:
             - source: c++-coding-conventions.md
@@ -63,6 +65,8 @@ languages:
               target: '$instructions'
             - source: c++-format-instructions.yml
               target: '$workspace/.clang-format'
+            - source: c++-editor-config.ini
+              target: '$workspace/.editorconfig'
     rust:
         files:
             - source: rust-coding-conventions.md
@@ -71,6 +75,8 @@ languages:
               target: '$instructions'
             - source: rust-format-instructions.toml
               target: '$workspace/.rustfmt.toml'
+            - source: rust-editor-config.ini
+              target: '$workspace/.editorconfig'
     swift:
         files:
             - source: swift-coding-conventions.md
@@ -79,6 +85,8 @@ languages:
               target: '$instructions'
             - source: swift-format-instructions.json
               target: '$workspace/.swift-format'
+            - source: swift-editor-config.ini
+              target: '$workspace/.editorconfig'
 
 # Integration templates for specific tools/workflows
 integration:
