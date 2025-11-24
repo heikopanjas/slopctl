@@ -53,25 +53,32 @@ languages:
               target: '$instructions'
             - source: cmake-build-commands.md
               target: '$instructions'
+            - source: c-format-instructions.yml
+              target: '$workspace/.clang-format'
     c++:
         files:
             - source: c++-coding-conventions.md
               target: '$instructions'
             - source: cmake-build-commands.md
               target: '$instructions'
+            - source: c++-format-instructions.yml
+              target: '$workspace/.clang-format'
     rust:
         files:
             - source: rust-coding-conventions.md
               target: '$instructions'
             - source: rust-build-commands.md
               target: '$instructions'
-
+            - source: rust-format-instructions.toml
+              target: '$workspace/.rustfmt.toml'
     swift:
         files:
             - source: swift-coding-conventions.md
               target: '$instructions'
             - source: swift-build-commands.md
               target: '$instructions'
+            - source: swift-format-instructions.json
+              target: '$workspace/.swift-format'
 
 # Integration templates for specific tools/workflows
 integration:
