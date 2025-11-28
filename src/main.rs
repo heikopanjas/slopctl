@@ -1,4 +1,7 @@
-use clap::{Parser, Subcommand};
+use std::io;
+
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 use owo_colors::OwoColorize;
 use vibe_check::TemplateManager;
 
@@ -58,6 +61,13 @@ enum Commands
         /// Force removal without confirmation
         #[arg(long, default_value = "false")]
         force: bool
+    },
+    /// Generate shell completions
+    Completions
+    {
+        /// Shell to generate completions for (bash, zsh, fish, powershell)
+        #[arg(value_enum)]
+        shell: Shell
     }
 }
 
@@ -119,6 +129,11 @@ fn main()
                 // Pass None for --all, or Some(&agent) for specific agent
                 manager.remove(agent.as_deref(), force)
             }
+        }
+        | Commands::Completions { shell } =>
+        {
+            generate(shell, &mut Cli::command(), "vibe-check", &mut io::stdout());
+            Ok(())
         }
     };
 

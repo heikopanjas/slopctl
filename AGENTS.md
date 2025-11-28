@@ -404,6 +404,42 @@ vibe-check remove --all --force
 - Cannot specify both `--agent` and `--all` (mutually exclusive)
 - Must specify either `--agent` or `--all`
 
+### `completions` - Generate Shell Completions
+
+Generate shell completion scripts for various shells.
+
+**Usage:**
+
+```bash
+vibe-check completions <shell>
+```
+
+**Arguments:**
+
+- `<shell>` - Shell to generate completions for: `bash`, `zsh`, `fish`, `powershell`
+
+**Examples:**
+
+```bash
+# Generate zsh completions
+vibe-check completions zsh > ~/.zsh/completions/_vibe-check
+
+# Generate bash completions
+vibe-check completions bash > ~/.bash_completion.d/vibe-check
+
+# Generate fish completions
+vibe-check completions fish > ~/.config/fish/completions/vibe-check.fish
+
+# Generate PowerShell completions
+vibe-check completions powershell > vibe-check.ps1
+```
+
+**Behavior:**
+
+- Outputs shell completion script to stdout
+- User redirects output to appropriate location for their shell
+- Supports bash, zsh, fish, and PowerShell
+
 ## Repository Structure
 
 ```text
@@ -1284,3 +1320,12 @@ git diff
 - Reduced template_manager.rs by approximately 70 lines
 - Bumped version from 4.0.3 to 4.0.4 (PATCH version for internal refactoring)
 - Reasoning: The template_manager.rs module had dead code, duplicated confirmation prompts, and two nearly identical remove functions. Consolidating these improves maintainability and reduces code size while maintaining the same CLI interface.
+
+### 2025-11-28 (Shell Completions)
+
+- Added `completions` subcommand to generate shell completion scripts
+- Added `clap_complete` v4.5 dependency for shell completion generation
+- Supports bash, zsh, fish, and PowerShell shells
+- Outputs completion script to stdout for user to redirect to appropriate location
+- Bumped version from 4.0.4 to 4.1.0 (MINOR version for new feature)
+- Reasoning: Shell completions improve user experience by enabling tab completion for commands, options, and arguments. Using clap_complete integrates seamlessly with the existing clap CLI framework.
