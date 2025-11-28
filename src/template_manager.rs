@@ -12,7 +12,7 @@ use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
     download_manager::DownloadManager,
-    utils::copy_dir_all
+    utils::{copy_dir_all, copy_file_with_mkdir, remove_file_and_cleanup_parents}
 };
 
 /// Manages template files for coding agent instructions
@@ -342,13 +342,7 @@ impl TemplateManager
 
         for (source, target) in &files_to_copy
         {
-            // Create parent directory if needed
-            if let Some(parent) = target.parent()
-            {
-                fs::create_dir_all(parent)?;
-            }
-
-            fs::copy(source, target)?;
+            copy_file_with_mkdir(source, target)?;
             println!("  - Copied: {}", target.display().to_string().yellow());
         }
 
@@ -526,23 +520,13 @@ impl TemplateManager
             for file in agent_files
             {
                 println!("{} Removing {}", "→".blue(), file.display().to_string().yellow());
-                if let Err(e) = fs::remove_file(&file)
+                if let Err(e) = remove_file_and_cleanup_parents(&file)
                 {
                     eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
                 }
                 else
                 {
                     purged_count += 1;
-
-                    // Try to remove empty parent directories
-                    if let Some(parent) = file.parent()
-                    {
-                        let _ = fs::remove_dir(parent);
-                        if let Some(grandparent) = parent.parent()
-                        {
-                            let _ = fs::remove_dir(grandparent);
-                        }
-                    }
                 }
             }
         }
@@ -658,22 +642,12 @@ impl TemplateManager
         let mut removed_count = 0;
         for file in existing_files
         {
-            match fs::remove_file(file)
+            match remove_file_and_cleanup_parents(file)
             {
                 | Ok(_) =>
                 {
                     println!("{} Removed {}", "✓".green(), file.display());
                     removed_count += 1;
-
-                    // Try to remove empty parent directories
-                    if let Some(parent) = file.parent()
-                    {
-                        let _ = fs::remove_dir(parent); // Ignore errors - directory might not be empty
-                        if let Some(grandparent) = parent.parent()
-                        {
-                            let _ = fs::remove_dir(grandparent); // Try grandparent too
-                        }
-                    }
                 }
                 | Err(e) =>
                 {
@@ -780,22 +754,12 @@ impl TemplateManager
         let mut removed_count = 0;
         for file in all_files
         {
-            match fs::remove_file(&file)
+            match remove_file_and_cleanup_parents(&file)
             {
                 | Ok(_) =>
                 {
                     println!("{} Removed {}", "✓".green(), file.display());
                     removed_count += 1;
-
-                    // Try to remove empty parent directories
-                    if let Some(parent) = file.parent()
-                    {
-                        let _ = fs::remove_dir(parent); // Ignore errors - directory might not be empty
-                        if let Some(grandparent) = parent.parent()
-                        {
-                            let _ = fs::remove_dir(grandparent); // Try grandparent too
-                        }
-                    }
                 }
                 | Err(e) =>
                 {

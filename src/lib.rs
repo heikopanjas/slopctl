@@ -11,7 +11,7 @@ mod utils;
 pub use bom::BillOfMaterials;
 pub use download_manager::DownloadManager;
 pub use template_manager::TemplateManager;
-pub use utils::copy_dir_all;
+pub use utils::{copy_dir_all, copy_file_with_mkdir, remove_file_and_cleanup_parents};
 
 /// Result type used throughout the library
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;

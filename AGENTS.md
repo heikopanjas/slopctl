@@ -1264,3 +1264,13 @@ git diff
 - Reduced template_manager.rs from 1059 lines to approximately 835 lines
 - Bumped version from 4.0.1 to 4.0.2 (PATCH version for internal refactoring)
 - Reasoning: The template_manager.rs module was too large at over 1000 lines. Extracting URL parsing and download logic into a separate module improves code organization, maintainability, and follows the single responsibility principle. The DownloadManager can now be tested and modified independently from template management logic.
+
+### 2025-11-28 (Add File System Utilities)
+
+- Added `copy_file_with_mkdir()` utility to utils.rs for copying files with automatic parent directory creation
+- Added `remove_file_and_cleanup_parents()` utility to utils.rs for removing files and cleaning up empty parent directories
+- Updated `update()`, `purge()`, `remove()`, and `remove_all()` in template_manager.rs to use new utilities
+- Reduced code duplication across file removal operations
+- Exported new utilities in public API via lib.rs
+- Bumped version from 4.0.2 to 4.0.3 (PATCH version for internal refactoring)
+- Reasoning: The same file operation patterns were repeated multiple times across template_manager.rs. Extracting these into reusable utilities in utils.rs follows the DRY principle and makes the code more maintainable.
