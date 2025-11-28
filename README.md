@@ -942,6 +942,6 @@ cargo clippy
 
 ---
 
-![Made in Berlin](docs/images/made-in-berlin-badge.jpg)
+<img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
 Last updated: November 28, 2025
