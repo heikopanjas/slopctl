@@ -557,6 +557,65 @@ Available Languages:
 - Languages are listed without status (content is merged into AGENTS.md)
 - Provides guidance on how to install
 
+### `config` - Manage Configuration
+
+Manage persistent configuration settings using Git-style dotted keys.
+
+**Usage:**
+
+```bash
+vibe-check config <key> <value>    # Set a configuration value
+vibe-check config <key>            # Get a configuration value
+vibe-check config --list           # List all configuration values
+vibe-check config --unset <key>    # Remove a configuration value
+```
+
+**Options:**
+
+- `<key>` - Configuration key (e.g., source.url)
+- `<value>` - Value to set (omit to get current value)
+- `--list` - List all configuration values
+- `--unset <key>` - Remove a configuration key
+
+**Examples:**
+
+```bash
+# Set custom template source
+vibe-check config source.url https://github.com/myteam/templates/tree/main/templates
+
+# Get current source URL
+vibe-check config source.url
+
+# List all configuration
+vibe-check config --list
+
+# Remove custom source (revert to default)
+vibe-check config --unset source.url
+
+# Set fallback source for resilience
+vibe-check config source.fallback https://github.com/heikopanjas/vibe-check/tree/develop/templates
+
+# Show help and valid keys
+vibe-check config
+```
+
+**Valid Configuration Keys:**
+
+- `source.url` - Default template download URL (used by `update` and `init` when `--from` not specified)
+- `source.fallback` - Fallback URL used when primary source fails or is unreachable
+
+**Configuration File Location:**
+
+- Linux: `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
+- macOS: `~/.config/vibe-check/config.yml`
+
+**Behavior:**
+
+- Configuration persists between sessions
+- `update` command uses `source.url` if set and `--from` not specified
+- `init` command uses `source.url` when downloading missing global templates
+- Empty configuration file is valid (all defaults used)
+
 ## Repository Structure
 
 ```text
@@ -569,7 +628,9 @@ vibe-check/
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
 │   ├── bom.rs                  # Bill of Materials structures and functions
+│   ├── config.rs               # Configuration management
 │   ├── download_manager.rs     # DownloadManager for URL downloads
+│   ├── template_engine_v1.rs   # Template engine for version 1 templates
 │   ├── template_manager.rs     # TemplateManager implementation
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
@@ -1559,3 +1620,19 @@ git diff
 - Exported `TemplateEngineV1` in public API via lib.rs
 - Bumped version from 4.5.0 to 4.6.0 (MINOR version for new feature)
 - Reasoning: Template versioning enables future template format changes without breaking backward compatibility. When a new template format is needed, a new engine module can be created and the dispatcher will route to the appropriate engine based on the version field. Missing version field defaults to 1 for backward compatibility with existing templates.
+
+### 2025-11-28 (Config Command)
+
+- Added `config` command with Git-style dotted key syntax for persistent configuration
+- Created `src/config.rs` module with Config struct and methods
+- Configuration stored in `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
+- Supports `source.url` key to set default template download source
+- Supports `source.fallback` key for fallback URL when primary source fails
+- Commands: `config <key> <value>` (set), `config <key>` (get), `config --list`, `config --unset <key>`
+- Updated `update` command to use configured source.url when `--from` not specified
+- Updated `init` command to use configured source.url when downloading missing templates
+- Exported `Config` in public API via lib.rs
+- Added config command documentation to AGENTS.md and README.md
+- Updated repository structure to include config.rs
+- Bumped version from 4.6.0 to 5.0.0 (MAJOR version for significant new capabilities)
+- Reasoning: Persistent configuration allows teams to set a custom template source once and have it used automatically by update and init commands. This simplifies workflows for teams with custom template repositories and reduces repetitive --from flag usage. Combined with template engine versioning, these features represent a significant milestone in the project maturity warranting a major version bump.

@@ -4,12 +4,14 @@
 //! initialization prompts and instruction files for AI coding assistants.
 
 mod bom;
+mod config;
 mod download_manager;
 mod template_engine_v1;
 mod template_manager;
 mod utils;
 
 pub use bom::BillOfMaterials;
+pub use config::Config;
 pub use download_manager::DownloadManager;
 pub use template_engine_v1::TemplateEngineV1;
 pub use template_manager::TemplateManager;

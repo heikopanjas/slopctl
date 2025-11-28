@@ -11,11 +11,7 @@ use std::{
 
 use owo_colors::OwoColorize;
 
-use crate::{
-    Result,
-    bom::TemplateConfig,
-    utils::copy_file_with_mkdir
-};
+use crate::{Result, bom::TemplateConfig, utils::copy_file_with_mkdir};
 
 /// Template engine for version 1 templates
 ///
@@ -419,4 +415,3 @@ impl<'a> TemplateEngineV1<'a>
         PathBuf::from(resolved)
     }
 }
-

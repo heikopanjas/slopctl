@@ -481,8 +481,8 @@ impl TemplateManager
 
             // Show available agents and languages from templates.yml
             let config_path = self.config_dir.join("templates.yml");
-            if let Ok(content) = fs::read_to_string(&config_path)
-                && let Ok(config) = serde_yaml::from_str::<TemplateConfig>(&content)
+            if let Ok(content) = fs::read_to_string(&config_path) &&
+                let Ok(config) = serde_yaml::from_str::<TemplateConfig>(&content)
             {
                 let agents: Vec<&String> = config.agents.keys().collect();
                 let languages: Vec<&String> = config.languages.keys().collect();

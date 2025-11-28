@@ -35,6 +35,7 @@ vibe-check/
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
 │   ├── bom.rs                  # Bill of Materials structures and functions
+│   ├── config.rs               # Configuration management
 │   ├── download_manager.rs     # DownloadManager for URL downloads
 │   ├── template_engine_v1.rs   # Template engine for version 1 templates
 │   ├── template_manager.rs     # TemplateManager implementation
@@ -659,6 +660,63 @@ vibe-check completions fish > ~/.config/fish/completions/vibe-check.fish
 # Generate PowerShell completions
 vibe-check completions powershell > vibe-check.ps1
 ```
+
+### `config` - Manage Configuration
+
+Manage persistent configuration settings using Git-style dotted keys.
+
+**Usage:**
+
+```bash
+vibe-check config <key> <value>    # Set a configuration value
+vibe-check config <key>            # Get a configuration value
+vibe-check config --list           # List all configuration values
+vibe-check config --unset <key>    # Remove a configuration value
+```
+
+**Options:**
+
+- `<key>` - Configuration key (e.g., source.url)
+- `<value>` - Value to set (omit to get current value)
+- `--list` - List all configuration values
+- `--unset <key>` - Remove a configuration key
+
+**Examples:**
+
+```bash
+# Set custom template source
+vibe-check config source.url https://github.com/myteam/templates/tree/main/templates
+
+# Get current source URL
+vibe-check config source.url
+
+# List all configuration
+vibe-check config --list
+
+# Remove custom source (revert to default)
+vibe-check config --unset source.url
+
+# Set fallback source for resilience
+vibe-check config source.fallback https://github.com/heikopanjas/vibe-check/tree/develop/templates
+```
+
+**Valid Configuration Keys:**
+
+- `source.url` - Default template download URL (used by `update` and `init` when `--from` not specified)
+- `source.fallback` - Fallback URL used when primary source fails or is unreachable
+
+**Configuration File Location:**
+
+- Linux: `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
+- macOS: `~/.config/vibe-check/config.yml`
+
+**Behavior:**
+
+- Configuration persists between sessions
+- `update` command uses `source.url` if set and `--from` not specified
+- `init` command uses `source.url` when downloading missing global templates
+- If primary source fails and `source.fallback` is configured, automatically tries the fallback
+- Empty configuration file is valid (all defaults used)
 
 ## Core Governance Principles
 
