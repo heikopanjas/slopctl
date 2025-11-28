@@ -8,6 +8,7 @@
 ![Claude](https://img.shields.io/badge/-Claude-000000?style=flat-square&logo=anthropic&logoColor=white)
 ![GitHub Copilot](https://img.shields.io/badge/-GitHub%20Copilot-000000?style=flat-square&logo=github&logoColor=white)
 ![Codex](https://img.shields.io/badge/-Codex-000000?style=flat-square&logo=openai&logoColor=white)
+![Cursor](https://img.shields.io/badge/-Cursor-000000?style=flat-square&logo=visualstudiocode&logoColor=white)
 
 ## Overview
 
@@ -940,5 +941,7 @@ cargo clippy
 ```
 
 ---
+
+![Made in Berlin](docs/images/made-in-berlin-badge.jpg)
 
 Last updated: November 28, 2025
