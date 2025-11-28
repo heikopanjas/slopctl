@@ -44,6 +44,14 @@ impl TemplateManager
         Ok(Self { config_dir })
     }
 
+    /// Checks if global templates exist
+    ///
+    /// Returns true if the global template directory exists and contains templates.yml
+    pub fn has_global_templates(&self) -> bool
+    {
+        self.config_dir.exists() && self.config_dir.join("templates.yml").exists()
+    }
+
     /// Loads template configuration from templates.yml
     ///
     /// Downloads templates.yml if it doesn't exist in the global config directory.
@@ -701,25 +709,25 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Clears local templates from current directory
+    /// Purges all vibe-check files from the current directory
     ///
     /// Removes all agent-specific files and AGENTS.md from the current directory.
     /// Global templates in the local data directory are never affected.
     ///
     /// # Arguments
     ///
-    /// * `force` - If true, clear without confirmation prompt and delete customized AGENTS.md
+    /// * `force` - If true, purge without confirmation prompt and delete customized AGENTS.md
     ///
     /// # Errors
     ///
     /// Returns an error if file deletion fails or templates.yml cannot be loaded
-    pub fn clear(&self, force: bool) -> Result<()>
+    pub fn purge(&self, force: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
 
         if force == false
         {
-            print!("{} Are you sure you want to clear local templates? (y/N): ", "?".yellow());
+            print!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow());
             io::stdout().flush()?;
 
             let mut input = String::new();
@@ -732,7 +740,7 @@ impl TemplateManager
             }
         }
 
-        let mut cleared_count = 0;
+        let mut purged_count = 0;
 
         // Load templates.yml and build Bill of Materials to get agent files
         let config_file = self.config_dir.join("templates.yml");
@@ -771,7 +779,7 @@ impl TemplateManager
                 }
                 else
                 {
-                    cleared_count += 1;
+                    purged_count += 1;
 
                     // Try to remove empty parent directories
                     if let Some(parent) = file.parent()
@@ -801,17 +809,17 @@ impl TemplateManager
             {
                 println!("{} Removing {}", "→".blue(), agents_md_path.display().to_string().yellow());
                 fs::remove_file(&agents_md_path)?;
-                cleared_count += 1;
+                purged_count += 1;
             }
         }
 
-        if cleared_count == 0
+        if purged_count == 0
         {
-            println!("{} No local templates found to clear", "→".blue());
+            println!("{} No vibe-check files found to purge", "→".blue());
         }
         else
         {
-            println!("{} Cleared {} local template(s) successfully", "✓".green(), cleared_count);
+            println!("{} Purged {} file(s) successfully", "✓".green(), purged_count);
         }
 
         Ok(())

@@ -18,41 +18,29 @@ enum Commands
     /// Initialize agent instructions for a project
     Init
     {
-        /// Programming language or framework (e.g., rust, python, typescript)
-        #[arg(long)]
-        lang: Option<String>,
-
-        /// AI coding agent (e.g., claude, copilot, codex)
-        #[arg(long)]
-        agent: Option<String>,
-
-        /// Force overwrite of local files without confirmation
-        #[arg(long, default_value = "false")]
-        force: bool,
-
-        /// Path or URL to copy/download templates from
-        #[arg(long)]
-        from: Option<String>
-    },
-    /// Update templates from global storage
-    Update
-    {
-        /// Programming language or framework
+        /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(long)]
         lang: String,
 
-        /// AI coding agent
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(long)]
         agent: String,
 
-        /// Force overwrite without confirmation
+        /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
         force: bool
     },
-    /// Clear local templates from current directory
-    Clear
+    /// Update global templates from source
+    Update
     {
-        /// Force clear without confirmation
+        /// Path or URL to download/copy templates from
+        #[arg(long)]
+        from: Option<String>
+    },
+    /// Purge all vibe-check files from project
+    Purge
+    {
+        /// Force purge without confirmation
         #[arg(long, default_value = "false")]
         force: bool
     },
@@ -89,45 +77,32 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, force, from } =>
+        | Commands::Init { lang, agent, force } =>
         {
-            // Always update global templates for init command
+            // Check if global templates exist, download if not
+            if manager.has_global_templates() == false
+            {
+                let source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates";
+                println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
+
+                if let Err(e) = manager.download_or_copy_templates(source)
+                {
+                    eprintln!("{} Failed to download global templates: {}", "✗".red(), e.to_string().red());
+                    std::process::exit(1);
+                }
+            }
+
+            // Install templates to project
+            println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent.green());
+            manager.update(&lang, &agent, force)
+        }
+        | Commands::Update { from } =>
+        {
             let source = from.as_deref().unwrap_or("https://github.com/heikopanjas/vibe-check/tree/develop/templates");
             println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-
-            if let Err(e) = manager.download_or_copy_templates(source)
-            {
-                eprintln!("{} Failed to update global templates: {}", "✗".red(), e.to_string().red());
-                std::process::exit(1);
-            }
-
-            // If lang and agent are provided, update local templates
-            match (lang, agent)
-            {
-                | (Some(l), Some(a)) =>
-                {
-                    println!("{} Installing templates for {} with {}", "→".blue(), l.green(), a.green());
-                    manager.update(&l, &a, force)
-                }
-                | (Some(_), None) =>
-                {
-                    println!("{} Language specified without agent. Use both --lang and --agent to install templates.", "!".yellow());
-                    Ok(())
-                }
-                | (None, Some(_)) =>
-                {
-                    println!("{} Agent specified without language. Use both --lang and --agent to install templates.", "!".yellow());
-                    Ok(())
-                }
-                | (None, None) =>
-                {
-                    println!("{} Run with --lang and --agent to install templates to your project", "→".blue());
-                    Ok(())
-                }
-            }
+            manager.download_or_copy_templates(source)
         }
-        | Commands::Update { lang, agent, force } => manager.update(&lang, &agent, force),
-        | Commands::Clear { force } => manager.clear(force),
+        | Commands::Purge { force } => manager.purge(force),
         | Commands::Remove { agent, all, force } =>
         {
             // Validate mutually exclusive options

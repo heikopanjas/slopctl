@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-24
+**Last updated:** 2025-11-28
 
 ## General Instructions
 
@@ -231,6 +231,47 @@ Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe
 
 ## CLI Commands
 
+### `update` - Update Global Templates
+
+Download and update global templates from a source repository.
+
+**Usage:**
+
+```bash
+vibe-check update [--from <PATH or URL>]
+```
+
+**Options:**
+
+- `--from <string>` - Optional path or URL to download/copy templates from
+
+**Examples:**
+
+```bash
+# Update global templates from default repository
+vibe-check update
+
+# Update from custom URL
+vibe-check update --from https://github.com/user/repo/tree/branch/templates
+
+# Update from local path
+vibe-check update --from /path/to/templates
+```
+
+**Behavior:**
+
+- Downloads templates from specified source or default GitHub repository
+- If `--from` is not specified, downloads from:
+  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
+- Downloads `templates.yml` configuration file and all template files
+- Stores templates in local data directory:
+  - Linux: `$HOME/.local/share/vibe-check/templates`
+  - macOS: `$HOME/Library/Application Support/vibe-check/templates`
+- Overwrites existing global templates with new versions
+- Does NOT modify any files in the current project directory
+
+**Note:** Run `update` first to download templates before using `init` to set up a project.
+
 ### `init` - Initialize Agent Instructions
 
 Initialize instruction files for AI coding agents in your project.
@@ -238,118 +279,62 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-# Download global templates only
-vibe-check init [--from <PATH or URL>]
-
-# Download and install templates for a project
-vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
+vibe-check init --lang <language> --agent <agent> [--force]
 ```
 
 **Options:**
 
-- `--lang <string>` - (Optional) Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - (Optional) AI coding agent (e.g., claude, copilot, codex)
+- `--lang <string>` - Programming language or framework (e.g., c++, rust, swift)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--force` - Force overwrite of local files without confirmation
-- `--from <string>` - Optional path or URL to copy/download templates from
 
 **Examples:**
 
 ```bash
-# Download global templates only (no local installation)
-vibe-check init
-
 # Initialize C++ project with Claude
 vibe-check init --lang c++ --agent claude
 
-# Initialize from local path
-vibe-check init --lang c++ --agent claude --from /path/to/templates
-
-# Initialize from URL
-vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
+# Initialize Rust project with Copilot
+vibe-check init --lang rust --agent copilot
 
 # Force overwrite existing local files
-vibe-check init --lang rust --agent copilot --force
+vibe-check init --lang swift --agent cursor --force
 ```
 
 **Behavior:**
 
-- Always updates global templates first (downloads or copies from source)
-- Downloads `templates.yml` configuration file to determine which templates to install
-- If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
-- If `--from` is specified, updates global templates from that location
-- **If `--lang` and `--agent` are provided:**
-  - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-  - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
-  - If `--force` is specified, overwrites local files regardless of modifications
-  - Files are placed according to `templates.yml` configuration with placeholder resolution:
-    - `$workspace` resolves to current directory
-    - `$userprofile` resolves to user's home directory
-- **If `--lang` and `--agent` are omitted:**
-  - Only downloads global templates (no local installation)
-  - Use this to pre-download templates or update global template cache
-
-### `update` - Update Local Templates
-
-Update local templates from global storage.
-
-**Usage:**
-
-```bash
-vibe-check update --lang <language> --agent <agent> [--force]
-```
-
-**Options:**
-
-- `--lang <string>` - Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
-- `--force` - Force overwrite of local files without confirmation
-
-**Examples:**
-
-```bash
-# Update local templates from global storage
-vibe-check update --lang c++ --agent claude
-
-# Force overwrite customized local files
-vibe-check update --lang rust --agent copilot --force
-```
-
-**Behavior:**
-
-- Uses existing global templates (does not download new ones)
-- Requires global templates to exist (run `init` first if not present)
+- Uses global templates to set up agent instructions in the current project
+- If global templates do not exist, automatically downloads them from the default repository
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
 - If `--force` is specified, overwrites local files regardless of modifications
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
+- Merges language-specific and integration fragments into AGENTS.md
 
-**Note:** The `update` command behaves exactly like `init` except it does not download new global templates. Use `init` to refresh global templates or `update` to sync local files with existing global templates.
+### `purge` - Purge All Vibe-Check Files
 
-### `clear` - Clear Local Templates
-
-Clear all local templates from the current directory.
+Purge all vibe-check files from the current project directory.
 
 **Usage:**
 
 ```bash
-vibe-check clear [--force]
+vibe-check purge [--force]
 ```
 
 **Options:**
 
-- `--force` - Force clear without confirmation and delete customized AGENTS.md
+- `--force` - Force purge without confirmation and delete customized AGENTS.md
 
 **Examples:**
 
 ```bash
-# Clear local templates with confirmation prompt
-vibe-check clear
+# Purge all vibe-check files with confirmation prompt
+vibe-check purge
 
-# Force clear without confirmation
-vibe-check clear --force
+# Force purge without confirmation
+vibe-check purge --force
 ```
 
 **Behavior:**
@@ -413,7 +398,7 @@ vibe-check remove --all --force
 - Asks for confirmation unless `--force` is specified
 - Removes agent-specific files (instructions and prompts)
 - Automatically cleans up empty parent directories
-- **NEVER touches AGENTS.md** (use `clear` command to remove AGENTS.md)
+- **NEVER touches AGENTS.md** (use `purge` command to remove AGENTS.md)
 - Does NOT affect global templates in local data directory
 - If agent not found in BoM, shows list of available agents
 - Cannot specify both `--agent` and `--all` (mutually exclusive)
@@ -572,8 +557,8 @@ The system downloads templates.yml first; if download fails, the operation stops
   - Stops operation if AGENTS.md is customized and `force` is false
   - Copies template files from local data directory to resolved target paths
 
-- `clear(force: bool)` - Clear local templates from current directory
-  - `force` - If true, clear templates without confirmation
+- `purge(force: bool)` - Purge all vibe-check files from current directory
+  - `force` - If true, purge without confirmation
   - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
   - Removes language template files for supported languages (c, c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
@@ -1241,3 +1226,28 @@ git diff
 - Updated AGENTS.md repository structure to include new git-related template files
 - No version bump required (template-only changes, no code changes)
 - Reasoning: Git version control templates are essential for maintaining consistent repository behavior across platforms and team members. The common .gitattributes file ensures proper line ending handling when the repository is cloned on different platforms, while language-specific .gitignore files prevent build artifacts and editor files from being committed. Cross-platform support is critical as developers may use Windows, macOS, or Linux, and both .gitignore templates and .gitattributes must work correctly on all platforms once committed to the repository.
+
+### 2025-11-28 (Command Swap - init and update)
+
+- Swapped the meanings of `init` and `update` CLI commands
+- **New `update` command**: Downloads/updates global templates from source
+  - Removed `--lang` and `--agent` parameters (no longer needed)
+  - Removed `--force` parameter (just overwrites global templates)
+  - Added `--from` option (optional, defaults to GitHub repository)
+- **New `init` command**: Sets up agent instructions in project directory
+  - Made `--lang` and `--agent` parameters required
+  - Removed `--from` option (global template source handled by `update`)
+  - Kept `--force` for overwriting customized local files
+  - Automatically downloads global templates if they do not exist
+- Added `has_global_templates()` method to TemplateManager
+- Updated CLI documentation to reflect new command behavior
+- Bumped version from 3.0.1 to 4.0.0 (MAJOR version for breaking CLI change)
+- Reasoning: The swapped meanings are more intuitive. The `update` command now handles updating the global template cache, while `init` focuses on initializing a project with agent instructions. This separation of concerns makes the workflow clearer: first update templates, then init a project. The auto-download fallback in init ensures backward compatibility for users who skip the update step.
+
+### 2025-11-28 (Command Rename - clear to purge)
+
+- Renamed `clear` command to `purge` for better clarity and autocompletion safety
+- Renamed `clear()` method to `purge()` in TemplateManager
+- Updated all related documentation and user-facing messages
+- Bumped version from 4.0.0 to 4.0.1 (PATCH version for rename)
+- Reasoning: The `clear` and `remove` commands had similar names causing confusion about their different purposes. Renaming to `purge` makes the distinction clearer: `remove` surgically removes agent files while preserving AGENTS.md, whereas `purge` completely removes all vibe-check files. Additionally, `purge` starts with a different letter than `remove`, preventing accidental selection via shell autocompletion.
