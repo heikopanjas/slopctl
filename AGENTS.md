@@ -1274,3 +1274,13 @@ git diff
 - Exported new utilities in public API via lib.rs
 - Bumped version from 4.0.2 to 4.0.3 (PATCH version for internal refactoring)
 - Reasoning: The same file operation patterns were repeated multiple times across template_manager.rs. Extracting these into reusable utilities in utils.rs follows the DRY principle and makes the code more maintainable.
+
+### 2025-11-28 (Template Manager Slimdown)
+
+- Removed dead `clear_global_templates()` function (never called)
+- Added `confirm_action()` utility to utils.rs for user confirmation prompts
+- Consolidated `remove()` and `remove_all()` into single `remove(agent: Option<&str>, force: bool)` method
+- Updated `purge()`, and `remove()` to use the new `confirm_action()` utility
+- Reduced template_manager.rs by approximately 70 lines
+- Bumped version from 4.0.3 to 4.0.4 (PATCH version for internal refactoring)
+- Reasoning: The template_manager.rs module had dead code, duplicated confirmation prompts, and two nearly identical remove functions. Consolidating these improves maintainability and reduces code size while maintaining the same CLI interface.

@@ -1,6 +1,10 @@
 //! Utility functions for vibe-check
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::{self, Write},
+    path::Path
+};
 
 use crate::Result;
 
@@ -104,4 +108,27 @@ pub fn remove_file_and_cleanup_parents(path: &Path) -> Result<()>
     }
 
     Ok(())
+}
+
+/// Prompts the user for confirmation and returns true if they confirm
+///
+/// Displays the prompt and waits for user input. Returns true only if
+/// the user enters 'y' or 'Y'.
+///
+/// # Arguments
+///
+/// * `prompt` - The confirmation prompt to display
+///
+/// # Errors
+///
+/// Returns an error if reading from stdin fails
+pub fn confirm_action(prompt: &str) -> Result<bool>
+{
+    print!("{}", prompt);
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    Ok(input.trim().eq_ignore_ascii_case("y"))
 }

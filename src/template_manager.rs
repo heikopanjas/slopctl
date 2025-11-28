@@ -1,8 +1,7 @@
 //! Template management functionality for vibe-check
 
 use std::{
-    fs,
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf}
 };
 
@@ -12,7 +11,7 @@ use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
     download_manager::DownloadManager,
-    utils::{copy_dir_all, copy_file_with_mkdir, remove_file_and_cleanup_parents}
+    utils::{confirm_action, copy_dir_all, copy_file_with_mkdir, remove_file_and_cleanup_parents}
 };
 
 /// Manages template files for coding agent instructions
@@ -432,30 +431,6 @@ impl TemplateManager
         PathBuf::from(resolved)
     }
 
-    /// Clears global templates from local data directory
-    ///
-    /// This method deletes all templates from the global storage directory,
-    /// forcing a fresh download on the next init or update operation.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the directory cannot be removed
-    pub fn clear_global_templates(&self) -> Result<()>
-    {
-        if self.config_dir.exists()
-        {
-            println!("{} Removing global templates from {}", "→".blue(), self.config_dir.display().to_string().yellow());
-            fs::remove_dir_all(&self.config_dir)?;
-            println!("{} Global templates cleared successfully", "✓".green());
-        }
-        else
-        {
-            println!("{} No global templates found to clear", "→".blue());
-        }
-
-        Ok(())
-    }
-
     /// Purges all vibe-check files from the current directory
     ///
     /// Removes all agent-specific files and AGENTS.md from the current directory.
@@ -472,19 +447,10 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
 
-        if force == false
+        if force == false && confirm_action(&format!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow()))? == false
         {
-            print!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow());
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-
-            if input.trim().eq_ignore_ascii_case("y") == false
-            {
-                println!("{} Operation cancelled", "→".blue());
-                return Ok(());
-            }
+            println!("{} Operation cancelled", "→".blue());
+            return Ok(());
         }
 
         let mut purged_count = 0;
@@ -564,12 +530,13 @@ impl TemplateManager
 
     /// Remove agent-specific files from the current directory
     ///
-    /// Deletes all files associated with the specified agent based on the
-    /// Bill of Materials built from templates.yml in global storage.
+    /// Deletes files associated with the specified agent (or all agents if None)
+    /// based on the Bill of Materials built from templates.yml in global storage.
+    /// AGENTS.md is never touched by this operation.
     ///
     /// # Arguments
     ///
-    /// * `agent` - AI coding agent name (e.g., "claude", "copilot", "codex", "cursor")
+    /// * `agent` - Optional agent name. If Some, removes files for that agent only. If None, removes files for all agents.
     /// * `force` - If true, skip confirmation prompt
     ///
     /// # Returns
@@ -580,10 +547,9 @@ impl TemplateManager
     ///
     /// Returns an error if:
     /// - templates.yml cannot be loaded
-    /// - Agent name is not found in the BoM
-    /// - Backup creation fails
+    /// - Agent name is not found in the BoM (when agent is Some)
     /// - File deletion fails
-    pub fn remove(&self, agent: &str, force: bool) -> Result<()>
+    pub fn remove(&self, agent: Option<&str>, force: bool) -> Result<()>
     {
         // Load templates.yml and build Bill of Materials
         let config_file = self.config_dir.join("templates.yml");
@@ -595,52 +561,73 @@ impl TemplateManager
         println!("{} Building Bill of Materials from templates.yml", "→".blue());
         let bom = BillOfMaterials::from_config(&config_file)?;
 
-        // Check if agent exists in BoM
-        if bom.has_agent(agent) == false
+        // Collect files based on agent parameter
+        let (files_to_remove, description): (Vec<PathBuf>, String) = if let Some(agent_name) = agent
         {
-            let available_agents = bom.get_agent_names();
-            return Err(format!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent, available_agents.join(", ")).into());
+            // Single agent mode
+            if bom.has_agent(agent_name) == false
+            {
+                let available_agents = bom.get_agent_names();
+                return Err(format!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent_name, available_agents.join(", ")).into());
+            }
+
+            let agent_files = bom.get_agent_files(agent_name).unwrap();
+            let existing: Vec<PathBuf> = agent_files.iter().filter(|f| f.exists()).cloned().collect();
+            (existing, format!("agent '{}'", agent_name.yellow()))
         }
-
-        // Get files for this agent
-        let agent_files = bom.get_agent_files(agent).unwrap();
-
-        // Check which files actually exist
-        let existing_files: Vec<&PathBuf> = agent_files.iter().filter(|f| f.exists()).collect();
-
-        if existing_files.is_empty() == true
+        else
         {
-            println!("{} No files found for agent '{}' in current directory", "→".blue(), agent.yellow());
+            // All agents mode
+            let agent_names = bom.get_agent_names();
+            if agent_names.is_empty() == true
+            {
+                println!("{} No agents found in Bill of Materials", "→".blue());
+                return Ok(());
+            }
+
+            let mut all_files: Vec<PathBuf> = Vec::new();
+            for name in &agent_names
+            {
+                if let Some(agent_files) = bom.get_agent_files(name)
+                {
+                    for file in agent_files
+                    {
+                        if file.exists() == true
+                        {
+                            all_files.push(file.clone());
+                        }
+                    }
+                }
+            }
+            all_files.sort();
+            all_files.dedup();
+            (all_files, "all agents".to_string())
+        };
+
+        if files_to_remove.is_empty() == true
+        {
+            println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
         }
 
         // Show files to be removed
-        println!("\n{} Files to be removed for agent '{}':", "→".blue(), agent.yellow());
-        for file in &existing_files
+        println!("\n{} Files to be removed for {}:", "→".blue(), description);
+        for file in &files_to_remove
         {
             println!("  • {}", file.display().to_string().yellow());
         }
         println!();
 
         // Ask for confirmation unless force is true
-        if force == false
+        if force == false && confirm_action(&format!("{} Proceed with removal? [y/N]: ", "?".yellow()))? == false
         {
-            print!("{} Proceed with removal? [y/N]: ", "?".yellow());
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-
-            if input.trim().to_lowercase() != "y"
-            {
-                println!("{} Operation cancelled", "✗".red());
-                return Ok(());
-            }
+            println!("{} Operation cancelled", "✗".red());
+            return Ok(());
         }
 
         // Remove files
         let mut removed_count = 0;
-        for file in existing_files
+        for file in &files_to_remove
         {
             match remove_file_and_cleanup_parents(file)
             {
@@ -656,119 +643,7 @@ impl TemplateManager
             }
         }
 
-        println!("\n{} Removed {} file(s) for agent '{}'", "✓".green(), removed_count, agent.yellow());
-
-        Ok(())
-    }
-
-    /// Remove all agent-specific files from the current directory
-    ///
-    /// Deletes all files associated with all agents based on the
-    /// Bill of Materials built from templates.yml in global storage.
-    /// AGENTS.md is never touched by this operation.
-    ///
-    /// # Arguments
-    ///
-    /// * `force` - If true, skip confirmation prompt
-    ///
-    /// # Returns
-    ///
-    /// Ok(()) if files were successfully removed or if no files were found
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if templates.yml cannot be loaded
-    pub fn remove_all(&self, force: bool) -> Result<()>
-    {
-        // Load templates.yml and build Bill of Materials
-        let config_file = self.config_dir.join("templates.yml");
-        if config_file.exists() == false
-        {
-            return Err("Global templates not found. Run 'vibe-check init' first to set up templates.".to_string().into());
-        }
-
-        println!("{} Building Bill of Materials from templates.yml", "→".blue());
-        let bom = BillOfMaterials::from_config(&config_file)?;
-
-        // Get all agent names
-        let agent_names = bom.get_agent_names();
-
-        if agent_names.is_empty() == true
-        {
-            println!("{} No agents found in Bill of Materials", "→".blue());
-            return Ok(());
-        }
-
-        // Collect all files from all agents
-        let mut all_files: Vec<PathBuf> = Vec::new();
-        for agent in &agent_names
-        {
-            if let Some(agent_files) = bom.get_agent_files(agent)
-            {
-                for file in agent_files
-                {
-                    // Only include files that exist
-                    if file.exists() == true
-                    {
-                        all_files.push(file.clone());
-                    }
-                }
-            }
-        }
-
-        // Remove duplicates (in case multiple agents reference same file)
-        all_files.sort();
-        all_files.dedup();
-
-        if all_files.is_empty() == true
-        {
-            println!("{} No agent-specific files found in current directory", "→".blue());
-            return Ok(());
-        }
-
-        // Show files to be removed
-        println!("\n{} Files to be removed for all agents:", "→".blue());
-        for file in &all_files
-        {
-            println!("  • {}", file.display().to_string().yellow());
-        }
-        println!();
-
-        // Ask for confirmation unless force is true
-        if force == false
-        {
-            print!("{} Proceed with removal? [y/N]: ", "?".yellow());
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-
-            if input.trim().to_lowercase() != "y"
-            {
-                println!("{} Operation cancelled", "✗".red());
-                return Ok(());
-            }
-        }
-
-        // Remove files
-        let mut removed_count = 0;
-        for file in all_files
-        {
-            match remove_file_and_cleanup_parents(&file)
-            {
-                | Ok(_) =>
-                {
-                    println!("{} Removed {}", "✓".green(), file.display());
-                    removed_count += 1;
-                }
-                | Err(e) =>
-                {
-                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
-                }
-            }
-        }
-
-        println!("\n{} Removed {} file(s) for all agents", "✓".green(), removed_count);
+        println!("\n{} Removed {} file(s) for {}", "✓".green(), removed_count, description);
 
         Ok(())
     }

@@ -114,13 +114,10 @@ fn main()
             {
                 Err("Must specify either --agent <name> or --all".to_string().into())
             }
-            else if all == true
-            {
-                manager.remove_all(force)
-            }
             else
             {
-                manager.remove(agent.as_ref().unwrap(), force)
+                // Pass None for --all, or Some(&agent) for specific agent
+                manager.remove(agent.as_deref(), force)
             }
         }
     };
