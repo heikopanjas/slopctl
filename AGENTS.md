@@ -415,7 +415,8 @@ vibe-check/
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
 │   ├── bom.rs                  # Bill of Materials structures and functions
-│   ├── template_manager.rs    # TemplateManager implementation
+│   ├── download_manager.rs     # DownloadManager for URL downloads
+│   ├── template_manager.rs     # TemplateManager implementation
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # Main documentation
@@ -1251,3 +1252,15 @@ git diff
 - Updated all related documentation and user-facing messages
 - Bumped version from 4.0.0 to 4.0.1 (PATCH version for rename)
 - Reasoning: The `clear` and `remove` commands had similar names causing confusion about their different purposes. Renaming to `purge` makes the distinction clearer: `remove` surgically removes agent files while preserving AGENTS.md, whereas `purge` completely removes all vibe-check files. Additionally, `purge` starts with a different letter than `remove`, preventing accidental selection via shell autocompletion.
+
+### 2025-11-28 (Extract Download Manager Module)
+
+- Created new `src/download_manager.rs` module for URL and download operations
+- Moved `parse_github_url()`, `download_file()`, and `download_templates_from_url()` from template_manager.rs
+- Created `DownloadManager` struct to encapsulate download functionality
+- Simplified `load_template_config()` in TemplateManager to only load from local files
+- Updated `download_or_copy_templates()` to use DownloadManager for URL downloads
+- Exposed `DownloadManager` in public API via lib.rs
+- Reduced template_manager.rs from 1059 lines to approximately 835 lines
+- Bumped version from 4.0.1 to 4.0.2 (PATCH version for internal refactoring)
+- Reasoning: The template_manager.rs module was too large at over 1000 lines. Extracting URL parsing and download logic into a separate module improves code organization, maintainability, and follows the single responsibility principle. The DownloadManager can now be tested and modified independently from template management logic.

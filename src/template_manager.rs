@@ -11,6 +11,7 @@ use owo_colors::OwoColorize;
 use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
+    download_manager::DownloadManager,
     utils::copy_dir_all
 };
 
@@ -54,37 +55,14 @@ impl TemplateManager
 
     /// Loads template configuration from templates.yml
     ///
-    /// Downloads templates.yml if it doesn't exist in the global config directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `base_url` - Base URL for downloading templates.yml from GitHub
-    /// * `url_path` - Path within the repository
+    /// Loads and parses templates.yml from the global config directory.
     ///
     /// # Errors
     ///
     /// Returns an error if templates.yml cannot be loaded or parsed
-    fn load_template_config(&self, base_url: Option<&str>, url_path: Option<&str>) -> Result<TemplateConfig>
+    fn load_template_config(&self) -> Result<TemplateConfig>
     {
         let config_path = self.config_dir.join("templates.yml");
-
-        // If we have a URL, always download templates.yml to get latest version
-        if let (Some(base), Some(path)) = (base_url, url_path)
-        {
-            let config_url = format!("{}{}/templates.yml", base, path);
-            print!("{} Downloading templates.yml... ", "→".blue());
-            io::stdout().flush()?;
-
-            match self.download_file(&config_url, &config_path)
-            {
-                | Ok(_) => println!("{}", "✓".green()),
-                | Err(e) =>
-                {
-                    println!("{}", "✗".red());
-                    return Err(format!("Failed to download templates.yml: {}", e).into());
-                }
-            }
-        }
 
         // Try to load and parse templates.yml
         if config_path.exists() == false
@@ -139,9 +117,10 @@ impl TemplateManager
     {
         if source.starts_with("http://") || source.starts_with("https://")
         {
-            // Download from URL
+            // Download from URL using DownloadManager
             println!("{} Downloading templates from URL...", "→".blue());
-            self.download_templates_from_url(source)?;
+            let download_manager = DownloadManager::new(self.config_dir.clone());
+            download_manager.download_templates_from_url(source)?;
         }
         else
         {
@@ -156,232 +135,6 @@ impl TemplateManager
             fs::create_dir_all(&self.config_dir)?;
             copy_dir_all(source_path, &self.config_dir)?;
         }
-
-        Ok(())
-    }
-
-    /// Converts a GitHub tree URL to raw content URLs
-    ///
-    /// Converts URLs like:
-    /// `https://github.com/owner/repo/tree/branch/path`
-    /// to:
-    /// `https://raw.githubusercontent.com/owner/repo/branch/path`
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - GitHub tree URL
-    ///
-    /// # Returns
-    ///
-    /// Returns base raw URL and path components, or None if URL is not a GitHub tree URL
-    fn parse_github_url(&self, url: &str) -> Option<(String, String, String, String)>
-    {
-        // Parse URLs like: https://github.com/owner/repo/tree/branch/path
-        if url.contains("github.com") == false
-        {
-            return None;
-        }
-
-        let parts: Vec<&str> = url.split('/').collect();
-
-        // Find the indices for owner, repo, tree, branch
-        let github_idx = parts.iter().position(|&p| p == "github.com")?;
-
-        if parts.len() < github_idx + 5
-        {
-            return None;
-        }
-
-        let owner = parts[github_idx + 1];
-        let repo = parts[github_idx + 2];
-        let tree_or_blob = parts[github_idx + 3];
-
-        if tree_or_blob != "tree" && tree_or_blob != "blob"
-        {
-            return None;
-        }
-
-        let branch = parts[github_idx + 4];
-        let path = if parts.len() > github_idx + 5
-        {
-            parts[github_idx + 5..].join("/")
-        }
-        else
-        {
-            String::new()
-        };
-
-        Some((owner.to_string(), repo.to_string(), branch.to_string(), path))
-    }
-
-    /// Downloads a file from a URL
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - URL to download from
-    /// * `dest_path` - Destination file path
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if download or file write fails
-    fn download_file(&self, url: &str, dest_path: &Path) -> Result<()>
-    {
-        let response = reqwest::blocking::get(url)?;
-
-        if response.status().is_success() == false
-        {
-            return Err(format!("Failed to download {}: HTTP {}", url, response.status()).into());
-        }
-
-        let content = response.bytes()?;
-
-        if let Some(parent) = dest_path.parent()
-        {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(dest_path, content)?;
-
-        Ok(())
-    }
-
-    /// Downloads templates from a GitHub URL
-    ///
-    /// Downloads template files from a GitHub repository based on templates.yml configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - GitHub URL to download from
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if URL parsing or download fails
-    fn download_templates_from_url(&self, url: &str) -> Result<()>
-    {
-        let (owner, repo, branch, path) = self.parse_github_url(url).ok_or("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path")?;
-
-        println!("{} Repository: {}/{} (branch: {})", "→".blue(), owner.green(), repo.green(), branch.yellow());
-
-        // Build base raw URL
-        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", owner, repo, branch);
-        let url_path = if path.is_empty() == false
-        {
-            format!("/{}", path)
-        }
-        else
-        {
-            String::new()
-        };
-
-        fs::create_dir_all(&self.config_dir)?;
-
-        // Load template configuration
-        let config = self.load_template_config(Some(&base_url), Some(&url_path))?;
-
-        // Helper closure to download a file entry
-        let download_entry = |source: &str| -> Result<()> {
-            let file_url = format!("{}{}/{}", base_url, url_path, source);
-            let dest_path = self.config_dir.join(source);
-
-            print!("{} Downloading {}... ", "→".blue(), source.yellow());
-            io::stdout().flush()?;
-
-            match self.download_file(&file_url, &dest_path)
-            {
-                | Ok(_) => println!("{}", "✓".green()),
-                | Err(_) => println!("{} (skipped)", "✗".red())
-            }
-            Ok(())
-        };
-
-        // Download main AGENTS.md template if present
-        if let Some(main) = &config.main
-        {
-            download_entry(&main.source)?;
-        }
-
-        // Download principles templates if present
-        if let Some(principles_entries) = &config.principles
-        {
-            for entry in principles_entries
-            {
-                download_entry(&entry.source)?;
-            }
-        }
-
-        // Download mission templates if present
-        if let Some(mission_entries) = &config.mission
-        {
-            for entry in mission_entries
-            {
-                download_entry(&entry.source)?;
-            }
-        }
-
-        // Download language templates
-        for lang_config in config.languages.values()
-        {
-            for file_entry in &lang_config.files
-            {
-                download_entry(&file_entry.source)?;
-            }
-        }
-
-        // Download integration templates
-        if let Some(integration_map) = &config.integration
-        {
-            for integration_config in integration_map.values()
-            {
-                for file_entry in &integration_config.files
-                {
-                    download_entry(&file_entry.source)?;
-                }
-            }
-        }
-
-        // Download agent templates
-        for agent_config in config.agents.values()
-        {
-            // Download instructions files if present
-            if let Some(instructions) = &agent_config.instructions
-            {
-                for instruction in instructions
-                {
-                    let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
-                    let dest_path = self.config_dir.join(&instruction.source);
-
-                    print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
-                    io::stdout().flush()?;
-
-                    match self.download_file(&file_url, &dest_path)
-                    {
-                        | Ok(_) => println!("{}", "✓".green()),
-                        | Err(_) => println!("{} (skipped)", "✗".red())
-                    }
-                }
-            }
-
-            // Download prompt files if present
-            if let Some(prompts) = &agent_config.prompts
-            {
-                for prompt in prompts
-                {
-                    let file_url = format!("{}{}/{}", base_url, url_path, prompt.source);
-                    let dest_path = self.config_dir.join(&prompt.source);
-
-                    print!("{} Downloading {}... ", "→".blue(), prompt.source.yellow());
-                    io::stdout().flush()?;
-
-                    match self.download_file(&file_url, &dest_path)
-                    {
-                        | Ok(_) => println!("{}", "✓".green()),
-                        | Err(_) => println!("{} (skipped)", "✗".red())
-                    }
-                }
-            }
-        }
-
-        println!("{} Templates downloaded successfully", "✓".green());
 
         Ok(())
     }
@@ -419,7 +172,7 @@ impl TemplateManager
         }
 
         // Load template configuration
-        let config = self.load_template_config(None, None)?;
+        let config = self.load_template_config()?;
 
         // Get current working directory and user home directory
         let workspace = std::env::current_dir()?;
