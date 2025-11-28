@@ -52,6 +52,12 @@ impl TemplateManager
         self.config_dir.exists() && self.config_dir.join("templates.yml").exists()
     }
 
+    /// Returns the path to the global template directory
+    pub fn get_config_dir(&self) -> &Path
+    {
+        &self.config_dir
+    }
+
     /// Loads template configuration from templates.yml
     ///
     /// Loads and parses templates.yml from the global config directory.
@@ -158,10 +164,8 @@ impl TemplateManager
     /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Backup or copy operations fail
-    pub fn update(&self, lang: &str, agent: &str, force: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: &str, force: bool, dry_run: bool) -> Result<()>
     {
-        println!("{} Updating templates for {} with {}", "→".blue(), lang.green(), agent.green());
-
         let templates_yml_path = self.config_dir.join("templates.yml");
 
         // Check if global templates exist
@@ -306,8 +310,50 @@ impl TemplateManager
         if skip_agents_md && force == false
         {
             println!("{} Local AGENTS.md has been customized and will be skipped", "!".yellow());
-            println!("{} Other files will still be updated", "→".blue());
+            if dry_run == false
+            {
+                println!("{} Other files will still be updated", "→".blue());
+            }
             println!("{} Use --force to overwrite AGENTS.md", "→".blue());
+        }
+
+        // Dry run mode: just show what would happen
+        if dry_run == true
+        {
+            println!("\n{} Files that would be created/modified:", "→".blue());
+
+            // Show main AGENTS.md status
+            if let Some((_, main_target)) = &main_template
+            {
+                if skip_agents_md && force == false
+                {
+                    println!("  {} {} (skipped - customized)", "○".yellow(), main_target.display());
+                }
+                else if main_target.exists()
+                {
+                    println!("  {} {} (would be overwritten)", "●".yellow(), main_target.display());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), main_target.display());
+                }
+            }
+
+            // Show other files
+            for (_, target) in &files_to_copy
+            {
+                if target.exists()
+                {
+                    println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), target.display());
+                }
+            }
+
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
         }
 
         // Handle main AGENTS.md with fragment merging if fragments exist
@@ -322,7 +368,7 @@ impl TemplateManager
             {
                 println!("{} Merging fragments into AGENTS.md", "→".blue());
                 self.merge_fragments(&main_source, &main_target, &fragments)?;
-                println!("  - Merged: {}", main_target.display().to_string().yellow());
+                println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
             }
             else
             {
@@ -332,7 +378,7 @@ impl TemplateManager
                     fs::create_dir_all(parent)?;
                 }
                 fs::copy(&main_source, &main_target)?;
-                println!("  - Copied: {}", main_target.display().to_string().yellow());
+                println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
             }
         }
 
@@ -342,7 +388,7 @@ impl TemplateManager
         for (source, target) in &files_to_copy
         {
             copy_file_with_mkdir(source, target)?;
-            println!("  - Copied: {}", target.display().to_string().yellow());
+            println!("  {} {}", "✓".green(), target.display().to_string().yellow());
         }
 
         println!("{} Templates updated successfully", "✓".green());
@@ -443,17 +489,13 @@ impl TemplateManager
     /// # Errors
     ///
     /// Returns an error if file deletion fails or templates.yml cannot be loaded
-    pub fn purge(&self, force: bool) -> Result<()>
+    pub fn purge(&self, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
 
-        if force == false && confirm_action(&format!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow()))? == false
-        {
-            println!("{} Operation cancelled", "→".blue());
-            return Ok(());
-        }
-
-        let mut purged_count = 0;
+        // Collect all files to be purged
+        let mut files_to_purge: Vec<PathBuf> = Vec::new();
+        let mut agents_md_skipped = false;
 
         // Load templates.yml and build Bill of Materials to get agent files
         let config_file = self.config_dir.join("templates.yml");
@@ -462,8 +504,6 @@ impl TemplateManager
         {
             let agent_names = bom.get_agent_names();
 
-            // Collect all agent-specific files
-            let mut agent_files: Vec<PathBuf> = Vec::new();
             for agent in &agent_names
             {
                 if let Some(files) = bom.get_agent_files(agent)
@@ -472,32 +512,18 @@ impl TemplateManager
                     {
                         if file.exists() == true
                         {
-                            agent_files.push(file.clone());
+                            files_to_purge.push(file.clone());
                         }
                     }
                 }
             }
-
-            // Remove duplicates
-            agent_files.sort();
-            agent_files.dedup();
-
-            // Remove agent files
-            for file in agent_files
-            {
-                println!("{} Removing {}", "→".blue(), file.display().to_string().yellow());
-                if let Err(e) = remove_file_and_cleanup_parents(&file)
-                {
-                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
-                }
-                else
-                {
-                    purged_count += 1;
-                }
-            }
         }
 
-        // Remove AGENTS.md
+        // Remove duplicates
+        files_to_purge.sort();
+        files_to_purge.dedup();
+
+        // Check AGENTS.md
         let agents_md_path = current_dir.join("AGENTS.md");
         if agents_md_path.exists() == true
         {
@@ -505,15 +531,65 @@ impl TemplateManager
 
             if agents_md_customized == true && force == false
             {
-                println!("{} AGENTS.md has been customized and will not be deleted", "→".yellow());
-                println!("{} Use --force to delete it anyway", "→".yellow());
+                agents_md_skipped = true;
             }
             else
             {
-                println!("{} Removing {}", "→".blue(), agents_md_path.display().to_string().yellow());
-                fs::remove_file(&agents_md_path)?;
+                files_to_purge.push(agents_md_path.clone());
+            }
+        }
+
+        if files_to_purge.is_empty() && agents_md_skipped == false
+        {
+            println!("{} No vibe-check files found to purge", "→".blue());
+            return Ok(());
+        }
+
+        // Dry run mode: just show what would happen
+        if dry_run == true
+        {
+            println!("\n{} Files that would be deleted:", "→".blue());
+
+            for file in &files_to_purge
+            {
+                println!("  {} {}", "●".red(), file.display());
+            }
+
+            if agents_md_skipped == true
+            {
+                println!("  {} {} (skipped - customized, use --force)", "○".yellow(), agents_md_path.display());
+            }
+
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+
+        // Ask for confirmation unless force is true
+        if force == false && confirm_action(&format!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow()))? == false
+        {
+            println!("{} Operation cancelled", "→".blue());
+            return Ok(());
+        }
+
+        // Remove files
+        let mut purged_count = 0;
+        for file in &files_to_purge
+        {
+            println!("{} Removing {}", "→".blue(), file.display().to_string().yellow());
+            if let Err(e) = remove_file_and_cleanup_parents(file)
+            {
+                eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+            }
+            else
+            {
                 purged_count += 1;
             }
+        }
+
+        if agents_md_skipped == true
+        {
+            println!("{} AGENTS.md has been customized and was not deleted", "→".yellow());
+            println!("{} Use --force to delete it anyway", "→".yellow());
         }
 
         if purged_count == 0
@@ -538,6 +614,7 @@ impl TemplateManager
     ///
     /// * `agent` - Optional agent name. If Some, removes files for that agent only. If None, removes files for all agents.
     /// * `force` - If true, skip confirmation prompt
+    /// * `dry_run` - If true, only show what would be removed without actually removing
     ///
     /// # Returns
     ///
@@ -549,7 +626,7 @@ impl TemplateManager
     /// - templates.yml cannot be loaded
     /// - Agent name is not found in the BoM (when agent is Some)
     /// - File deletion fails
-    pub fn remove(&self, agent: Option<&str>, force: bool) -> Result<()>
+    pub fn remove(&self, agent: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         // Load templates.yml and build Bill of Materials
         let config_file = self.config_dir.join("templates.yml");
@@ -607,6 +684,20 @@ impl TemplateManager
         if files_to_remove.is_empty() == true
         {
             println!("{} No files found for {} in current directory", "→".blue(), description);
+            return Ok(());
+        }
+
+        // Dry run mode: just show what would happen
+        if dry_run == true
+        {
+            println!("\n{} Files that would be deleted for {}:", "→".blue(), description);
+
+            for file in &files_to_remove
+            {
+                println!("  {} {}", "●".red(), file.display());
+            }
+
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
             return Ok(());
         }
 

@@ -55,21 +55,33 @@ enum Commands
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
-        force: bool
+        force: bool,
+
+        /// Preview changes without applying them
+        #[arg(long, default_value = "false")]
+        dry_run: bool
     },
     /// Update global templates from source
     Update
     {
         /// Path or URL to download/copy templates from
         #[arg(long)]
-        from: Option<String>
+        from: Option<String>,
+
+        /// Preview changes without applying them
+        #[arg(long, default_value = "false")]
+        dry_run: bool
     },
     /// Purge all vibe-check files from project
     Purge
     {
         /// Force purge without confirmation
         #[arg(long, default_value = "false")]
-        force: bool
+        force: bool,
+
+        /// Preview changes without applying them
+        #[arg(long, default_value = "false")]
+        dry_run: bool
     },
     /// Remove agent-specific files from current directory
     Remove
@@ -84,7 +96,11 @@ enum Commands
 
         /// Force removal without confirmation
         #[arg(long, default_value = "false")]
-        force: bool
+        force: bool,
+
+        /// Preview changes without applying them
+        #[arg(long, default_value = "false")]
+        dry_run: bool
     },
     /// Generate shell completions
     Completions
@@ -111,11 +127,17 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, force } =>
+        | Commands::Init { lang, agent, force, dry_run } =>
         {
             // Check if global templates exist, download if not
             if manager.has_global_templates() == false
             {
+                if dry_run == true
+                {
+                    println!("{} Global templates not found (would download in non-dry-run mode)", "→".yellow());
+                    return;
+                }
+
                 let source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates";
                 println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
 
@@ -127,17 +149,34 @@ fn main()
             }
 
             // Install templates to project
-            println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent.green());
-            manager.update(&lang, &agent, force)
+            if dry_run == true
+            {
+                println!("{} Dry run: previewing changes for {} with {}", "→".blue(), lang.green(), agent.green());
+            }
+            else
+            {
+                println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent.green());
+            }
+            manager.update(&lang, &agent, force, dry_run)
         }
-        | Commands::Update { from } =>
+        | Commands::Update { from, dry_run } =>
         {
             let source = from.as_deref().unwrap_or("https://github.com/heikopanjas/vibe-check/tree/develop/templates");
-            println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-            manager.download_or_copy_templates(source)
+            if dry_run == true
+            {
+                println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
+                println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
+                println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                Ok(())
+            }
+            else
+            {
+                println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+                manager.download_or_copy_templates(source)
+            }
         }
-        | Commands::Purge { force } => manager.purge(force),
-        | Commands::Remove { agent, all, force } =>
+        | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
+        | Commands::Remove { agent, all, force, dry_run } =>
         {
             // Validate mutually exclusive options
             if all == true && agent.is_some() == true
@@ -151,7 +190,7 @@ fn main()
             else
             {
                 // Pass None for --all, or Some(&agent) for specific agent
-                manager.remove(agent.as_deref(), force)
+                manager.remove(agent.as_deref(), force, dry_run)
             }
         }
         | Commands::Completions { shell } =>

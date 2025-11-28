@@ -238,12 +238,13 @@ Download and update global templates from a source repository.
 **Usage:**
 
 ```bash
-vibe-check update [--from <PATH or URL>]
+vibe-check update [--from <PATH or URL>] [--dry-run]
 ```
 
 **Options:**
 
 - `--from <string>` - Optional path or URL to download/copy templates from
+- `--dry-run` - Preview what would be downloaded without making changes
 
 **Examples:**
 
@@ -256,6 +257,9 @@ vibe-check update --from https://github.com/user/repo/tree/branch/templates
 
 # Update from local path
 vibe-check update --from /path/to/templates
+
+# Preview what would be downloaded
+vibe-check update --dry-run
 ```
 
 **Behavior:**
@@ -267,6 +271,7 @@ vibe-check update --from /path/to/templates
 - Stores templates in local data directory:
   - Linux: `$HOME/.local/share/vibe-check/templates`
   - macOS: `$HOME/Library/Application Support/vibe-check/templates`
+- If `--dry-run` is specified, shows the source URL and target directory without downloading
 - Overwrites existing global templates with new versions
 - Does NOT modify any files in the current project directory
 
@@ -279,7 +284,7 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-vibe-check init --lang <language> --agent <agent> [--force]
+vibe-check init --lang <language> --agent <agent> [--force] [--dry-run]
 ```
 
 **Options:**
@@ -287,6 +292,7 @@ vibe-check init --lang <language> --agent <agent> [--force]
 - `--lang <string>` - Programming language or framework (e.g., c++, rust, swift)
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--force` - Force overwrite of local files without confirmation
+- `--dry-run` - Preview changes without applying them
 
 **Examples:**
 
@@ -299,6 +305,9 @@ vibe-check init --lang rust --agent copilot
 
 # Force overwrite existing local files
 vibe-check init --lang swift --agent cursor --force
+
+# Preview what would be created/modified
+vibe-check init --lang rust --agent claude --dry-run
 ```
 
 **Behavior:**
@@ -308,6 +317,7 @@ vibe-check init --lang swift --agent cursor --force
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
 - If `--force` is specified, overwrites local files regardless of modifications
+- If `--dry-run` is specified, shows what would be created/modified without making changes
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
@@ -320,12 +330,13 @@ Purge all vibe-check files from the current project directory.
 **Usage:**
 
 ```bash
-vibe-check purge [--force]
+vibe-check purge [--force] [--dry-run]
 ```
 
 **Options:**
 
 - `--force` - Force purge without confirmation and delete customized AGENTS.md
+- `--dry-run` - Preview what would be deleted without making changes
 
 **Examples:**
 
@@ -335,6 +346,9 @@ vibe-check purge
 
 # Force purge without confirmation
 vibe-check purge --force
+
+# Preview what would be deleted
+vibe-check purge --dry-run
 ```
 
 **Behavior:**
@@ -344,6 +358,7 @@ vibe-check purge --force
 - Removes AGENTS.md from current directory
 - Automatically cleans up empty parent directories after file removal
 - Does NOT affect global templates in local data directory
+- If `--dry-run` is specified, shows files that would be deleted without removing them
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
     - AGENTS.md is skipped and preserved
@@ -361,10 +376,10 @@ Remove agent-specific files from the current directory based on the Bill of Mate
 
 ```bash
 # Remove specific agent's files
-vibe-check remove --agent <agent> [--force]
+vibe-check remove --agent <agent> [--force] [--dry-run]
 
 # Remove all agent-specific files (keeps AGENTS.md)
-vibe-check remove --all [--force]
+vibe-check remove --all [--force] [--dry-run]
 ```
 
 **Options:**
@@ -372,6 +387,7 @@ vibe-check remove --all [--force]
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--all` - Remove all agent-specific files (cannot be used with --agent)
 - `--force` - Force removal without confirmation
+- `--dry-run` - Preview what would be deleted without making changes
 
 **Examples:**
 
@@ -387,6 +403,9 @@ vibe-check remove --all
 
 # Remove all agents with force
 vibe-check remove --all --force
+
+# Preview what would be deleted
+vibe-check remove --all --dry-run
 ```
 
 **Behavior:**
@@ -396,6 +415,7 @@ vibe-check remove --all --force
 - Only removes files that exist in the current directory
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
+- If `--dry-run` is specified, shows files that would be deleted without removing them
 - Removes agent-specific files (instructions and prompts)
 - Automatically cleans up empty parent directories
 - **NEVER touches AGENTS.md** (use `purge` command to remove AGENTS.md)
@@ -779,6 +799,77 @@ git diff
   - Skip options: `editorconfig`, `format`, `gitignore`, `gitattributes`
   - Maintain AGENTS.md and agent instructions (never skippable)
   - Document skip options in CLI help text
+
+---
+
+## Future CLI Enhancements
+
+**Planned improvements for CLI usability and modern tooling standards:**
+
+### High Priority
+
+- [x] **Add `--dry-run` flag** - Preview changes without applying them
+  - Available on `init`, `update`, `purge`, and `remove` commands
+  - Show exactly which files would be created, modified, or deleted
+  - Display file paths with color coding (green=create, yellow=modify, red=delete)
+  - Exit with success after preview (no actual changes made)
+  - Pairs well with `--preview` flag for init command
+
+- [ ] **Add `status` command** - Show current project state
+  - Display which agent is configured (if any)
+  - Show which language templates are installed
+  - Indicate if AGENTS.md has been customized
+  - List all vibe-check managed files in current directory
+  - Show global template status (downloaded, version/date)
+
+### Medium Priority
+
+- [ ] **Add `--verbose` / `-v` flag** - Show detailed output
+  - Display full file paths during operations
+  - Show individual file copy/delete actions
+  - Include timing information for operations
+  - Stack with `-vv` for even more detail (debug level)
+
+- [ ] **Add `--no-color` flag** - Disable colored output
+  - Essential for CI/CD environments
+  - Required when piping output to files or other commands
+  - Respect `NO_COLOR` environment variable (standard convention)
+  - Consider `CLICOLOR` and `CLICOLOR_FORCE` for compatibility
+
+- [ ] **Add `diff` command** - Compare local vs template versions
+  - Show differences between installed files and global templates
+  - Highlight customizations made to AGENTS.md
+  - Support `--stat` for summary view (like git diff --stat)
+  - Color-coded output (additions in green, deletions in red)
+
+### Low Priority
+
+- [ ] **Add `--quiet` / `-q` flag** - Suppress non-essential output
+  - Only show errors and critical warnings
+  - Useful for scripting and automation
+  - Exit codes remain meaningful for error detection
+
+- [ ] **Add `--json` output flag** - Machine-readable output
+  - Available on `list`, `status`, and `validate` commands
+  - Structured JSON output for scripting and automation
+  - Include all relevant metadata (paths, versions, status)
+  - Follow JSON Lines format for streaming output
+
+- [ ] **Add man page generation** - Unix manual pages
+  - Use `clap_mangen` crate for generation
+  - Generate during build or as separate command
+  - Include in release artifacts for package managers
+  - Document installation in README
+
+### Implementation Guidelines
+
+- Implement flags in order of priority (high → medium → low)
+- Each feature should be a separate commit with version bump
+- High priority items: MINOR version bump (new features)
+- Medium/low priority items: MINOR version bump (new features)
+- Update CLI help text and AGENTS.md documentation
+- Add changelog entry to Recent Updates & Decisions section
+- Consider backward compatibility for all changes
 
 **Implementation Notes:**
 
@@ -1336,3 +1427,23 @@ git diff
 - Removed elvish from available shell completions
 - Bumped version from 4.1.0 to 4.1.1 (PATCH version for refinement)
 - Reasoning: Elvish is not a commonly used shell and was included by default from clap_complete. Restricting to the four main shells (bash, fish, powershell, zsh) provides a cleaner user experience.
+
+### 2025-11-28 (Dry Run Flag for Init)
+
+- Added `--dry-run` flag to `init` command
+- Shows preview of files that would be created or modified
+- Color-coded output: green for new files, yellow for files that would be overwritten
+- Respects AGENTS.md customization detection (shows as skipped if customized)
+- No files are modified when dry-run is active
+- Bumped version from 4.1.1 to 4.2.0 (MINOR version for new feature)
+- Reasoning: Dry-run mode allows users to preview changes before committing to them, reducing the risk of unintended modifications and improving user confidence in the tool.
+
+### 2025-11-28 (Dry Run Flag for All Commands)
+
+- Extended `--dry-run` flag to `update`, `purge`, and `remove` commands
+- `update --dry-run` shows source URL and target directory
+- `purge --dry-run` shows files that would be deleted (red color)
+- `remove --dry-run` shows agent-specific files that would be deleted
+- Added `get_config_dir()` method to TemplateManager for dry-run output
+- Updated AGENTS.md documentation for all commands
+- Reasoning: Consistent dry-run support across all commands provides users with a complete preview capability before any file system modifications.
