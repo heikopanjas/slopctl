@@ -460,6 +460,53 @@ vibe-check completions powershell > vibe-check.ps1
 - User redirects output to appropriate location for their shell
 - Supports bash, zsh, fish, and PowerShell
 
+### `status` - Show Project Status
+
+Display the current status of vibe-check in the project.
+
+**Usage:**
+
+```bash
+vibe-check status
+```
+
+**Examples:**
+
+```bash
+# Show current project status
+vibe-check status
+```
+
+**Output includes:**
+
+- **Global Templates:** Whether templates are installed and their location
+  - Available agents (from templates.yml)
+  - Available languages (from templates.yml)
+- **Project Status:**
+  - AGENTS.md existence and customization status
+  - Which agents are currently installed
+- **Managed Files:** List of all vibe-check managed files in current directory
+
+**Example output:**
+
+```
+vibe-check status
+
+Global Templates:
+  ✓ Installed at: /Users/.../vibe-check/templates
+  → Available agents: claude, copilot, codex, cursor
+  → Available languages: c, c++, rust, swift
+
+Project Status:
+  ✓ AGENTS.md: exists (customized)
+  ✓ Installed agents: claude, copilot
+
+Managed Files:
+  • AGENTS.md
+  • .claude/commands/init-session.md
+  • CLAUDE.md
+```
+
 ## Repository Structure
 
 ```text
@@ -815,7 +862,7 @@ git diff
   - Exit with success after preview (no actual changes made)
   - Pairs well with `--preview` flag for init command
 
-- [ ] **Add `status` command** - Show current project state
+- [x] **Add `status` command** - Show current project state
   - Display which agent is configured (if any)
   - Show which language templates are installed
   - Indicate if AGENTS.md has been customized
@@ -1447,3 +1494,13 @@ git diff
 - Added `get_config_dir()` method to TemplateManager for dry-run output
 - Updated AGENTS.md documentation for all commands
 - Reasoning: Consistent dry-run support across all commands provides users with a complete preview capability before any file system modifications.
+
+### 2025-11-28 (Status Command)
+
+- Added `status` command to show current project state
+- Displays global template status (installed location, available agents and languages)
+- Shows AGENTS.md status (exists, customized or from template)
+- Lists installed agents detected from file presence
+- Shows all vibe-check managed files in current directory
+- Bumped version from 4.2.0 to 4.3.0 (MINOR version for new feature)
+- Reasoning: The status command helps users understand what is currently configured in their project, making it easier to manage and troubleshoot vibe-check installations.

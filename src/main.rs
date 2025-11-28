@@ -108,7 +108,9 @@ enum Commands
         /// Shell to generate completions for
         #[arg(value_enum)]
         shell: ShellType
-    }
+    },
+    /// Show current project status
+    Status
 }
 
 fn main()
@@ -199,6 +201,7 @@ fn main()
             generate(shell, &mut Cli::command(), "vibe-check", &mut io::stdout());
             Ok(())
         }
+        | Commands::Status => manager.status()
     };
 
     if let Err(e) = result
