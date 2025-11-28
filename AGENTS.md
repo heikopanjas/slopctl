@@ -1329,3 +1329,10 @@ git diff
 - Outputs completion script to stdout for user to redirect to appropriate location
 - Bumped version from 4.0.4 to 4.1.0 (MINOR version for new feature)
 - Reasoning: Shell completions improve user experience by enabling tab completion for commands, options, and arguments. Using clap_complete integrates seamlessly with the existing clap CLI framework.
+
+### 2025-11-28 (Shell Completions - Restrict Shells)
+
+- Created custom ShellType enum to limit shell options to bash, fish, powershell, zsh
+- Removed elvish from available shell completions
+- Bumped version from 4.1.0 to 4.1.1 (PATCH version for refinement)
+- Reasoning: Elvish is not a commonly used shell and was included by default from clap_complete. Restricting to the four main shells (bash, fish, powershell, zsh) provides a cleaner user experience.

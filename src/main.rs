@@ -1,9 +1,33 @@
 use std::io;
 
-use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{Shell, generate};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::generate;
 use owo_colors::OwoColorize;
 use vibe_check::TemplateManager;
+
+/// Supported shells for completion generation
+#[derive(Clone, Copy, ValueEnum)]
+enum ShellType
+{
+    Bash,
+    Fish,
+    Powershell,
+    Zsh
+}
+
+impl From<ShellType> for clap_complete::Shell
+{
+    fn from(shell: ShellType) -> Self
+    {
+        match shell
+        {
+            | ShellType::Bash => clap_complete::Shell::Bash,
+            | ShellType::Fish => clap_complete::Shell::Fish,
+            | ShellType::Powershell => clap_complete::Shell::PowerShell,
+            | ShellType::Zsh => clap_complete::Shell::Zsh
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "vibe-check")]
@@ -65,9 +89,9 @@ enum Commands
     /// Generate shell completions
     Completions
     {
-        /// Shell to generate completions for (bash, zsh, fish, powershell)
+        /// Shell to generate completions for
         #[arg(value_enum)]
-        shell: Shell
+        shell: ShellType
     }
 }
 
@@ -132,6 +156,7 @@ fn main()
         }
         | Commands::Completions { shell } =>
         {
+            let shell: clap_complete::Shell = shell.into();
             generate(shell, &mut Cli::command(), "vibe-check", &mut io::stdout());
             Ok(())
         }
