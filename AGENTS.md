@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-17
+**Last updated:** 2025-11-28
 
 ## General Instructions
 
@@ -231,6 +231,52 @@ Templates are stored in the local data directory (e.g., `$HOME/.local/share/vibe
 
 ## CLI Commands
 
+### `update` - Update Global Templates
+
+Download and update global templates from a source repository.
+
+**Usage:**
+
+```bash
+vibe-check update [--from <PATH or URL>] [--dry-run]
+```
+
+**Options:**
+
+- `--from <string>` - Optional path or URL to download/copy templates from
+- `--dry-run` - Preview what would be downloaded without making changes
+
+**Examples:**
+
+```bash
+# Update global templates from default repository
+vibe-check update
+
+# Update from custom URL
+vibe-check update --from https://github.com/user/repo/tree/branch/templates
+
+# Update from local path
+vibe-check update --from /path/to/templates
+
+# Preview what would be downloaded
+vibe-check update --dry-run
+```
+
+**Behavior:**
+
+- Downloads templates from specified source or default GitHub repository
+- If `--from` is not specified, downloads from:
+  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
+- Downloads `templates.yml` configuration file and all template files
+- Stores templates in local data directory:
+  - Linux: `$HOME/.local/share/vibe-check/templates`
+  - macOS: `$HOME/Library/Application Support/vibe-check/templates`
+- If `--dry-run` is specified, shows the source URL and target directory without downloading
+- Overwrites existing global templates with new versions
+- Does NOT modify any files in the current project directory
+
+**Note:** Run `update` first to download templates before using `init` to set up a project.
+
 ### `init` - Initialize Agent Instructions
 
 Initialize instruction files for AI coding agents in your project.
@@ -238,118 +284,71 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-# Download global templates only
-vibe-check init [--from <PATH or URL>]
-
-# Download and install templates for a project
-vibe-check init --lang <language> --agent <agent> [--force] [--from <PATH or URL>]
+vibe-check init --lang <language> --agent <agent> [--force] [--dry-run]
 ```
 
 **Options:**
 
-- `--lang <string>` - (Optional) Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - (Optional) AI coding agent (e.g., claude, copilot, codex)
+- `--lang <string>` - Programming language or framework (e.g., c++, rust, swift)
+- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--force` - Force overwrite of local files without confirmation
-- `--from <string>` - Optional path or URL to copy/download templates from
+- `--dry-run` - Preview changes without applying them
 
 **Examples:**
 
 ```bash
-# Download global templates only (no local installation)
-vibe-check init
-
 # Initialize C++ project with Claude
 vibe-check init --lang c++ --agent claude
 
-# Initialize from local path
-vibe-check init --lang c++ --agent claude --from /path/to/templates
-
-# Initialize from URL
-vibe-check init --lang c++ --agent claude --from https://github.com/user/repo/tree/branch/templates
+# Initialize Rust project with Copilot
+vibe-check init --lang rust --agent copilot
 
 # Force overwrite existing local files
-vibe-check init --lang rust --agent copilot --force
+vibe-check init --lang swift --agent cursor --force
+
+# Preview what would be created/modified
+vibe-check init --lang rust --agent claude --dry-run
 ```
 
 **Behavior:**
 
-- Always updates global templates first (downloads or copies from source)
-- Downloads `templates.yml` configuration file to determine which templates to install
-- If `--from` is not specified, downloads from:
-  `https://github.com/heikopanjas/vibe-check/tree/develop/templates`
-- If `--from` is specified, updates global templates from that location
-- **If `--lang` and `--agent` are provided:**
-  - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-  - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
-  - If `--force` is specified, overwrites local files regardless of modifications
-  - Files are placed according to `templates.yml` configuration with placeholder resolution:
-    - `$workspace` resolves to current directory
-    - `$userprofile` resolves to user's home directory
-- **If `--lang` and `--agent` are omitted:**
-  - Only downloads global templates (no local installation)
-  - Use this to pre-download templates or update global template cache
-
-### `update` - Update Local Templates
-
-Update local templates from global storage.
-
-**Usage:**
-
-```bash
-vibe-check update --lang <language> --agent <agent> [--force]
-```
-
-**Options:**
-
-- `--lang <string>` - Programming language or framework (e.g., c++, rust)
-- `--agent <string>` - AI coding agent (e.g., claude, copilot, codex)
-- `--force` - Force overwrite of local files without confirmation
-
-**Examples:**
-
-```bash
-# Update local templates from global storage
-vibe-check update --lang c++ --agent claude
-
-# Force overwrite customized local files
-vibe-check update --lang rust --agent copilot --force
-```
-
-**Behavior:**
-
-- Uses existing global templates (does not download new ones)
-- Requires global templates to exist (run `init` first if not present)
+- Uses global templates to set up agent instructions in the current project
+- If global templates do not exist, automatically downloads them from the default repository
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
-- If local AGENTS.md has been customized and `--force` is not specified, aborts with error
+- If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
 - If `--force` is specified, overwrites local files regardless of modifications
+- If `--dry-run` is specified, shows what would be created/modified without making changes
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
   - `$workspace` resolves to current directory
   - `$userprofile` resolves to user's home directory
+- Merges language-specific and integration fragments into AGENTS.md
 
-**Note:** The `update` command behaves exactly like `init` except it does not download new global templates. Use `init` to refresh global templates or `update` to sync local files with existing global templates.
+### `purge` - Purge All Vibe-Check Files
 
-### `clear` - Clear Local Templates
-
-Clear all local templates from the current directory.
+Purge all vibe-check files from the current project directory.
 
 **Usage:**
 
 ```bash
-vibe-check clear [--force]
+vibe-check purge [--force] [--dry-run]
 ```
 
 **Options:**
 
-- `--force` - Force clear without confirmation and delete customized AGENTS.md
+- `--force` - Force purge without confirmation and delete customized AGENTS.md
+- `--dry-run` - Preview what would be deleted without making changes
 
 **Examples:**
 
 ```bash
-# Clear local templates with confirmation prompt
-vibe-check clear
+# Purge all vibe-check files with confirmation prompt
+vibe-check purge
 
-# Force clear without confirmation
-vibe-check clear --force
+# Force purge without confirmation
+vibe-check purge --force
+
+# Preview what would be deleted
+vibe-check purge --dry-run
 ```
 
 **Behavior:**
@@ -359,6 +358,7 @@ vibe-check clear --force
 - Removes AGENTS.md from current directory
 - Automatically cleans up empty parent directories after file removal
 - Does NOT affect global templates in local data directory
+- If `--dry-run` is specified, shows files that would be deleted without removing them
 - **AGENTS.md Protection:**
   - If AGENTS.md has been customized (template marker removed) and `--force` is NOT specified:
     - AGENTS.md is skipped and preserved
@@ -376,10 +376,10 @@ Remove agent-specific files from the current directory based on the Bill of Mate
 
 ```bash
 # Remove specific agent's files
-vibe-check remove --agent <agent> [--force]
+vibe-check remove --agent <agent> [--force] [--dry-run]
 
 # Remove all agent-specific files (keeps AGENTS.md)
-vibe-check remove --all [--force]
+vibe-check remove --all [--force] [--dry-run]
 ```
 
 **Options:**
@@ -387,6 +387,7 @@ vibe-check remove --all [--force]
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--all` - Remove all agent-specific files (cannot be used with --agent)
 - `--force` - Force removal without confirmation
+- `--dry-run` - Preview what would be deleted without making changes
 
 **Examples:**
 
@@ -402,6 +403,9 @@ vibe-check remove --all
 
 # Remove all agents with force
 vibe-check remove --all --force
+
+# Preview what would be deleted
+vibe-check remove --all --dry-run
 ```
 
 **Behavior:**
@@ -411,13 +415,206 @@ vibe-check remove --all --force
 - Only removes files that exist in the current directory
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
+- If `--dry-run` is specified, shows files that would be deleted without removing them
 - Removes agent-specific files (instructions and prompts)
 - Automatically cleans up empty parent directories
-- **NEVER touches AGENTS.md** (use `clear` command to remove AGENTS.md)
+- **NEVER touches AGENTS.md** (use `purge` command to remove AGENTS.md)
 - Does NOT affect global templates in local data directory
 - If agent not found in BoM, shows list of available agents
 - Cannot specify both `--agent` and `--all` (mutually exclusive)
 - Must specify either `--agent` or `--all`
+
+### `completions` - Generate Shell Completions
+
+Generate shell completion scripts for various shells.
+
+**Usage:**
+
+```bash
+vibe-check completions <shell>
+```
+
+**Arguments:**
+
+- `<shell>` - Shell to generate completions for: `bash`, `zsh`, `fish`, `powershell`
+
+**Examples:**
+
+```bash
+# Generate zsh completions
+vibe-check completions zsh > ~/.zsh/completions/_vibe-check
+
+# Generate bash completions
+vibe-check completions bash > ~/.bash_completion.d/vibe-check
+
+# Generate fish completions
+vibe-check completions fish > ~/.config/fish/completions/vibe-check.fish
+
+# Generate PowerShell completions
+vibe-check completions powershell > vibe-check.ps1
+```
+
+**Behavior:**
+
+- Outputs shell completion script to stdout
+- User redirects output to appropriate location for their shell
+- Supports bash, zsh, fish, and PowerShell
+
+### `status` - Show Project Status
+
+Display the current status of vibe-check in the project.
+
+**Usage:**
+
+```bash
+vibe-check status
+```
+
+**Examples:**
+
+```bash
+# Show current project status
+vibe-check status
+```
+
+**Output includes:**
+
+- **Global Templates:** Whether templates are installed and their location
+  - Available agents (from templates.yml)
+  - Available languages (from templates.yml)
+- **Project Status:**
+  - AGENTS.md existence and customization status
+  - Which agents are currently installed
+- **Managed Files:** List of all vibe-check managed files in current directory
+
+**Example output:**
+
+```
+vibe-check status
+
+Global Templates:
+  ✓ Installed at: /Users/.../vibe-check/templates
+  → Available agents: claude, copilot, codex, cursor
+  → Available languages: c, c++, rust, swift
+
+Project Status:
+  ✓ AGENTS.md: exists (customized)
+  ✓ Installed agents: claude, copilot
+
+Managed Files:
+  • AGENTS.md
+  • .claude/commands/init-session.md
+  • CLAUDE.md
+```
+
+### `list` - List Available Options
+
+List all available agents and languages from global templates.
+
+**Usage:**
+
+```bash
+vibe-check list
+```
+
+**Examples:**
+
+```bash
+# List available agents and languages
+vibe-check list
+```
+
+**Output includes:**
+
+- **Available Agents:** All agents defined in templates.yml with installation status
+- **Available Languages:** All languages defined in templates.yml
+
+**Example output:**
+
+```
+vibe-check list
+
+Available Agents:
+  ✓ claude (installed)
+  ○ codex
+  ✓ copilot (installed)
+  ○ cursor
+
+Available Languages:
+  • c
+  • c++
+  • rust
+  • swift
+
+→ Use 'vibe-check init --lang <lang> --agent <agent>' to install
+```
+
+**Behavior:**
+
+- Shows all agents available in global templates with installation status
+- Shows all languages available in global templates
+- Agents show ✓ (installed) or ○ (available) based on file presence
+- Languages are listed without status (content is merged into AGENTS.md)
+- Provides guidance on how to install
+
+### `config` - Manage Configuration
+
+Manage persistent configuration settings using Git-style dotted keys.
+
+**Usage:**
+
+```bash
+vibe-check config <key> <value>    # Set a configuration value
+vibe-check config <key>            # Get a configuration value
+vibe-check config --list           # List all configuration values
+vibe-check config --unset <key>    # Remove a configuration value
+```
+
+**Options:**
+
+- `<key>` - Configuration key (e.g., source.url)
+- `<value>` - Value to set (omit to get current value)
+- `--list` - List all configuration values
+- `--unset <key>` - Remove a configuration key
+
+**Examples:**
+
+```bash
+# Set custom template source
+vibe-check config source.url https://github.com/myteam/templates/tree/main/templates
+
+# Get current source URL
+vibe-check config source.url
+
+# List all configuration
+vibe-check config --list
+
+# Remove custom source (revert to default)
+vibe-check config --unset source.url
+
+# Set fallback source for resilience
+vibe-check config source.fallback https://github.com/heikopanjas/vibe-check/tree/develop/templates
+
+# Show help and valid keys
+vibe-check config
+```
+
+**Valid Configuration Keys:**
+
+- `source.url` - Default template download URL (used by `update` and `init` when `--from` not specified)
+- `source.fallback` - Fallback URL used when primary source fails or is unreachable
+
+**Configuration File Location:**
+
+- Linux: `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
+- macOS: `~/.config/vibe-check/config.yml`
+
+**Behavior:**
+
+- Configuration persists between sessions
+- `update` command uses `source.url` if set and `--from` not specified
+- `init` command uses `source.url` when downloading missing global templates
+- Empty configuration file is valid (all defaults used)
 
 ## Repository Structure
 
@@ -425,12 +622,16 @@ vibe-check remove --all --force
 vibe-check/
 ├── Cargo.toml                  # Rust project manifest
 ├── Cargo.lock                  # Dependency lock file
+├── build.rs                    # Build script for man page generation
 ├── .rustfmt.toml               # Rust formatting configuration
 ├── src/                        # Rust source code
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
 │   ├── bom.rs                  # Bill of Materials structures and functions
-│   ├── template_manager.rs    # TemplateManager implementation
+│   ├── config.rs               # Configuration management
+│   ├── download_manager.rs     # DownloadManager for URL downloads
+│   ├── template_engine_v1.rs   # Template engine for version 1 templates
+│   ├── template_manager.rs     # TemplateManager implementation
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # Main documentation
@@ -440,13 +641,31 @@ vibe-check/
 │   ├── AGENTS.md               # Template for project-specific agent instructions
 │   ├── best-practices.md       # Best practices template (fragment)
 │   ├── build-environment.md    # Generic build environment template (fragment)
+│   ├── c-coding-conventions.md # C coding standards template (fragment)
+│   ├── c-editor-config.ini     # EditorConfig for C projects
+│   ├── c-format-instructions.yml  # clang-format config for C
+│   ├── c-git-ignore.txt        # C .gitignore template
 │   ├── c++-coding-conventions.md  # C++ coding standards template (fragment)
-│   ├── cmake-build-commands.md # CMake/C++ build commands template (fragment)
+│   ├── c++-editor-config.ini   # EditorConfig for C++ projects
+│   ├── c++-format-instructions.yml  # clang-format config for C++
+│   ├── c++-git-ignore.txt      # C++ .gitignore template
+│   ├── cmake-build-commands.md # CMake build commands template (fragment)
 │   ├── core-principles.md      # Core principles template (fragment)
+│   ├── git-attributes-common.txt  # Common .gitattributes template (cross-platform)
 │   ├── git-workflow-conventions.md  # Git workflow template (fragment)
+│   ├── make-build-commands.md  # Make build commands template (fragment)
 │   ├── mission-statement.md    # Mission statement template (fragment)
 │   ├── rust-coding-conventions.md  # Rust coding standards template (fragment)
 │   ├── rust-build-commands.md  # Rust build commands template (fragment)
+│   ├── rust-editor-config.ini  # EditorConfig for Rust projects
+│   ├── rust-format-instructions.toml  # rustfmt config for Rust
+│   ├── rust-git-ignore.txt     # Rust .gitignore template
+│   ├── semantic-versioning.md  # Semantic versioning template (fragment)
+│   ├── swift-coding-conventions.md  # Swift coding standards template (fragment)
+│   ├── swift-build-commands.md # Swift build commands template (fragment)
+│   ├── swift-editor-config.ini # EditorConfig for Swift projects
+│   ├── swift-format-instructions.json  # swift-format config for Swift
+│   ├── swift-git-ignore.txt    # Swift .gitignore template
 │   ├── technology-stack.md     # Technology stack template (fragment)
 │   ├── claude/
 │   │   ├── CLAUDE.md           # Claude main instruction file
@@ -554,8 +773,8 @@ The system downloads templates.yml first; if download fails, the operation stops
   - Stops operation if AGENTS.md is customized and `force` is false
   - Copies template files from local data directory to resolved target paths
 
-- `clear(force: bool)` - Clear local templates from current directory
-  - `force` - If true, clear templates without confirmation
+- `purge(force: bool)` - Purge all vibe-check files from current directory
+  - `force` - If true, purge without confirmation
   - Removes agent instruction directories (.claude, .copilot, .codex) from current directory
   - Removes language template files for supported languages (c, c++, swift, rust) from current directory
   - Does NOT affect global templates in local data directory
@@ -567,6 +786,33 @@ The system downloads templates.yml first; if download fails, the operation stops
 - Validate arguments early and provide clear error messages
 - Use `owo-colors` for user-friendly terminal output
 - Provide helpful examples in `--help` output
+
+### Code Formatting Tools
+
+The project includes language-specific formatting configurations:
+
+- **C/C++**: Uses clang-format
+  - Configuration: `.clang-format` (YAML format)
+  - Documentation: <https://clang.llvm.org/docs/ClangFormatStyleOptions.html>
+  - C uses 120 character line limit, C17 standard
+  - C++ uses 160 character line limit, latest standard
+
+- **Rust**: Uses rustfmt
+  - Configuration: `.rustfmt.toml` (TOML format)
+  - Documentation: <https://rust-lang.github.io/rustfmt/>
+  - Edition 2024, 167 character line limit
+
+- **Swift**: Uses swift-format
+  - Configuration: `.swift-format` (JSON format)
+  - Documentation: <https://github.com/apple/swift-format/blob/main/Documentation/Configuration.md>
+  - 147 character line limit
+
+- **EditorConfig**: Cross-editor baseline formatting
+  - Configuration: `.editorconfig` (INI format)
+  - Documentation: <https://editorconfig.org/>
+  - Provides charset control (C uses latin1, others use utf-8)
+  - Handles line endings, trailing whitespace, final newline
+  - Complements language-specific formatters
 
 ### Markdown Style
 
@@ -679,6 +925,85 @@ git diff
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
+
+---
+
+## Future CLI Enhancements
+
+**Planned improvements for CLI usability and modern tooling standards:**
+
+### High Priority
+
+- [x] **Add `--dry-run` flag** - Preview changes without applying them
+  - Available on `init`, `update`, `purge`, and `remove` commands
+  - Show exactly which files would be created, modified, or deleted
+  - Display file paths with color coding (green=create, yellow=modify, red=delete)
+  - Exit with success after preview (no actual changes made)
+  - Pairs well with `--preview` flag for init command
+
+- [x] **Add `status` command** - Show current project state
+  - Display which agent is configured (if any)
+  - Show which language templates are installed
+  - Indicate if AGENTS.md has been customized
+  - List all vibe-check managed files in current directory
+  - Show global template status (downloaded, version/date)
+
+### Medium Priority
+
+- [ ] **Add `--verbose` / `-v` flag** - Show detailed output
+  - Display full file paths during operations
+  - Show individual file copy/delete actions
+  - Include timing information for operations
+  - Stack with `-vv` for even more detail (debug level)
+
+- [ ] **Add `--no-color` flag** - Disable colored output
+  - Essential for CI/CD environments
+  - Required when piping output to files or other commands
+  - Respect `NO_COLOR` environment variable (standard convention)
+  - Consider `CLICOLOR` and `CLICOLOR_FORCE` for compatibility
+
+- [ ] **Add `diff` command** - Compare local vs template versions
+  - Show differences between installed files and global templates
+  - Highlight customizations made to AGENTS.md
+  - Support `--stat` for summary view (like git diff --stat)
+  - Color-coded output (additions in green, deletions in red)
+
+### Low Priority
+
+- [ ] **Add `--quiet` / `-q` flag** - Suppress non-essential output
+  - Only show errors and critical warnings
+  - Useful for scripting and automation
+  - Exit codes remain meaningful for error detection
+
+- [ ] **Add `--json` output flag** - Machine-readable output
+  - Available on `list`, `status`, and `validate` commands
+  - Structured JSON output for scripting and automation
+  - Include all relevant metadata (paths, versions, status)
+  - Follow JSON Lines format for streaming output
+
+- [x] **Add man page generation** - Unix manual pages
+  - Use `clap_mangen` crate for generation
+  - Generate during release builds via build.rs
+  - Man page output at `target/release/build/vibe-check-*/out/man/vibe-check.1`
+  - Include in release artifacts for package managers
+
+### Implementation Guidelines
+
+- Implement flags in order of priority (high → medium → low)
+- Each feature should be a separate commit with version bump
+- High priority items: MINOR version bump (new features)
+- Medium/low priority items: MINOR version bump (new features)
+- Update CLI help text and AGENTS.md documentation
+- Add changelog entry to Recent Updates & Decisions section
+- Consider backward compatibility for all changes
+
+**Implementation Notes:**
+
+- Each TODO should be completed as a separate commit
+- Update this list as items are completed (check boxes)
+- Add new Quick Wins to the list as they are identified
+- Include version bump in the same commit (MINOR for new features)
+- Add detailed entry to Recent Updates & Decisions section when complete
 
 ---
 
@@ -1092,3 +1417,222 @@ git diff
 - **Breaking Change:** Clear command now always targets AGENTS.md for removal (with protection for customized files)
 - Users who want to keep AGENTS.md should use `remove --all` instead
 - Reasoning: The language template scanning was legacy code from when templates were separate files. Modern vibe-check merges language templates into AGENTS.md as fragments, making the scanning logic obsolete. Removing it simplifies the codebase and clarifies the command's purpose: complete local cleanup of all vibe-check files. This is a breaking change because the command behavior changed - it now always attempts to remove AGENTS.md instead of only agent-specific files.
+
+### 2025-11-20 (Documentation Cleanup)
+
+- Removed outdated SHA checksum references from documentation comments in template_manager.rs
+- Removed "Creates SHA checksums" line from download_or_copy_templates() doc comment
+- Removed "Creates SHA checksums" line from download_templates_from_url() doc comment
+- No code changes, only documentation cleanup
+- Version remains 3.0.0 (documentation-only change, no version bump needed)
+- Reasoning: The checksum system was removed on 2025-11-14, but outdated documentation comments remained in the code. This cleanup ensures documentation accurately reflects the current implementation and prevents confusion for developers reading the code.
+
+### 2025-11-20 (Init Command Output Cleanup)
+
+- Removed redundant "Global templates downloaded successfully" message from init command
+- When running init without --lang and --agent, only "Templates downloaded successfully" is shown (from download_or_copy_templates)
+- Followed by informational message about running with --lang and --agent
+- No version bump (PATCH-level change, cosmetic output improvement)
+- Reasoning: The init command was displaying two success messages when downloading templates without installing to a project. The message from download_or_copy_templates already confirms successful download, making the additional message redundant and cluttering the output.
+
+### 2025-11-20 (Code Refactoring - DRY Principle)
+
+- Extracted common code duplication in template_manager.rs using closures
+- Created download_entry closure in download_templates_from_url to eliminate repetitive download logic
+- Created process_entry closure in update to eliminate repetitive file processing logic
+- Reduced code duplication for processing principles, missions, languages, and integrations
+- No behavioral changes, only code organization improvement
+- Bumped version from 3.0.0 to 3.0.1 (PATCH version for internal improvements)
+- Reasoning: Both download_templates_from_url and update functions contained nearly identical code blocks for processing principles, missions, languages, and integrations. Using closures eliminates this duplication, makes the code more maintainable, and follows the DRY principle as specified in General Instructions. The refactoring reduces approximately 120 lines of repetitive code while maintaining identical functionality. Version bump allows distinguishing this improved codebase from the released 3.0.0.
+
+### 2025-11-24 (Format Instructions and EditorConfig Templates)
+
+- Added language-specific format instruction templates for C, C++, Rust, and Swift
+- Created c-format-instructions.yml with 120 char limit and C17 standard
+- Created c++-format-instructions.yml with 160 char limit and latest C++ standard
+- Created rust-format-instructions.toml with 167 char limit and edition 2024
+- Created swift-format-instructions.json with 147 char limit
+- Added language-specific EditorConfig templates for all supported languages
+- Created c-editor-config.ini with latin1 charset for C source files
+- Created c++-editor-config.ini with utf-8 charset for modern C++
+- Created rust-editor-config.ini with utf-8 charset (enforced by compiler)
+- Created swift-editor-config.ini with utf-8 charset for Swift projects
+- Added make-build-commands.md template for Make/Makefile workflows
+- Updated templates.yml to include format instructions and EditorConfig for all languages
+- Updated AGENTS.md repository structure to include all new template files
+- Added Code Formatting Tools section with documentation links
+- Reasoning: Format instructions provide language-specific code formatting rules that complement EditorConfig's cross-editor baseline settings. EditorConfig handles charset control (critical for C projects using latin1), line endings, and trailing whitespace - settings that language-specific formatters cannot manage. The make-build-commands.md complements cmake-build-commands.md for projects using Make instead of CMake. All templates follow consistent structure and emphasize best practices.
+
+### 2025-11-24 (Git Support - .gitignore and .gitattributes)
+
+- Created git-attributes-common.txt template for cross-platform line ending normalization
+- Template uses `* text=auto` for automatic line ending handling on both Windows and Unix
+- Explicitly marks text files for normalization and binary files to prevent conversion
+- Sets diff drivers for C, C++, Rust, and Swift source files
+- Created language-specific .gitignore templates with both Windows and Unix patterns
+- Created c-git-ignore.txt with C artifacts (object files, static/shared libraries, executables, CMake cache)
+- Created c++-git-ignore.txt with C++ artifacts (similar to C plus C++-specific patterns)
+- Created rust-git-ignore.txt with Rust artifacts (target/, executables, Cargo.lock for binaries)
+- Created swift-git-ignore.txt with Swift artifacts (.build/, swiftmodule files, platform-specific)
+- Each .gitignore includes common OS files (.DS_Store, Thumbs.db) and editor files (.vscode/, .idea/)
+- Added git-attributes-common.txt to integration.git.files section in templates.yml
+- Added language-specific .gitignore templates to each language section in templates.yml
+- Updated AGENTS.md repository structure to include new git-related template files
+- No version bump required (template-only changes, no code changes)
+- Reasoning: Git version control templates are essential for maintaining consistent repository behavior across platforms and team members. The common .gitattributes file ensures proper line ending handling when the repository is cloned on different platforms, while language-specific .gitignore files prevent build artifacts and editor files from being committed. Cross-platform support is critical as developers may use Windows, macOS, or Linux, and both .gitignore templates and .gitattributes must work correctly on all platforms once committed to the repository.
+
+### 2025-11-28 (Command Swap - init and update)
+
+- Swapped the meanings of `init` and `update` CLI commands
+- **New `update` command**: Downloads/updates global templates from source
+  - Removed `--lang` and `--agent` parameters (no longer needed)
+  - Removed `--force` parameter (just overwrites global templates)
+  - Added `--from` option (optional, defaults to GitHub repository)
+- **New `init` command**: Sets up agent instructions in project directory
+  - Made `--lang` and `--agent` parameters required
+  - Removed `--from` option (global template source handled by `update`)
+  - Kept `--force` for overwriting customized local files
+  - Automatically downloads global templates if they do not exist
+- Added `has_global_templates()` method to TemplateManager
+- Updated CLI documentation to reflect new command behavior
+- Bumped version from 3.0.1 to 4.0.0 (MAJOR version for breaking CLI change)
+- Reasoning: The swapped meanings are more intuitive. The `update` command now handles updating the global template cache, while `init` focuses on initializing a project with agent instructions. This separation of concerns makes the workflow clearer: first update templates, then init a project. The auto-download fallback in init ensures backward compatibility for users who skip the update step.
+
+### 2025-11-28 (Command Rename - clear to purge)
+
+- Renamed `clear` command to `purge` for better clarity and autocompletion safety
+- Renamed `clear()` method to `purge()` in TemplateManager
+- Updated all related documentation and user-facing messages
+- Bumped version from 4.0.0 to 4.0.1 (PATCH version for rename)
+- Reasoning: The `clear` and `remove` commands had similar names causing confusion about their different purposes. Renaming to `purge` makes the distinction clearer: `remove` surgically removes agent files while preserving AGENTS.md, whereas `purge` completely removes all vibe-check files. Additionally, `purge` starts with a different letter than `remove`, preventing accidental selection via shell autocompletion.
+
+### 2025-11-28 (Extract Download Manager Module)
+
+- Created new `src/download_manager.rs` module for URL and download operations
+- Moved `parse_github_url()`, `download_file()`, and `download_templates_from_url()` from template_manager.rs
+- Created `DownloadManager` struct to encapsulate download functionality
+- Simplified `load_template_config()` in TemplateManager to only load from local files
+- Updated `download_or_copy_templates()` to use DownloadManager for URL downloads
+- Exposed `DownloadManager` in public API via lib.rs
+- Reduced template_manager.rs from 1059 lines to approximately 835 lines
+- Bumped version from 4.0.1 to 4.0.2 (PATCH version for internal refactoring)
+- Reasoning: The template_manager.rs module was too large at over 1000 lines. Extracting URL parsing and download logic into a separate module improves code organization, maintainability, and follows the single responsibility principle. The DownloadManager can now be tested and modified independently from template management logic.
+
+### 2025-11-28 (Add File System Utilities)
+
+- Added `copy_file_with_mkdir()` utility to utils.rs for copying files with automatic parent directory creation
+- Added `remove_file_and_cleanup_parents()` utility to utils.rs for removing files and cleaning up empty parent directories
+- Updated `update()`, `purge()`, `remove()`, and `remove_all()` in template_manager.rs to use new utilities
+- Reduced code duplication across file removal operations
+- Exported new utilities in public API via lib.rs
+- Bumped version from 4.0.2 to 4.0.3 (PATCH version for internal refactoring)
+- Reasoning: The same file operation patterns were repeated multiple times across template_manager.rs. Extracting these into reusable utilities in utils.rs follows the DRY principle and makes the code more maintainable.
+
+### 2025-11-28 (Template Manager Slimdown)
+
+- Removed dead `clear_global_templates()` function (never called)
+- Added `confirm_action()` utility to utils.rs for user confirmation prompts
+- Consolidated `remove()` and `remove_all()` into single `remove(agent: Option<&str>, force: bool)` method
+- Updated `purge()`, and `remove()` to use the new `confirm_action()` utility
+- Reduced template_manager.rs by approximately 70 lines
+- Bumped version from 4.0.3 to 4.0.4 (PATCH version for internal refactoring)
+- Reasoning: The template_manager.rs module had dead code, duplicated confirmation prompts, and two nearly identical remove functions. Consolidating these improves maintainability and reduces code size while maintaining the same CLI interface.
+
+### 2025-11-28 (Shell Completions)
+
+- Added `completions` subcommand to generate shell completion scripts
+- Added `clap_complete` v4.5 dependency for shell completion generation
+- Supports bash, zsh, fish, and PowerShell shells
+- Outputs completion script to stdout for user to redirect to appropriate location
+- Bumped version from 4.0.4 to 4.1.0 (MINOR version for new feature)
+- Reasoning: Shell completions improve user experience by enabling tab completion for commands, options, and arguments. Using clap_complete integrates seamlessly with the existing clap CLI framework.
+
+### 2025-11-28 (Shell Completions - Restrict Shells)
+
+- Created custom ShellType enum to limit shell options to bash, fish, powershell, zsh
+- Removed elvish from available shell completions
+- Bumped version from 4.1.0 to 4.1.1 (PATCH version for refinement)
+- Reasoning: Elvish is not a commonly used shell and was included by default from clap_complete. Restricting to the four main shells (bash, fish, powershell, zsh) provides a cleaner user experience.
+
+### 2025-11-28 (Dry Run Flag for Init)
+
+- Added `--dry-run` flag to `init` command
+- Shows preview of files that would be created or modified
+- Color-coded output: green for new files, yellow for files that would be overwritten
+- Respects AGENTS.md customization detection (shows as skipped if customized)
+- No files are modified when dry-run is active
+- Bumped version from 4.1.1 to 4.2.0 (MINOR version for new feature)
+- Reasoning: Dry-run mode allows users to preview changes before committing to them, reducing the risk of unintended modifications and improving user confidence in the tool.
+
+### 2025-11-28 (Dry Run Flag for All Commands)
+
+- Extended `--dry-run` flag to `update`, `purge`, and `remove` commands
+- `update --dry-run` shows source URL and target directory
+- `purge --dry-run` shows files that would be deleted (red color)
+- `remove --dry-run` shows agent-specific files that would be deleted
+- Added `get_config_dir()` method to TemplateManager for dry-run output
+- Updated AGENTS.md documentation for all commands
+- Reasoning: Consistent dry-run support across all commands provides users with a complete preview capability before any file system modifications.
+
+### 2025-11-28 (Status Command)
+
+- Added `status` command to show current project state
+- Displays global template status (installed location, available agents and languages)
+- Shows AGENTS.md status (exists, customized or from template)
+- Lists installed agents detected from file presence
+- Shows all vibe-check managed files in current directory
+- Bumped version from 4.2.0 to 4.3.0 (MINOR version for new feature)
+- Reasoning: The status command helps users understand what is currently configured in their project, making it easier to manage and troubleshoot vibe-check installations.
+
+### 2025-11-28 (List Command)
+
+- Added `list` command to show available agents and languages
+- Lists all agents from templates.yml with installation status
+- Lists all languages from templates.yml without status (content merged into AGENTS.md)
+- Green checkmark for installed items, blue circle for available
+- Provides guidance on how to install with init command
+- Bumped version from 4.3.0 to 4.4.0 (MINOR version for new feature)
+- Reasoning: The list command helps users discover what agents and languages are available, making it easier to choose the right options when initializing a new project.
+
+### 2025-11-28 (Man Page Generation)
+
+- Added build.rs script to generate man pages during release builds
+- Added clap_mangen v0.2 as build dependency
+- Man page generated at `target/release/build/vibe-check-*/out/man/vibe-check.1`
+- Only generates for release builds (not debug)
+- Bumped version from 4.4.0 to 4.5.0 (MINOR version for new feature)
+- Reasoning: Man pages are the standard way Unix users access command documentation. Build-time generation ensures the man page is always in sync with the CLI definition and can be included in release artifacts for package managers.
+
+### 2025-11-28 (Template Engine Versioning)
+
+- Added `version` field to templates.yml (current version is 1)
+- Added `version` field to `TemplateConfig` struct in bom.rs with default value of 1
+- Created new `src/template_engine_v1.rs` module for version 1 template generation logic
+- Moved template generation functions from template_manager.rs to template_engine_v1.rs:
+  - `load_template_config()`
+  - `is_file_customized()`
+  - `update()` (template generation)
+  - `merge_fragments()`
+  - `resolve_placeholder()`
+- Refactored `TemplateManager::update()` to detect template version and dispatch to appropriate engine
+- Added `get_template_version()` method to TemplateManager
+- Added template version display in `status` command output
+- Exported `TemplateEngineV1` in public API via lib.rs
+- Bumped version from 4.5.0 to 4.6.0 (MINOR version for new feature)
+- Reasoning: Template versioning enables future template format changes without breaking backward compatibility. When a new template format is needed, a new engine module can be created and the dispatcher will route to the appropriate engine based on the version field. Missing version field defaults to 1 for backward compatibility with existing templates.
+
+### 2025-11-28 (Config Command)
+
+- Added `config` command with Git-style dotted key syntax for persistent configuration
+- Created `src/config.rs` module with Config struct and methods
+- Configuration stored in `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
+- Supports `source.url` key to set default template download source
+- Supports `source.fallback` key for fallback URL when primary source fails
+- Commands: `config <key> <value>` (set), `config <key>` (get), `config --list`, `config --unset <key>`
+- Updated `update` command to use configured source.url when `--from` not specified
+- Updated `init` command to use configured source.url when downloading missing templates
+- Exported `Config` in public API via lib.rs
+- Added config command documentation to AGENTS.md and README.md
+- Updated repository structure to include config.rs
+- Bumped version from 4.6.0 to 5.0.0 (MAJOR version for significant new capabilities)
+- Reasoning: Persistent configuration allows teams to set a custom template source once and have it used automatically by update and init commands. This simplifies workflows for teams with custom template repositories and reduces repetitive --from flag usage. Combined with template engine versioning, these features represent a significant milestone in the project maturity warranting a major version bump.
