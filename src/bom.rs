@@ -50,10 +50,18 @@ pub struct MainConfig
     pub target: String
 }
 
+/// Default version for templates.yml (used when version field is missing)
+fn default_version() -> u32
+{
+    1
+}
+
 /// Template configuration structure parsed from templates.yml
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TemplateConfig
 {
+    #[serde(default = "default_version")]
+    pub version:     u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub main:        Option<MainConfig>,
     pub agents:      HashMap<String, AgentConfig>,

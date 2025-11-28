@@ -1541,3 +1541,21 @@ git diff
 - Only generates for release builds (not debug)
 - Bumped version from 4.4.0 to 4.5.0 (MINOR version for new feature)
 - Reasoning: Man pages are the standard way Unix users access command documentation. Build-time generation ensures the man page is always in sync with the CLI definition and can be included in release artifacts for package managers.
+
+### 2025-11-28 (Template Engine Versioning)
+
+- Added `version` field to templates.yml (current version is 1)
+- Added `version` field to `TemplateConfig` struct in bom.rs with default value of 1
+- Created new `src/template_engine_v1.rs` module for version 1 template generation logic
+- Moved template generation functions from template_manager.rs to template_engine_v1.rs:
+  - `load_template_config()`
+  - `is_file_customized()`
+  - `update()` (template generation)
+  - `merge_fragments()`
+  - `resolve_placeholder()`
+- Refactored `TemplateManager::update()` to detect template version and dispatch to appropriate engine
+- Added `get_template_version()` method to TemplateManager
+- Added template version display in `status` command output
+- Exported `TemplateEngineV1` in public API via lib.rs
+- Bumped version from 4.5.0 to 4.6.0 (MINOR version for new feature)
+- Reasoning: Template versioning enables future template format changes without breaking backward compatibility. When a new template format is needed, a new engine module can be created and the dispatcher will route to the appropriate engine based on the version field. Missing version field defaults to 1 for backward compatibility with existing templates.

@@ -5,11 +5,13 @@
 
 mod bom;
 mod download_manager;
+mod template_engine_v1;
 mod template_manager;
 mod utils;
 
 pub use bom::BillOfMaterials;
 pub use download_manager::DownloadManager;
+pub use template_engine_v1::TemplateEngineV1;
 pub use template_manager::TemplateManager;
 pub use utils::{confirm_action, copy_dir_all, copy_file_with_mkdir, remove_file_and_cleanup_parents};
 
