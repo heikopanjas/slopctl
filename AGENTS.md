@@ -563,6 +563,7 @@ Available Languages:
 vibe-check/
 ├── Cargo.toml                  # Rust project manifest
 ├── Cargo.lock                  # Dependency lock file
+├── build.rs                    # Build script for man page generation
 ├── .rustfmt.toml               # Rust formatting configuration
 ├── src/                        # Rust source code
 │   ├── main.rs                 # Application entry point and CLI
@@ -866,39 +867,6 @@ git diff
 
 ---
 
-## Quick Wins TODO List
-
-**Priority improvements to enhance vibe-check usability and functionality:**
-
-- [x] **Add `vibe-check list` command** - Show available languages, agents, and what's installed locally
-  - Display all supported languages from templates.yml
-  - Display all supported agents from templates.yml
-  - Show which global templates are downloaded
-  - Show which local templates are installed in current directory
-  - Include file paths and installation status
-
-- [ ] **Add `vibe-check validate` command** - Verify local installation is complete and consistent
-  - Check if global templates exist and are complete
-  - Verify local AGENTS.md exists and is properly formatted
-  - Validate agent-specific files are present for configured agent
-  - Check language-specific files match selected language
-  - Report missing or inconsistent files with actionable suggestions
-
-- [ ] **Add template preview functionality** - Let users see what will be installed before running init
-  - Add `--preview` flag to init and update commands
-  - Display list of files that would be created/modified
-  - Show file paths with resolved placeholders
-  - Include file sizes and brief descriptions
-  - No actual file operations performed in preview mode
-
-- [ ] **Add selective installation option** - Allow users to skip specific template types
-  - Add `--skip` flag accepting comma-separated list (e.g., `--skip editorconfig,gitignore`)
-  - Skip options: `editorconfig`, `format`, `gitignore`, `gitattributes`
-  - Maintain AGENTS.md and agent instructions (never skippable)
-  - Document skip options in CLI help text
-
----
-
 ## Future CLI Enhancements
 
 **Planned improvements for CLI usability and modern tooling standards:**
@@ -952,11 +920,11 @@ git diff
   - Include all relevant metadata (paths, versions, status)
   - Follow JSON Lines format for streaming output
 
-- [ ] **Add man page generation** - Unix manual pages
+- [x] **Add man page generation** - Unix manual pages
   - Use `clap_mangen` crate for generation
-  - Generate during build or as separate command
+  - Generate during release builds via build.rs
+  - Man page output at `target/release/build/vibe-check-*/out/man/vibe-check.1`
   - Include in release artifacts for package managers
-  - Document installation in README
 
 ### Implementation Guidelines
 
@@ -1559,8 +1527,17 @@ git diff
 
 - Added `list` command to show available agents and languages
 - Lists all agents from templates.yml with installation status
-- Lists all languages from templates.yml with installation status
+- Lists all languages from templates.yml without status (content merged into AGENTS.md)
 - Green checkmark for installed items, blue circle for available
 - Provides guidance on how to install with init command
 - Bumped version from 4.3.0 to 4.4.0 (MINOR version for new feature)
 - Reasoning: The list command helps users discover what agents and languages are available, making it easier to choose the right options when initializing a new project.
+
+### 2025-11-28 (Man Page Generation)
+
+- Added build.rs script to generate man pages during release builds
+- Added clap_mangen v0.2 as build dependency
+- Man page generated at `target/release/build/vibe-check-*/out/man/vibe-check.1`
+- Only generates for release builds (not debug)
+- Bumped version from 4.4.0 to 4.5.0 (MINOR version for new feature)
+- Reasoning: Man pages are the standard way Unix users access command documentation. Build-time generation ensures the man page is always in sync with the CLI definition and can be included in release artifacts for package managers.
