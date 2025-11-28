@@ -869,4 +869,77 @@ impl TemplateManager
 
         Ok(())
     }
+
+    /// List available agents and languages
+    ///
+    /// Displays all available agents and languages from the global templates,
+    /// along with their installation status in the current project.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if templates.yml cannot be loaded
+    pub fn list(&self) -> Result<()>
+    {
+        println!("{}", "vibe-check list".bold());
+        println!();
+
+        // Check if global templates exist
+        if self.has_global_templates() == false
+        {
+            println!("{} Global templates not installed", "✗".red());
+            println!("{} Run 'vibe-check update' to download templates", "→".blue());
+            return Ok(());
+        }
+
+        // Load template configuration
+        let config = self.load_template_config()?;
+
+        // Build BoM for checking installed status
+        let config_file = self.config_dir.join("templates.yml");
+        let bom = BillOfMaterials::from_config(&config_file)?;
+
+        // List agents
+        println!("{}", "Available Agents:".bold());
+        let mut agents: Vec<&String> = config.agents.keys().collect();
+        agents.sort();
+
+        for agent_name in agents
+        {
+            // Check if agent is installed (has files in current directory)
+            let is_installed = if let Some(files) = bom.get_agent_files(agent_name)
+            {
+                files.iter().any(|f| f.exists())
+            }
+            else
+            {
+                false
+            };
+
+            if is_installed == true
+            {
+                println!("  {} {} (installed)", "✓".green(), agent_name.green());
+            }
+            else
+            {
+                println!("  {} {}", "○".blue(), agent_name);
+            }
+        }
+
+        println!();
+
+        // List languages (no installation status - language content is merged into AGENTS.md)
+        println!("{}", "Available Languages:".bold());
+        let mut languages: Vec<&String> = config.languages.keys().collect();
+        languages.sort();
+
+        for lang_name in languages
+        {
+            println!("  • {}", lang_name);
+        }
+
+        println!();
+        println!("{} Use 'vibe-check init --lang <lang> --agent <agent>' to install", "→".blue());
+
+        Ok(())
+    }
 }

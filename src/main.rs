@@ -110,7 +110,9 @@ enum Commands
         shell: ShellType
     },
     /// Show current project status
-    Status
+    Status,
+    /// List available agents and languages
+    List
 }
 
 fn main()
@@ -201,7 +203,8 @@ fn main()
             generate(shell, &mut Cli::command(), "vibe-check", &mut io::stdout());
             Ok(())
         }
-        | Commands::Status => manager.status()
+        | Commands::Status => manager.status(),
+        | Commands::List => manager.list()
     };
 
     if let Err(e) = result

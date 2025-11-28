@@ -507,6 +507,56 @@ Managed Files:
   • CLAUDE.md
 ```
 
+### `list` - List Available Options
+
+List all available agents and languages from global templates.
+
+**Usage:**
+
+```bash
+vibe-check list
+```
+
+**Examples:**
+
+```bash
+# List available agents and languages
+vibe-check list
+```
+
+**Output includes:**
+
+- **Available Agents:** All agents defined in templates.yml with installation status
+- **Available Languages:** All languages defined in templates.yml
+
+**Example output:**
+
+```
+vibe-check list
+
+Available Agents:
+  ✓ claude (installed)
+  ○ codex
+  ✓ copilot (installed)
+  ○ cursor
+
+Available Languages:
+  • c
+  • c++
+  • rust
+  • swift
+
+→ Use 'vibe-check init --lang <lang> --agent <agent>' to install
+```
+
+**Behavior:**
+
+- Shows all agents available in global templates with installation status
+- Shows all languages available in global templates
+- Agents show ✓ (installed) or ○ (available) based on file presence
+- Languages are listed without status (content is merged into AGENTS.md)
+- Provides guidance on how to install
+
 ## Repository Structure
 
 ```text
@@ -820,7 +870,7 @@ git diff
 
 **Priority improvements to enhance vibe-check usability and functionality:**
 
-- [ ] **Add `vibe-check list` command** - Show available languages, agents, and what's installed locally
+- [x] **Add `vibe-check list` command** - Show available languages, agents, and what's installed locally
   - Display all supported languages from templates.yml
   - Display all supported agents from templates.yml
   - Show which global templates are downloaded
@@ -1504,3 +1554,13 @@ git diff
 - Shows all vibe-check managed files in current directory
 - Bumped version from 4.2.0 to 4.3.0 (MINOR version for new feature)
 - Reasoning: The status command helps users understand what is currently configured in their project, making it easier to manage and troubleshoot vibe-check installations.
+
+### 2025-11-28 (List Command)
+
+- Added `list` command to show available agents and languages
+- Lists all agents from templates.yml with installation status
+- Lists all languages from templates.yml with installation status
+- Green checkmark for installed items, blue circle for available
+- Provides guidance on how to install with init command
+- Bumped version from 4.3.0 to 4.4.0 (MINOR version for new feature)
+- Reasoning: The list command helps users discover what agents and languages are available, making it easier to choose the right options when initializing a new project.
