@@ -229,7 +229,7 @@ impl<'a> TemplateEngineV1<'a>
             return Err(format!("Agent '{}' not found in templates.yml", agent).into());
         }
 
-        if files_to_copy.is_empty()
+        if files_to_copy.is_empty() && main_template.is_none()
         {
             println!("{} No templates found to copy", "!".yellow());
             return Ok(());

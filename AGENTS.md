@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-28
+**Last updated:** 2025-11-29
 
 ## General Instructions
 
@@ -1636,3 +1636,12 @@ git diff
 - Updated repository structure to include config.rs
 - Bumped version from 4.6.0 to 5.0.0 (MAJOR version for significant new capabilities)
 - Reasoning: Persistent configuration allows teams to set a custom template source once and have it used automatically by update and init commands. This simplifies workflows for teams with custom template repositories and reduces repetitive --from flag usage. Combined with template engine versioning, these features represent a significant milestone in the project maturity warranting a major version bump.
+
+### 2025-11-29 (Update Function Early Return Fix)
+
+- Fixed bug in `update` function in template_engine_v1.rs that caused early return when agent has no files
+- The early return check now considers both `files_to_copy.is_empty()` AND `main_template.is_none()`
+- Previously, if an agent had no instruction/prompt files, the function would return before processing AGENTS.md
+- Now the function correctly continues to merge fragments into AGENTS.md even when no other files need copying
+- Bumped version from 5.0.0 to 5.0.1 (PATCH version for bug fix)
+- Reasoning: The early return condition was too aggressive, preventing fragment merging into AGENTS.md when agents have no standalone files. This fix ensures main template processing always occurs when main_template exists.
