@@ -1,54 +1,40 @@
-# C .gitignore
-# Covers both Unix and Windows platforms
+# Prerequisites
+*.d
 
-# C object files (Unix)
+# Object files
 *.o
 *.ko
+*.obj
 *.elf
 
-# C object files (Windows)
-*.obj
+# Linker output
+*.ilk
+*.map
+*.exp
 
-# Static libraries (Unix)
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
 *.a
 *.la
 *.lo
 
-# Static libraries (Windows)
-*.lib
-
-# Shared libraries (Unix)
+# Shared objects (inc. Windows DLLs)
+*.dll
 *.so
 *.so.*
 *.dylib
 
-# Shared libraries (Windows)
-*.dll
-
-# Executables (Unix)
+# Executables
+*.exe
 *.out
 *.app
-
-# Executables (Windows)
-*.exe
-*.com
-
-# CMake generated files
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-CTestTestfile.cmake
-_deps/
-build/
-Build/
-
-# Make generated files
-*.d
-
-# Preprocessed files
-*.i
-*.ii
-*.s
+*.i*86
+*.x86_64
+*.hex
 
 # Debug files
 *.dSYM/
@@ -56,35 +42,14 @@ Build/
 *.idb
 *.pdb
 
-# Visual Studio files
-*.sln
-*.vcxproj
-*.vcxproj.filters
-*.vcxproj.user
-.vs/
-x64/
-x86/
-Debug/
-Release/
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
 
-# Clang/LLVM
-compile_commands.json
-.clangd/
-
-# Core dumps
-core
-core.*
-vgcore.*
-
-# OS-specific files
-.DS_Store
-Thumbs.db
-Desktop.ini
-
-# Editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.*.swp
+# debug information files
+*.dwo

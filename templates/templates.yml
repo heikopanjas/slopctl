@@ -16,110 +16,110 @@ version: 1
 
 # Main instruction file - primary source of truth
 main:
-    source: AGENTS.md
-    target: '$workspace/AGENTS.md'
+  source: AGENTS.md
+  target: '$workspace/AGENTS.md'
 
 # Agent-specific instruction templates
 agents:
-    claude:
-        instructions:
-            - source: claude/CLAUDE.md
-              target: '$workspace/CLAUDE.md'
-        prompts:
-            - source: claude/commands/init-session.md
-              target: '$workspace/.claude/commands/init-session.md'
+  claude:
+    instructions:
+      - source: claude/CLAUDE.md
+        target: '$workspace/CLAUDE.md'
+    prompts:
+      - source: claude/commands/init-session.md
+        target: '$workspace/.claude/commands/init-session.md'
 
-    copilot:
-        instructions:
-            - source: copilot/copilot-instructions.md
-              target: '$workspace/.github/copilot-instructions.md'
-        prompts:
-            - source: copilot/prompts/init-session.prompt.md
-              target: '$workspace/.github/prompts/init-session.prompt.md'
+  copilot:
+    instructions:
+      - source: copilot/copilot-instructions.md
+        target: '$workspace/.github/copilot-instructions.md'
+    prompts:
+      - source: copilot/prompts/init-session.prompt.md
+        target: '$workspace/.github/prompts/init-session.prompt.md'
 
-    codex:
-        prompts:
-            - source: codex/prompts/init-session.md
-              target: '$userprofile/.codex/prompts/init-session.md'
+  codex:
+    prompts:
+      - source: codex/prompts/init-session.md
+        target: '$userprofile/.codex/prompts/init-session.md'
 
-    cursor:
-        prompts:
-            - source: cursor/commands/init-session.md
-              target: '$workspace/.cursor/commands/init-session.md'
+  cursor:
+    prompts:
+      - source: cursor/commands/init-session.md
+        target: '$workspace/.cursor/commands/init-session.md'
 
 # Language-specific coding standards templates
 languages:
-    c:
-        files:
-            - source: c-coding-conventions.md
-              target: '$instructions'
-            - source: cmake-build-commands.md
-              target: '$instructions'
-            - source: c-format-instructions.yml
-              target: '$workspace/.clang-format'
-            - source: c-editor-config.ini
-              target: '$workspace/.editorconfig'
-            - source: c-git-ignore.txt
-              target: '$workspace/.gitignore'
-    c++:
-        files:
-            - source: c++-coding-conventions.md
-              target: '$instructions'
-            - source: cmake-build-commands.md
-              target: '$instructions'
-            - source: c++-format-instructions.yml
-              target: '$workspace/.clang-format'
-            - source: c++-editor-config.ini
-              target: '$workspace/.editorconfig'
-            - source: c++-git-ignore.txt
-              target: '$workspace/.gitignore'
-    rust:
-        files:
-            - source: rust-coding-conventions.md
-              target: '$instructions'
-            - source: rust-build-commands.md
-              target: '$instructions'
-            - source: rust-format-instructions.toml
-              target: '$workspace/.rustfmt.toml'
-            - source: rust-editor-config.ini
-              target: '$workspace/.editorconfig'
-            - source: rust-git-ignore.txt
-              target: '$workspace/.gitignore'
-    swift:
-        files:
-            - source: swift-coding-conventions.md
-              target: '$instructions'
-            - source: swift-build-commands.md
-              target: '$instructions'
-            - source: swift-format-instructions.json
-              target: '$workspace/.swift-format'
-            - source: swift-editor-config.ini
-              target: '$workspace/.editorconfig'
-            - source: swift-git-ignore.txt
-              target: '$workspace/.gitignore'
+  c:
+    files:
+      - source: c-coding-conventions.md
+        target: '$instructions'
+      - source: cmake-build-commands.md
+        target: '$instructions'
+      - source: c-format-instructions.yml
+        target: '$workspace/.clang-format'
+      - source: c-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: cmake-git-ignore.txt
+        target: '$workspace/.gitignore'
+  c++:
+    files:
+      - source: c++-coding-conventions.md
+        target: '$instructions'
+      - source: cmake-build-commands.md
+        target: '$instructions'
+      - source: c++-format-instructions.yml
+        target: '$workspace/.clang-format'
+      - source: c++-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: cmake-git-ignore.txt
+        target: '$workspace/.gitignore'
+  rust:
+    files:
+      - source: rust-coding-conventions.md
+        target: '$instructions'
+      - source: rust-build-commands.md
+        target: '$instructions'
+      - source: rust-format-instructions.toml
+        target: '$workspace/.rustfmt.toml'
+      - source: rust-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: rust-git-ignore.txt
+        target: '$workspace/.gitignore'
+  swift:
+    files:
+      - source: swift-coding-conventions.md
+        target: '$instructions'
+      - source: swift-build-commands.md
+        target: '$instructions'
+      - source: swift-format-instructions.json
+        target: '$workspace/.swift-format'
+      - source: swift-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: swift-git-ignore.txt
+        target: '$workspace/.gitignore'
 
 # Integration templates for specific tools/workflows
 integration:
-    git:
-        files:
-            - source: git-workflow-conventions.md
-              target: '$instructions'
-            - source: git-attributes-common.txt
-              target: '$workspace/.gitattributes'
-    versioning:
-        files:
-            - source: semantic-versioning.md
-              target: '$instructions'
+  git:
+    files:
+      - source: git-workflow-conventions.md
+        target: '$instructions'
+      - source: git-attributes-common.txt
+        target: '$workspace/.gitattributes'
+  versioning:
+    files:
+      - source: semantic-versioning.md
+        target: '$instructions'
 
 # General templates that apply to all projects
 principles:
-    - source: core-principles.md
-      target: '$instructions'
-    - source: best-practices.md
-      target: '$instructions'
+  - source: core-principles.md
+    target: '$instructions'
+  - source: best-practices.md
+    target: '$instructions'
 
 mission:
-    - source: mission-statement.md
-      target: '$instructions'
-    - source: technology-stack.md
-      target: '$instructions'
+  - source: mission-statement.md
+    target: '$instructions'
+  - source: technology-stack.md
+    target: '$instructions'
