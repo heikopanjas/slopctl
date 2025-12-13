@@ -11,7 +11,6 @@ use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
     download_manager::DownloadManager,
-    template_engine_v1::TemplateEngineV1,
     utils::{confirm_action, copy_dir_all, remove_file_and_cleanup_parents}
 };
 
@@ -164,7 +163,7 @@ impl TemplateManager
     /// - Global templates don't exist
     /// - Template version is unsupported
     /// - Template generation fails
-    pub fn update(&self, lang: &str, agent: &str, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         // Check if global templates exist
         if self.has_global_templates() == false
@@ -179,8 +178,20 @@ impl TemplateManager
         {
             | 1 =>
             {
-                let engine = TemplateEngineV1::new(&self.config_dir);
-                engine.update(lang, agent, force, dry_run)
+                // V1 requires agent parameter
+                let agent_str = agent.ok_or("--agent is required for v1 templates. Use: vibe-check init --lang <lang> --agent <agent>")?;
+                let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
+                engine.update(lang, agent_str, force, dry_run)
+            }
+            | 2 =>
+            {
+                // V2 doesn't use agent parameter (single AGENTS.md for all agents)
+                if agent.is_some()
+                {
+                    println!("{} Note: --agent parameter is ignored for v2 templates (single AGENTS.md works with all agents)", "→".blue());
+                }
+                let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
+                engine.update(lang, force, dry_run)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }
