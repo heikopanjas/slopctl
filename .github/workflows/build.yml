@@ -14,8 +14,26 @@ env:
     CARGO_TERM_COLOR: always
 
 jobs:
+    templates:
+        name: Create Templates Archive
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Create templates archive
+              run: zip -r vibe-check-templates.zip templates/
+
+            - name: Upload templates as artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: vibe-check-templates-temp
+                  path: vibe-check-templates.zip
+                  if-no-files-found: error
+
     build:
         name: Build and Test
+        needs: templates
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
@@ -53,20 +71,7 @@ jobs:
             - name: Run tests
               run: cargo test --verbose
 
-            - name: Create templates archive
-              if: matrix.os == 'ubuntu-latest'
-              run: zip -r vibe-check-templates.zip templates/
-
-            - name: Upload templates as artifact
-              if: matrix.os == 'ubuntu-latest'
-              uses: actions/upload-artifact@v4
-              with:
-                  name: vibe-check-templates-temp
-                  path: vibe-check-templates.zip
-                  if-no-files-found: error
-
             - name: Download templates archive
-              if: matrix.os != 'ubuntu-latest'
               uses: actions/download-artifact@v4
               with:
                   name: vibe-check-templates-temp
