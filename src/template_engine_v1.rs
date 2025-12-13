@@ -193,9 +193,11 @@ impl<'a> TemplateEngineV1<'a>
             }
         }
 
-        // Add agent-specific templates
-        if let Some(agent_config) = config.agents.get(agent)
+        // Add agent-specific templates (if agents section exists)
+        if let Some(agents) = &config.agents
         {
+            if let Some(agent_config) = agents.get(agent)
+            {
             // Add instructions files if present
             if let Some(instructions) = &agent_config.instructions
             {
@@ -223,10 +225,15 @@ impl<'a> TemplateEngineV1<'a>
                     }
                 }
             }
+            }
+            else
+            {
+                return Err(format!("Agent '{}' not found in templates.yml", agent).into());
+            }
         }
         else
         {
-            return Err(format!("Agent '{}' not found in templates.yml", agent).into());
+            return Err("V1 templates require agents section in templates.yml".into());
         }
 
         if files_to_copy.is_empty() && main_template.is_none()

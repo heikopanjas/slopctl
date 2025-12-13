@@ -127,9 +127,12 @@ impl DownloadManager
             }
         }
 
-        // Download agent templates
-        for agent_config in config.agents.values()
+        // Download agent templates (if agents section exists)
+        // V2 templates don't have agents section (agents.md standard)
+        if let Some(agents) = &config.agents
         {
+            for agent_config in agents.values()
+            {
             // Download instructions files if present
             if let Some(instructions) = &agent_config.instructions
             {
@@ -166,6 +169,7 @@ impl DownloadManager
                         | Err(_) => println!("{} (skipped)", "✗".red())
                     }
                 }
+            }
             }
         }
 
