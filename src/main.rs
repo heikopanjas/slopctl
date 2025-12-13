@@ -49,9 +49,9 @@ enum Commands
         #[arg(long)]
         lang: String,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
         #[arg(long)]
-        agent: String,
+        agent: Option<String>,
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
@@ -244,8 +244,8 @@ fn main()
                     return;
                 }
 
-                // Use configured source or default
-                let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates".to_string();
+                // Use configured source or default (v1 for backward compatibility in v5.x)
+                let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1".to_string();
                 let config = Config::load().ok();
                 let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
                 let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
@@ -287,18 +287,32 @@ fn main()
             // Install templates to project
             if dry_run == true
             {
-                println!("{} Dry run: previewing changes for {} with {}", "→".blue(), lang.green(), agent.green());
+                if let Some(agent_name) = &agent
+                {
+                    println!("{} Dry run: previewing changes for {} with {}", "→".blue(), lang.green(), agent_name.green());
+                }
+                else
+                {
+                    println!("{} Dry run: previewing changes for {}", "→".blue(), lang.green());
+                }
             }
             else
             {
-                println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent.green());
+                if let Some(agent_name) = &agent
+                {
+                    println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent_name.green());
+                }
+                else
+                {
+                    println!("{} Initializing project for {}", "→".blue(), lang.green());
+                }
             }
-            manager.update(&lang, &agent, force, dry_run)
+            manager.update(&lang, agent.as_deref(), force, dry_run)
         }
         | Commands::Update { from, dry_run } =>
         {
-            // Determine source: CLI --from > config source.url > default
-            let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates".to_string();
+            // Determine source: CLI --from > config source.url > default (v1 for backward compatibility in v5.x)
+            let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1".to_string();
             let config = Config::load().ok();
             let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
             let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));

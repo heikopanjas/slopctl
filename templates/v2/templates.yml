@@ -1,0 +1,102 @@
+version: 2
+
+# Template Configuration - Version 2 (agents.md standard)
+# 
+# V2 Philosophy: One AGENTS.md file that works across all agents
+# - Follows https://agents.md community standard
+# - No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+# - Single source of truth: AGENTS.md
+# - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+#
+# Placeholders:
+#   $workspace     - Project root directory
+#   $userprofile   - User profile/home directory
+#   $instructions  - Fragment merged into main AGENTS.md at insertion points
+#
+# Insertion Points (markdown comments preserved in final AGENTS.md):
+#   <!-- {mission} -->       - Where mission/purpose fragments are inserted
+#   <!-- {principles} -->    - Where principle fragments are inserted
+#   <!-- {languages} -->     - Where language fragments are inserted
+#   <!-- {integration} -->   - Where integration/tool fragments are inserted
+
+# Main instruction file - single source of truth for all agents
+main:
+  source: AGENTS.md
+  target: '$workspace/AGENTS.md'
+
+# Language-specific coding standards templates
+languages:
+  c:
+    files:
+      - source: c-coding-conventions.md
+        target: '$instructions'
+      - source: cmake-build-commands.md
+        target: '$instructions'
+      - source: c-format-instructions.yml
+        target: '$workspace/.clang-format'
+      - source: c-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: cmake-git-ignore.txt
+        target: '$workspace/.gitignore'
+  c++:
+    files:
+      - source: c++-coding-conventions.md
+        target: '$instructions'
+      - source: cmake-build-commands.md
+        target: '$instructions'
+      - source: c++-format-instructions.yml
+        target: '$workspace/.clang-format'
+      - source: c++-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: cmake-git-ignore.txt
+        target: '$workspace/.gitignore'
+  rust:
+    files:
+      - source: rust-coding-conventions.md
+        target: '$instructions'
+      - source: rust-build-commands.md
+        target: '$instructions'
+      - source: rust-format-instructions.toml
+        target: '$workspace/.rustfmt.toml'
+      - source: rust-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: rust-git-ignore.txt
+        target: '$workspace/.gitignore'
+  swift:
+    files:
+      - source: swift-coding-conventions.md
+        target: '$instructions'
+      - source: swift-build-commands.md
+        target: '$instructions'
+      - source: swift-format-instructions.json
+        target: '$workspace/.swift-format'
+      - source: swift-editor-config.ini
+        target: '$workspace/.editorconfig'
+      - source: swift-git-ignore.txt
+        target: '$workspace/.gitignore'
+
+# Integration templates for specific tools/workflows
+integration:
+  git:
+    files:
+      - source: git-workflow-conventions.md
+        target: '$instructions'
+      - source: git-attributes-common.txt
+        target: '$workspace/.gitattributes'
+  versioning:
+    files:
+      - source: semantic-versioning.md
+        target: '$instructions'
+
+# General templates that apply to all projects
+principles:
+  - source: core-principles.md
+    target: '$instructions'
+  - source: best-practices.md
+    target: '$instructions'
+
+mission:
+  - source: mission-statement.md
+    target: '$instructions'
+  - source: technology-stack.md
+    target: '$instructions'

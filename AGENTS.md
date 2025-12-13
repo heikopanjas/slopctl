@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-11-29
+**Last updated:** 2025-12-13
 
 ## General Instructions
 
@@ -1645,3 +1645,35 @@ git diff
 - Now the function correctly continues to merge fragments into AGENTS.md even when no other files need copying
 - Bumped version from 5.0.0 to 5.0.1 (PATCH version for bug fix)
 - Reasoning: The early return condition was too aggressive, preventing fragment merging into AGENTS.md when agents have no standalone files. This fix ensures main template processing always occurs when main_template exists.
+
+### 2025-12-13 (Version 5.1.0 - Template Engine V2 / agents.md Standard Support)
+
+- **Major Feature**: Added support for template engine version 2 aligned with agents.md community standard (https://agents.md)
+- **Template Reorganization**: Reorganized templates into versioned directories
+  - Created `templates/v1/` directory with all current templates (v1 format with agent-specific files)
+  - Created `templates/v2/` directory with simplified templates (no agent-specific files)
+  - Removed agent directories from v2: `claude/`, `copilot/`, `codex/`, `cursor/`
+  - Updated `templates/v2/templates.yml` to version 2 (no agents section)
+- **New Template Engine**: Created `src/template_engine_v2.rs` module
+  - Implements agents.md philosophy: single AGENTS.md works with all agents
+  - No agent-specific file handling (simplified from v1)
+  - Update method signature: `update(lang, force, dry_run)` - no agent parameter needed
+  - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+- **Version-Aware Dispatcher**: Enhanced `TemplateManager::update()` with version detection
+  - Routes to `TemplateEngineV1` for version 1 templates (requires agent parameter)
+  - Routes to `TemplateEngineV2` for version 2 templates (agent parameter optional/ignored)
+  - Clear error messages for version-specific requirements
+- **CLI Enhancements**: Made `--agent` parameter optional in `init` command
+  - V1 templates: `--agent` required, validates at runtime based on template version
+  - V2 templates: `--agent` optional, shows informational message if provided
+  - Updated help text to clarify version-specific behavior
+- **Default URL Updated**: Changed default template source to `templates/v1` for backward compatibility
+  - Default: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1`
+  - Users can opt-in to v2: `vibe-check config source.url <v2-url>`
+  - V6.0.0 will switch default to v2 (future breaking change)
+- **Exported V2 Engine**: Added `TemplateEngineV2` to public API in `lib.rs`
+- **Version Strategy**: Two-phase rollout approach
+  - v5.1.0: Adds v2 support, keeps v1 as default (backward compatible - MINOR version)
+  - v6.0.0: Switches default to v2 (future - MAJOR version for breaking change)
+- Bumped version from 5.0.1 to 5.1.0 (MINOR version for new features)
+- Reasoning: This release adds significant new functionality (v2 template support) while maintaining full backward compatibility. Existing users continue using v1 templates without any changes. New v2 template system embraces the agents.md community standard, providing a simpler, more universal approach where one AGENTS.md file works across all coding agents. The opt-in approach allows users to test v2 before v6.0.0 switches the default.
