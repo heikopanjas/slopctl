@@ -495,13 +495,17 @@ impl TemplateManager
             if let Ok(content) = fs::read_to_string(&config_path) &&
                 let Ok(config) = serde_yaml::from_str::<TemplateConfig>(&content)
             {
-                let agents: Vec<&String> = config.agents.keys().collect();
-                let languages: Vec<&String> = config.languages.keys().collect();
-
-                if agents.is_empty() == false
+                // V2 templates don't have agents section (agents.md standard)
+                if let Some(agents_map) = &config.agents
                 {
-                    println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
+                    let agents: Vec<&String> = agents_map.keys().collect();
+                    if agents.is_empty() == false
+                    {
+                        println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
+                    }
                 }
+
+                let languages: Vec<&String> = config.languages.keys().collect();
                 if languages.is_empty() == false
                 {
                     println!("  {} Available languages: {}", "→".blue(), languages.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
@@ -628,34 +632,44 @@ impl TemplateManager
         // Build BoM for checking installed status
         let bom = BillOfMaterials::from_config(&config_path)?;
 
-        // List agents
-        println!("{}", "Available Agents:".bold());
-        let mut agents: Vec<&String> = config.agents.keys().collect();
-        agents.sort();
-
-        for agent_name in agents
+        // List agents (V2 templates don't have agents section - agents.md standard)
+        if let Some(agents_map) = &config.agents
         {
-            // Check if agent is installed (has files in current directory)
-            let is_installed = if let Some(files) = bom.get_agent_files(agent_name)
-            {
-                files.iter().any(|f| f.exists())
-            }
-            else
-            {
-                false
-            };
+            println!("{}", "Available Agents:".bold());
+            let mut agents: Vec<&String> = agents_map.keys().collect();
+            agents.sort();
 
-            if is_installed == true
+            for agent_name in agents
             {
-                println!("  {} {} (installed)", "✓".green(), agent_name.green());
+                // Check if agent is installed (has files in current directory)
+                let is_installed = if let Some(files) = bom.get_agent_files(agent_name)
+                {
+                    files.iter().any(|f| f.exists())
+                }
+                else
+                {
+                    false
+                };
+
+                if is_installed == true
+                {
+                    println!("  {} {} (installed)", "✓".green(), agent_name.green());
+                }
+                else
+                {
+                    println!("  {} {}", "○".blue(), agent_name);
+                }
             }
-            else
-            {
-                println!("  {} {}", "○".blue(), agent_name);
-            }
+
+            println!();
         }
-
-        println!();
+        else
+        {
+            println!("{}", "Available Agents:".bold());
+            println!("  {} V2 templates (agents.md standard) - no agent-specific files", "→".blue());
+            println!("  {} Single AGENTS.md works with all agents", "→".blue());
+            println!();
+        }
 
         // List languages (no installation status - language content is merged into AGENTS.md)
         println!("{}", "Available Languages:".bold());

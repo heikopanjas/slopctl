@@ -64,7 +64,8 @@ pub struct TemplateConfig
     pub version:     u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub main:        Option<MainConfig>,
-    pub agents:      HashMap<String, AgentConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents:      Option<HashMap<String, AgentConfig>>,
     pub languages:   HashMap<String, LanguageConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integration: Option<HashMap<String, IntegrationConfig>>,
@@ -117,38 +118,42 @@ impl BillOfMaterials
 
         let mut bom = Self::new();
 
-        // Process each agent's files
-        for (agent_name, agent_config) in template_config.agents
+        // Process each agent's files (if agents section exists)
+        // V2 templates don't have agents section (agents.md standard)
+        if let Some(agents) = template_config.agents
         {
-            let mut file_paths = Vec::new();
-
-            // Collect instruction files
-            if let Some(instructions) = agent_config.instructions
+            for (agent_name, agent_config) in agents
             {
-                for mapping in instructions
+                let mut file_paths = Vec::new();
+
+                // Collect instruction files
+                if let Some(instructions) = agent_config.instructions
                 {
-                    if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                    for mapping in instructions
                     {
-                        file_paths.push(path);
+                        if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                        {
+                            file_paths.push(path);
+                        }
                     }
                 }
-            }
 
-            // Collect prompt files
-            if let Some(prompts) = agent_config.prompts
-            {
-                for mapping in prompts
+                // Collect prompt files
+                if let Some(prompts) = agent_config.prompts
                 {
-                    if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                    for mapping in prompts
                     {
-                        file_paths.push(path);
+                        if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                        {
+                            file_paths.push(path);
+                        }
                     }
                 }
-            }
 
-            if file_paths.is_empty() == false
-            {
-                bom.agent_files.insert(agent_name, file_paths);
+                if file_paths.is_empty() == false
+                {
+                    bom.agent_files.insert(agent_name, file_paths);
+                }
             }
         }
 

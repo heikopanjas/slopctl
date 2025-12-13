@@ -39,7 +39,9 @@ You MUST:
 
 When you DO commit (after explicit instruction):
 
-- Stage the changes
+- **Run `cargo fmt` to format code** (REQUIRED)
+- **Run `cargo clippy` and fix all warnings** (REQUIRED)
+- Stage the changes (including Cargo.lock if Cargo.toml was modified)
 - Write a detailed but concise commit message using conventional commits format
 - The commit message must have a maximum length of 500 characters
 - The commit message must **NOT** contain any special characters or quoting
@@ -830,6 +832,18 @@ The project includes language-specific formatting configurations:
 - Keep subject line under 72 characters
 - Use imperative mood ("add" not "added" or "adds")
 - Add detailed body for complex changes
+
+### Pre-Commit Checklist (MANDATORY)
+
+Before staging and committing any changes:
+
+1. **Run `cargo fmt`** - Format all code to project standards
+2. **Run `cargo clippy`** - Check for linter warnings and fix ALL issues
+3. **Run `cargo build`** - Ensure code compiles without errors
+4. **Run `cargo test`** (if tests exist) - Verify no tests are broken
+5. **Stage Cargo.lock** - Always include when Cargo.toml is modified
+
+**CRITICAL**: Code that breaks CI/CD workflows is unacceptable. Always run clippy and rustfmt before committing.
 
 ### File Organization
 
@@ -1698,3 +1712,44 @@ git diff
   - **To stay on v1**: Set `source.url` config before upgrading
 - Bumped version from 5.1.0 to 6.0.0 (MAJOR version for breaking change)
 - Reasoning: This completes the two-phase rollout of the agents.md standard support. V5.1.0 added v2 as opt-in, allowing users to test the new format. V6.0.0 makes v2 the default, reflecting the community momentum around agents.md and providing the simpler experience to new users by default. The breaking change is justified as it significantly improves the default user experience while maintaining full backward compatibility for those who need v1.
+
+### 2025-12-13 (Pre-Commit Checklist - Mandatory)
+
+- **Documentation**: Added mandatory Pre-Commit Checklist section to coding conventions
+- **Critical Requirements**:
+  - Run `cargo fmt` before every commit (format code)
+  - Run `cargo clippy` before every commit (fix all warnings)
+  - Run `cargo build` to ensure compilation
+  - Always include `Cargo.lock` when `Cargo.toml` is modified
+- Updated Commit Protocol section with fmt/clippy requirements
+- Emphasized that code breaking CI/CD workflows is unacceptable
+- Reasoning: GitHub workflows were breaking due to code not being formatted or linted before commits. This checklist ensures code quality and prevents workflow failures. Following these steps is now mandatory for all commits.
+
+### 2025-12-13 (Version 6.0.1 - V2 Template Compatibility Fixes)
+
+- **Bug Fix**: Made `agents` field optional in `TemplateConfig` struct (bom.rs line 67)
+  - V2 templates don't have agents section (agents.md standard)
+  - Previously caused "missing field `agents`" error when downloading v2 templates
+- **Bug Fix**: Updated `BillOfMaterials::from_config()` to handle missing agents section (bom.rs lines 121-128)
+  - Wrapped agent processing loop in `if let Some(agents)` check
+  - V2 templates correctly processed without agents
+- **Bug Fix**: Updated `DownloadManager::download_templates_from_url()` to handle missing agents (download_manager.rs lines 131-173)
+  - Agent template download now skipped for v2 templates
+  - No errors when agents section doesn't exist
+- **Bug Fix**: Updated `TemplateEngineV1::update()` to handle missing agents section (template_engine_v1.rs lines 197-232)
+  - Added nested check for agents section existence
+  - Proper error message if v1 templates missing agents section
+- **Bug Fix**: Updated `status` command to handle missing agents (template_manager.rs lines 493-510)
+  - Only displays "Available agents" line if agents section exists
+  - No crash when processing v2 templates
+- **Bug Fix**: Updated `list` command to handle missing agents (template_manager.rs lines 635-670)
+  - Shows informational message for v2 templates explaining no agent-specific files
+  - Displays "V2 templates (agents.md standard) - no agent-specific files"
+- **Testing**: All commands verified working with v2 templates
+  - `update` successfully downloads v2 templates
+  - `status` shows correct template version and available languages
+  - `list` displays appropriate v2 message
+  - `init --lang rust` works without --agent parameter
+  - `init --lang rust --agent claude` shows informational note that agent is ignored
+- Bumped version from 6.0.0 to 6.0.1 (PATCH version for bug fixes)
+- Reasoning: Version 6.0.0 introduced breaking changes by switching to v2 templates as default, but the code wasn't fully updated to handle optional agents section. These bugs prevented v2 templates from working at all. The fixes ensure v2 templates work correctly while maintaining v1 compatibility. All affected modules (bom, download_manager, template_engine_v1, template_manager) now properly handle both v1 (with agents) and v2 (without agents) template formats.
