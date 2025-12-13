@@ -296,16 +296,13 @@ fn main()
                     println!("{} Dry run: previewing changes for {}", "→".blue(), lang.green());
                 }
             }
+            else if let Some(agent_name) = &agent
+            {
+                println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent_name.green());
+            }
             else
             {
-                if let Some(agent_name) = &agent
-                {
-                    println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent_name.green());
-                }
-                else
-                {
-                    println!("{} Initializing project for {}", "→".blue(), lang.green());
-                }
+                println!("{} Initializing project for {}", "→".blue(), lang.green());
             }
             manager.update(&lang, agent.as_deref(), force, dry_run)
         }

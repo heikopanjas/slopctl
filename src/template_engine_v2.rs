@@ -395,4 +395,3 @@ impl<'a> TemplateEngineV2<'a>
         PathBuf::from(resolved)
     }
 }
-
