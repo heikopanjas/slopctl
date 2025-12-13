@@ -185,13 +185,17 @@ impl TemplateManager
             }
             | 2 =>
             {
-                // V2 doesn't use agent parameter (single AGENTS.md for all agents)
+                // V2: Single AGENTS.md for all agents, but agent-specific prompts can be copied
                 if agent.is_some()
                 {
-                    println!("{} Note: --agent parameter is ignored for v2 templates (single AGENTS.md works with all agents)", "→".blue());
+                    println!("{} V2 templates: Using single AGENTS.md + copying agent-specific prompts", "→".blue());
+                }
+                else
+                {
+                    println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
                 let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
-                engine.update(lang, force, dry_run)
+                engine.update(lang, agent, force, dry_run)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }

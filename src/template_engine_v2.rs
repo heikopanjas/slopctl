@@ -88,19 +88,20 @@ impl<'a> TemplateEngineV2<'a>
         Ok(content.contains(marker) == false)
     }
 
-    /// Updates local templates from global storage (V2 - no agent parameter needed)
+    /// Updates local templates from global storage (V2 - agent parameter optional)
     ///
     /// This method:
     /// 1. Verifies global templates exist
     /// 2. Detects local modifications to AGENTS.md
     /// 3. Copies templates to current directory
     ///
-    /// V2 Difference: No agent parameter since v2 has no agent-specific files.
-    /// All agents use the same AGENTS.md file.
+    /// V2 Philosophy: Single AGENTS.md works for all agents, but agent-specific
+    /// prompts/commands can still be copied if agent is specified.
     ///
     /// # Arguments
     ///
     /// * `lang` - Programming language or framework identifier
+    /// * `agent` - Optional agent identifier for copying agent-specific prompts
     /// * `force` - If true, overwrite local modifications without warning
     /// * `dry_run` - If true, only show what would happen without making changes
     ///
@@ -110,7 +111,7 @@ impl<'a> TemplateEngineV2<'a>
     /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Copy operations fail
-    pub fn update(&self, lang: &str, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
@@ -205,8 +206,33 @@ impl<'a> TemplateEngineV2<'a>
             }
         }
 
-        // V2: No agent-specific files to process!
-        // All agents use the same AGENTS.md file
+        // V2: Process agent-specific prompts if agent is specified
+        // Note: V2 has no agent-specific instruction files (single AGENTS.md for all)
+        // but agents can still have operational prompts/commands
+        if let Some(agent_name) = agent
+            && let Some(agents) = config.agents.as_ref()
+            {
+                if let Some(agent_config) = agents.get(agent_name)
+                {
+                    // Add agent prompts
+                    if let Some(prompts) = &agent_config.prompts
+                    {
+                        for prompt in prompts
+                        {
+                            let source_path = self.config_dir.join(&prompt.source);
+                            if source_path.exists()
+                            {
+                                let target_path = self.resolve_placeholder(&prompt.target, &workspace, &userprofile);
+                                files_to_copy.push((source_path, target_path));
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    println!("{} Agent '{}' not found in templates.yml", "!".yellow(), agent_name.yellow());
+                }
+            }
 
         if files_to_copy.is_empty() && main_template.is_none()
         {
@@ -309,7 +335,14 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         println!("{} Templates updated successfully", "✓".green());
-        println!("{} Note: V2 templates - single AGENTS.md works with all agents", "→".blue());
+        if agent.is_some()
+        {
+            println!("{} V2 templates: Single AGENTS.md + agent-specific prompts", "→".blue());
+        }
+        else
+        {
+            println!("{} V2 templates: Single AGENTS.md works with all agents", "→".blue());
+        }
 
         Ok(())
     }

@@ -1753,3 +1753,24 @@ git diff
   - `init --lang rust --agent claude` shows informational note that agent is ignored
 - Bumped version from 6.0.0 to 6.0.1 (PATCH version for bug fixes)
 - Reasoning: Version 6.0.0 introduced breaking changes by switching to v2 templates as default, but the code wasn't fully updated to handle optional agents section. These bugs prevented v2 templates from working at all. The fixes ensure v2 templates work correctly while maintaining v1 compatibility. All affected modules (bom, download_manager, template_engine_v1, template_manager) now properly handle both v1 (with agents) and v2 (without agents) template formats.
+
+### 2025-12-13 (Version 6.0.2 - Restore Agent Prompts in V2)
+
+- **Bug Fix**: Restored agent-specific prompt copying in V2 templates
+  - V2 philosophy: Single AGENTS.md for all agents (no duplicate instructions)
+  - However, agent-specific operational files (prompts/commands) should still be supported
+  - Added agents section to templates/v2/templates.yml with prompts only (no instructions)
+  - Created agent directories in v2: claude/, copilot/, codex/, cursor/ with init-session files
+  - Updated template_engine_v2.rs to accept optional agent parameter and copy prompts
+  - Updated TemplateManager to pass agent parameter to v2 engine
+  - V2 init command now works with or without agent parameter
+- **Usage**:
+  - With agent: `vibe-check init --lang rust --agent claude` copies AGENTS.md + agent prompts
+  - Without agent: `vibe-check init --lang rust` copies only AGENTS.md (no agent prompts)
+- **Files Changed**:
+  - templates/v2/templates.yml: Added agents section with prompts
+  - templates/v2/: Added claude/, copilot/, codex/, cursor/ directories with init-session files
+  - src/template_engine_v2.rs: Updated update method signature and added prompt processing logic
+  - src/template_manager.rs: Updated v2 dispatcher to pass agent parameter
+- Bumped version from 6.0.1 to 6.0.2 (PATCH version for bug fix)
+- Reasoning: V2 removed agent prompts along with instructions, but prompts are operational files not duplicate instructions. Different agents need their own initialization prompts for workflow automation. This fix restores that capability while maintaining V2 philosophy of single unified AGENTS.md instruction file.
