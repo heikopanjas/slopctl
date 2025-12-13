@@ -39,7 +39,9 @@ You MUST:
 
 When you DO commit (after explicit instruction):
 
-- Stage the changes
+- **Run `cargo fmt` to format code** (REQUIRED)
+- **Run `cargo clippy` and fix all warnings** (REQUIRED)
+- Stage the changes (including Cargo.lock if Cargo.toml was modified)
 - Write a detailed but concise commit message using conventional commits format
 - The commit message must have a maximum length of 500 characters
 - The commit message must **NOT** contain any special characters or quoting
@@ -830,6 +832,18 @@ The project includes language-specific formatting configurations:
 - Keep subject line under 72 characters
 - Use imperative mood ("add" not "added" or "adds")
 - Add detailed body for complex changes
+
+### Pre-Commit Checklist (MANDATORY)
+
+Before staging and committing any changes:
+
+1. **Run `cargo fmt`** - Format all code to project standards
+2. **Run `cargo clippy`** - Check for linter warnings and fix ALL issues
+3. **Run `cargo build`** - Ensure code compiles without errors
+4. **Run `cargo test`** (if tests exist) - Verify no tests are broken
+5. **Stage Cargo.lock** - Always include when Cargo.toml is modified
+
+**CRITICAL**: Code that breaks CI/CD workflows is unacceptable. Always run clippy and rustfmt before committing.
 
 ### File Organization
 
