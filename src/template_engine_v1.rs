@@ -198,33 +198,33 @@ impl<'a> TemplateEngineV1<'a>
         {
             if let Some(agent_config) = agents.get(agent)
             {
-            // Add instructions files if present
-            if let Some(instructions) = &agent_config.instructions
-            {
-                for instruction in instructions
+                // Add instructions files if present
+                if let Some(instructions) = &agent_config.instructions
                 {
-                    let source_path = self.config_dir.join(&instruction.source);
-                    if source_path.exists()
+                    for instruction in instructions
                     {
-                        let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
-                        files_to_copy.push((source_path, target_path));
+                        let source_path = self.config_dir.join(&instruction.source);
+                        if source_path.exists()
+                        {
+                            let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                            files_to_copy.push((source_path, target_path));
+                        }
                     }
                 }
-            }
 
-            // Add prompt files if present
-            if let Some(prompts) = &agent_config.prompts
-            {
-                for prompt in prompts
+                // Add prompt files if present
+                if let Some(prompts) = &agent_config.prompts
                 {
-                    let source_path = self.config_dir.join(&prompt.source);
-                    if source_path.exists()
+                    for prompt in prompts
                     {
-                        let target_path = self.resolve_placeholder(&prompt.target, &workspace, &userprofile);
-                        files_to_copy.push((source_path, target_path));
+                        let source_path = self.config_dir.join(&prompt.source);
+                        if source_path.exists()
+                        {
+                            let target_path = self.resolve_placeholder(&prompt.target, &workspace, &userprofile);
+                            files_to_copy.push((source_path, target_path));
+                        }
                     }
                 }
-            }
             }
             else
             {

@@ -124,36 +124,36 @@ impl BillOfMaterials
         {
             for (agent_name, agent_config) in agents
             {
-            let mut file_paths = Vec::new();
+                let mut file_paths = Vec::new();
 
-            // Collect instruction files
-            if let Some(instructions) = agent_config.instructions
-            {
-                for mapping in instructions
+                // Collect instruction files
+                if let Some(instructions) = agent_config.instructions
                 {
-                    if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                    for mapping in instructions
                     {
-                        file_paths.push(path);
+                        if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                        {
+                            file_paths.push(path);
+                        }
                     }
                 }
-            }
 
-            // Collect prompt files
-            if let Some(prompts) = agent_config.prompts
-            {
-                for mapping in prompts
+                // Collect prompt files
+                if let Some(prompts) = agent_config.prompts
                 {
-                    if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                    for mapping in prompts
                     {
-                        file_paths.push(path);
+                        if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                        {
+                            file_paths.push(path);
+                        }
                     }
                 }
-            }
 
-            if file_paths.is_empty() == false
-            {
-                bom.agent_files.insert(agent_name, file_paths);
-            }
+                if file_paths.is_empty() == false
+                {
+                    bom.agent_files.insert(agent_name, file_paths);
+                }
             }
         }
 

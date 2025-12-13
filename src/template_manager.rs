@@ -504,7 +504,7 @@ impl TemplateManager
                         println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
                     }
                 }
-                
+
                 let languages: Vec<&String> = config.languages.keys().collect();
                 if languages.is_empty() == false
                 {

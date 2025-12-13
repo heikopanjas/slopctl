@@ -133,43 +133,43 @@ impl DownloadManager
         {
             for agent_config in agents.values()
             {
-            // Download instructions files if present
-            if let Some(instructions) = &agent_config.instructions
-            {
-                for instruction in instructions
+                // Download instructions files if present
+                if let Some(instructions) = &agent_config.instructions
                 {
-                    let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
-                    let dest_path = self.config_dir.join(&instruction.source);
-
-                    print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
-                    io::stdout().flush()?;
-
-                    match self.download_file(&file_url, &dest_path)
+                    for instruction in instructions
                     {
-                        | Ok(_) => println!("{}", "✓".green()),
-                        | Err(_) => println!("{} (skipped)", "✗".red())
+                        let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
+                        let dest_path = self.config_dir.join(&instruction.source);
+
+                        print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
+                        io::stdout().flush()?;
+
+                        match self.download_file(&file_url, &dest_path)
+                        {
+                            | Ok(_) => println!("{}", "✓".green()),
+                            | Err(_) => println!("{} (skipped)", "✗".red())
+                        }
                     }
                 }
-            }
 
-            // Download prompt files if present
-            if let Some(prompts) = &agent_config.prompts
-            {
-                for prompt in prompts
+                // Download prompt files if present
+                if let Some(prompts) = &agent_config.prompts
                 {
-                    let file_url = format!("{}{}/{}", base_url, url_path, prompt.source);
-                    let dest_path = self.config_dir.join(&prompt.source);
-
-                    print!("{} Downloading {}... ", "→".blue(), prompt.source.yellow());
-                    io::stdout().flush()?;
-
-                    match self.download_file(&file_url, &dest_path)
+                    for prompt in prompts
                     {
-                        | Ok(_) => println!("{}", "✓".green()),
-                        | Err(_) => println!("{} (skipped)", "✗".red())
+                        let file_url = format!("{}{}/{}", base_url, url_path, prompt.source);
+                        let dest_path = self.config_dir.join(&prompt.source);
+
+                        print!("{} Downloading {}... ", "→".blue(), prompt.source.yellow());
+                        io::stdout().flush()?;
+
+                        match self.download_file(&file_url, &dest_path)
+                        {
+                            | Ok(_) => println!("{}", "✓".green()),
+                            | Err(_) => println!("{} (skipped)", "✗".red())
+                        }
                     }
                 }
-            }
             }
         }
 
