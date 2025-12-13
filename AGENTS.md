@@ -1677,3 +1677,24 @@ git diff
   - v6.0.0: Switches default to v2 (future - MAJOR version for breaking change)
 - Bumped version from 5.0.1 to 5.1.0 (MINOR version for new features)
 - Reasoning: This release adds significant new functionality (v2 template support) while maintaining full backward compatibility. Existing users continue using v1 templates without any changes. New v2 template system embraces the agents.md community standard, providing a simpler, more universal approach where one AGENTS.md file works across all coding agents. The opt-in approach allows users to test v2 before v6.0.0 switches the default.
+
+### 2025-12-13 (Version 6.0.0 - V2 Templates Default / agents.md Standard)
+
+- **Breaking Change**: Switched default template source from v1 to v2
+  - Default URL changed from `templates/v1` to `templates/v2`
+  - New users get v2 templates by default (agents.md standard)
+  - Upgrading users will get v2 templates unless explicitly configured for v1
+- **V2 as Default**: agents.md standard is now the default experience
+  - Single AGENTS.md file works with all agents (Claude, Cursor, Copilot, Aider, Jules, Factory, etc.)
+  - No `--agent` parameter needed: `vibe-check init --lang rust`
+  - Simpler, cleaner workflow aligned with community standard
+- **V1 Still Available**: Users can continue using v1 templates
+  - Configure v1 URL: `vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1`
+  - Full backward compatibility maintained
+  - All v1 features continue to work
+- **Migration Impact**:
+  - **New installations**: Get v2 by default (no action needed)
+  - **Existing v5.x users upgrading**: Will switch to v2 (unless custom config)
+  - **To stay on v1**: Set `source.url` config before upgrading
+- Bumped version from 5.1.0 to 6.0.0 (MAJOR version for breaking change)
+- Reasoning: This completes the two-phase rollout of the agents.md standard support. V5.1.0 added v2 as opt-in, allowing users to test the new format. V6.0.0 makes v2 the default, reflecting the community momentum around agents.md and providing the simpler experience to new users by default. The breaking change is justified as it significantly improves the default user experience while maintaining full backward compatibility for those who need v1.

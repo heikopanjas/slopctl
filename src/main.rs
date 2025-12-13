@@ -244,8 +244,8 @@ fn main()
                     return;
                 }
 
-                // Use configured source or default (v1 for backward compatibility in v5.x)
-                let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1".to_string();
+                // Use configured source or default (v2 is default in v6.x - agents.md standard)
+                let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".to_string();
                 let config = Config::load().ok();
                 let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
                 let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
@@ -308,8 +308,8 @@ fn main()
         }
         | Commands::Update { from, dry_run } =>
         {
-            // Determine source: CLI --from > config source.url > default (v1 for backward compatibility in v5.x)
-            let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1".to_string();
+            // Determine source: CLI --from > config source.url > default (v2 is default in v6.x - agents.md standard)
+            let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".to_string();
             let config = Config::load().ok();
             let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
             let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
