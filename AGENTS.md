@@ -1713,6 +1713,18 @@ git diff
 - Bumped version from 5.1.0 to 6.0.0 (MAJOR version for breaking change)
 - Reasoning: This completes the two-phase rollout of the agents.md standard support. V5.1.0 added v2 as opt-in, allowing users to test the new format. V6.0.0 makes v2 the default, reflecting the community momentum around agents.md and providing the simpler experience to new users by default. The breaking change is justified as it significantly improves the default user experience while maintaining full backward compatibility for those who need v1.
 
+### 2025-12-13 (Pre-Commit Checklist - Mandatory)
+
+- **Documentation**: Added mandatory Pre-Commit Checklist section to coding conventions
+- **Critical Requirements**:
+  - Run `cargo fmt` before every commit (format code)
+  - Run `cargo clippy` before every commit (fix all warnings)
+  - Run `cargo build` to ensure compilation
+  - Always include `Cargo.lock` when `Cargo.toml` is modified
+- Updated Commit Protocol section with fmt/clippy requirements
+- Emphasized that code breaking CI/CD workflows is unacceptable
+- Reasoning: GitHub workflows were breaking due to code not being formatted or linted before commits. This checklist ensures code quality and prevents workflow failures. Following these steps is now mandatory for all commits.
+
 ### 2025-12-13 (Version 6.0.1 - V2 Template Compatibility Fixes)
 
 - **Bug Fix**: Made `agents` field optional in `TemplateConfig` struct (bom.rs line 67)
