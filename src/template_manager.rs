@@ -11,6 +11,7 @@ use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
     download_manager::DownloadManager,
+    file_tracker::FileTracker,
     utils::{confirm_action, copy_dir_all, remove_file_and_cleanup_parents}
 };
 
@@ -296,6 +297,9 @@ impl TemplateManager
             return Ok(());
         }
 
+        // Initialize file tracker for cleanup
+        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+
         // Remove files
         let mut purged_count = 0;
         for file in &files_to_purge
@@ -308,8 +312,13 @@ impl TemplateManager
             else
             {
                 purged_count += 1;
+                // Remove from file tracker
+                file_tracker.remove_entry(file);
             }
         }
+
+        // Save file tracker metadata
+        file_tracker.save()?;
 
         if agents_md_skipped == true
         {
@@ -441,6 +450,9 @@ impl TemplateManager
             return Ok(());
         }
 
+        // Initialize file tracker for cleanup
+        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+
         // Remove files
         let mut removed_count = 0;
         for file in &files_to_remove
@@ -451,6 +463,8 @@ impl TemplateManager
                 {
                     println!("{} Removed {}", "✓".green(), file.display());
                     removed_count += 1;
+                    // Remove from file tracker
+                    file_tracker.remove_entry(file);
                 }
                 | Err(e) =>
                 {
@@ -458,6 +472,9 @@ impl TemplateManager
                 }
             }
         }
+
+        // Save file tracker metadata
+        file_tracker.save()?;
 
         println!("\n{} Removed {} file(s) for {}", "✓".green(), removed_count, description);
 
