@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-10-05
+**Last updated:** 2025-12-23
 
 <!-- {mission} -->
 
@@ -695,6 +695,12 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2025-12-23
+
+- Fixed gitattributes line ending conflict with Rust formatting
+- Enforced LF line endings for Rust source files (*.rs) in .gitattributes to match rustfmt configuration (newline_style = "Unix")
+- Updated both v1 and v2 template versions to prevent future conflicts
 
 ### 2025-10-05
 
