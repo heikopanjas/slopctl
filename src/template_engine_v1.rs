@@ -11,7 +11,12 @@ use std::{
 
 use owo_colors::OwoColorize;
 
-use crate::{Result, bom::TemplateConfig, utils::copy_file_with_mkdir};
+use crate::{
+    Result,
+    bom::TemplateConfig,
+    file_tracker::{FileStatus, FileTracker},
+    utils::{FileActionResponse, copy_file_with_mkdir, prompt_file_modification}
+};
 
 /// Template engine for version 1 templates
 ///
@@ -118,6 +123,9 @@ impl<'a> TemplateEngineV1<'a>
         // Get current working directory and user home directory
         let workspace = std::env::current_dir()?;
         let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
+
+        // Initialize file tracker
+        let mut file_tracker = FileTracker::new(self.config_dir)?;
 
         // Collect files to copy
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -314,6 +322,10 @@ impl<'a> TemplateEngineV1<'a>
                 println!("{} Merging fragments into AGENTS.md", "→".blue());
                 self.merge_fragments(&main_source, &main_target, &fragments)?;
                 println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
+
+                // Record installation in file tracker
+                let sha = FileTracker::calculate_sha256(&main_target)?;
+                file_tracker.record_installation(&main_target, sha, config.version, Some(lang.to_string()), "main".to_string());
             }
             else
             {
@@ -324,17 +336,136 @@ impl<'a> TemplateEngineV1<'a>
                 }
                 fs::copy(&main_source, &main_target)?;
                 println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
+
+                // Record installation in file tracker
+                let sha = FileTracker::calculate_sha256(&main_target)?;
+                file_tracker.record_installation(&main_target, sha, config.version, Some(lang.to_string()), "main".to_string());
             }
         }
 
-        // Copy templates
+        // Copy templates with file modification checking
         println!("{} Copying templates to target directories", "→".blue());
+
+        let mut skipped_files = Vec::new();
 
         for (source, target) in &files_to_copy
         {
-            copy_file_with_mkdir(source, target)?;
-            println!("  {} {}", "✓".green(), target.display().to_string().yellow());
+            // Calculate new template SHA
+            let new_template_sha = FileTracker::calculate_sha256(source)?;
+
+            // Check if file needs to be processed
+            let should_copy = if target.exists() == false
+            {
+                // File doesn't exist, safe to copy
+                true
+            }
+            else if force == true
+            {
+                // Force flag set, always overwrite
+                true
+            }
+            else
+            {
+                // Check modification status
+                match file_tracker.check_modification(target)?
+                {
+                    | FileStatus::NotTracked =>
+                    {
+                        // Not tracked, could be user file - prompt for safety
+                        let response = prompt_file_modification(target, "<not tracked>", "<current file>", source)?;
+                        match response
+                        {
+                            | FileActionResponse::Overwrite => true,
+                            | FileActionResponse::Skip =>
+                            {
+                                skipped_files.push(target.clone());
+                                false
+                            }
+                            | FileActionResponse::Quit =>
+                            {
+                                println!("\n{} Operation cancelled by user", "!".yellow());
+                                return Ok(());
+                            }
+                        }
+                    }
+                    | FileStatus::Unmodified =>
+                    {
+                        // User didn't modify, safe to update
+                        true
+                    }
+                    | FileStatus::Modified =>
+                    {
+                        // User modified, prompt
+                        if let Some(metadata) = file_tracker.get_metadata(target)
+                        {
+                            let current_sha = FileTracker::calculate_sha256(target)?;
+                            let response = prompt_file_modification(target, &metadata.original_sha, &current_sha, source)?;
+                            match response
+                            {
+                                | FileActionResponse::Overwrite => true,
+                                | FileActionResponse::Skip =>
+                                {
+                                    skipped_files.push(target.clone());
+                                    false
+                                }
+                                | FileActionResponse::Quit =>
+                                {
+                                    println!("\n{} Operation cancelled by user", "!".yellow());
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Shouldn't happen, but treat as modified
+                            true
+                        }
+                    }
+                    | FileStatus::Deleted =>
+                    {
+                        // Was tracked but deleted, safe to recreate
+                        true
+                    }
+                }
+            };
+
+            if should_copy == true
+            {
+                copy_file_with_mkdir(source, target)?;
+                println!("  {} {}", "✓".green(), target.display().to_string().yellow());
+
+                // Record installation in file tracker
+                // Determine category based on target path
+                let category = if target.to_string_lossy().contains(".git")
+                {
+                    "integration"
+                }
+                else if target.to_string_lossy().contains(&format!(".{}", agent)) || target.to_string_lossy().contains(agent)
+                {
+                    "agent"
+                }
+                else
+                {
+                    "language"
+                };
+
+                file_tracker.record_installation(target, new_template_sha, config.version, Some(lang.to_string()), category.to_string());
+            }
         }
+
+        // Show summary of skipped files
+        if skipped_files.is_empty() == false
+        {
+            println!("\n{} Skipped {} modified file(s):", "!".yellow(), skipped_files.len());
+            for file in &skipped_files
+            {
+                println!("  {} {}", "○".yellow(), file.display());
+            }
+            println!("{} Use --force to overwrite modified files", "→".blue());
+        }
+
+        // Save file tracker metadata
+        file_tracker.save()?;
 
         println!("{} Templates updated successfully", "✓".green());
 

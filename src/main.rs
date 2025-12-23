@@ -279,7 +279,7 @@ fn main()
 
                 if let Err(e) = download_result
                 {
-                    eprintln!("{} Failed to download global templates: {}", "✗".red(), e.to_string().red());
+                    eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
                     std::process::exit(1);
                 }
             }

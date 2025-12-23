@@ -1,28 +1,93 @@
-# Default to LF for all text files
-* text=auto eol=lf
+# Git Attributes - Common Configuration
+# Cross-platform .gitattributes for text normalization and binary handling
+# Works correctly on both Windows (CRLF) and Unix (LF) systems
 
-# Rust source files
-*.rs text eol=lf
-*.toml text eol=lf
+# Auto-detect text files and normalize line endings
+* text=auto
 
-# Markdown documentation
-*.md text eol=lf
+# Text files - force normalization
+*.txt text
+*.md text
+*.markdown text
+*.rst text
 
-# YAML configuration
-*.yml text eol=lf
-*.yaml text eol=lf
+# Source code
+*.c text diff=c
+*.h text diff=c
+*.cpp text diff=cpp
+*.hpp text diff=cpp
+*.cc text diff=cpp
+*.cxx text diff=cpp
+*.rs text eol=lf diff=rust
+*.swift text diff=swift
 
-# Shell scripts (must be LF)
+# Configuration and data files
+*.yml text
+*.yaml text
+*.toml text
+*.json text
+*.xml text
+*.ini text
+*.cfg text
+*.conf text
+
+# Build files
+Makefile text
+*.mk text
+*.cmake text
+CMakeLists.txt text
+Cargo.toml text
+Cargo.lock text
+Package.swift text
+
+# Scripts
 *.sh text eol=lf
-
-# Windows scripts can be CRLF
+*.bash text eol=lf
+*.zsh text eol=lf
+*.fish text eol=lf
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
-# Binary files
+# Documentation
+*.1 text
+LICENSE text
+README text
+CHANGELOG text
+AUTHORS text
+CONTRIBUTORS text
+
+# Binary files - explicitly mark to prevent conversion
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.a binary
+*.lib binary
+*.o binary
+*.obj binary
+
+# Images
 *.png binary
 *.jpg binary
 *.jpeg binary
+*.gif binary
 *.ico binary
+*.svg binary
+
+# Archives
+*.zip binary
+*.tar binary
+*.gz binary
+*.bz2 binary
+*.xz binary
+*.7z binary
+*.rar binary
+
+# Other binary formats
 *.pdf binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.eot binary

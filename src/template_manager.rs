@@ -11,6 +11,7 @@ use crate::{
     Result,
     bom::{BillOfMaterials, TemplateConfig},
     download_manager::DownloadManager,
+    file_tracker::FileTracker,
     utils::{confirm_action, copy_dir_all, remove_file_and_cleanup_parents}
 };
 
@@ -185,13 +186,17 @@ impl TemplateManager
             }
             | 2 =>
             {
-                // V2 doesn't use agent parameter (single AGENTS.md for all agents)
+                // V2: Single AGENTS.md for all agents, but agent-specific prompts can be copied
                 if agent.is_some()
                 {
-                    println!("{} Note: --agent parameter is ignored for v2 templates (single AGENTS.md works with all agents)", "→".blue());
+                    println!("{} V2 templates: Using single AGENTS.md + copying agent-specific prompts", "→".blue());
+                }
+                else
+                {
+                    println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
                 let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
-                engine.update(lang, force, dry_run)
+                engine.update(lang, agent, force, dry_run)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }
@@ -292,6 +297,9 @@ impl TemplateManager
             return Ok(());
         }
 
+        // Initialize file tracker for cleanup
+        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+
         // Remove files
         let mut purged_count = 0;
         for file in &files_to_purge
@@ -304,8 +312,13 @@ impl TemplateManager
             else
             {
                 purged_count += 1;
+                // Remove from file tracker
+                file_tracker.remove_entry(file);
             }
         }
+
+        // Save file tracker metadata
+        file_tracker.save()?;
 
         if agents_md_skipped == true
         {
@@ -437,6 +450,9 @@ impl TemplateManager
             return Ok(());
         }
 
+        // Initialize file tracker for cleanup
+        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+
         // Remove files
         let mut removed_count = 0;
         for file in &files_to_remove
@@ -447,6 +463,8 @@ impl TemplateManager
                 {
                     println!("{} Removed {}", "✓".green(), file.display());
                     removed_count += 1;
+                    // Remove from file tracker
+                    file_tracker.remove_entry(file);
                 }
                 | Err(e) =>
                 {
@@ -454,6 +472,9 @@ impl TemplateManager
                 }
             }
         }
+
+        // Save file tracker metadata
+        file_tracker.save()?;
 
         println!("\n{} Removed {} file(s) for {}", "✓".green(), removed_count, description);
 
