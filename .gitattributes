@@ -18,7 +18,7 @@
 *.hpp text diff=cpp
 *.cc text diff=cpp
 *.cxx text diff=cpp
-*.rs text eol=lf diff=rust
+*.rs text diff=rust
 *.swift text diff=swift
 
 # Configuration and data files
