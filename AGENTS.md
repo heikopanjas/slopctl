@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-12-23
+**Last updated:** 2025-12-28
 
 <!-- {mission} -->
 
@@ -695,6 +695,14 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2025-12-28
+
+- Fixed Swift format template JSON formatting and typos
+- Corrected indentation issues on `respectsExistingLineBreaks` and `ValidateDocumentationComments` properties
+- Fixed typo: removed erroneous colon from `NeverUseImplicitlyUnwrappedOptionals` property name
+- Applied fixes to both v1 and v2 template versions
+- Version bump: 6.1.0 → 6.1.1 (PATCH - bug fix)
 
 ### 2025-12-23
 
