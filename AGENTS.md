@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2025-12-28
+**Last updated:** 2026-01-24
 
 <!-- {mission} -->
 
@@ -695,6 +695,15 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-01-24
+
+- Added `--mission` option to `init` command for custom mission statements
+- Supports inline text or file input via `@filename` syntax (e.g., `--mission @mission.md`)
+- Custom mission overrides default template mission statement in AGENTS.md
+- Implemented in both v1 and v2 template engines
+- Version bump: 6.1.1 → 6.2.0 (MINOR - new feature)
+- **Planned for v7.0.0:** Switch default template version from 1 to 2 (see `default_version()` in `src/bom.rs`)
 
 ### 2025-12-28
 

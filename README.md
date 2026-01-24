@@ -451,16 +451,17 @@ Initialize instruction files for AI coding agents in your project.
 
 ```bash
 # V2 templates (default in v6.0.0+)
-vibe-check init --lang <language> [--force] [--dry-run]
+vibe-check init --lang <language> [--mission <text|@file>] [--force] [--dry-run]
 
 # V1 templates (or explicit agent in v6.0.0+)
-vibe-check init --lang <language> --agent <agent> [--force] [--dry-run]
+vibe-check init --lang <language> --agent <agent> [--mission <text|@file>] [--force] [--dry-run]
 ```
 
 **Options:**
 
 - `--lang <string>` - Programming language or framework (e.g., c++, rust, swift, c)
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
+- `--mission <string>` - Custom mission statement to override the template default. Use `@filename` to read from a file (e.g., `--mission @mission.md`)
 - `--force` - Force overwrite of local files without confirmation
 - `--dry-run` - Preview changes without applying them
 
@@ -472,6 +473,12 @@ vibe-check init --lang rust
 
 # Initialize C++ project
 vibe-check init --lang c++
+
+# Initialize with custom mission statement (inline)
+vibe-check init --lang rust --mission "A CLI tool for managing AI agent instructions"
+
+# Initialize with mission statement from file (multi-line support)
+vibe-check init --lang rust --mission @mission.md
 
 # Force overwrite existing local files
 vibe-check init --lang swift --force
@@ -488,6 +495,9 @@ vibe-check init --lang c++ --agent claude
 
 # Initialize Rust project with Copilot
 vibe-check init --lang rust --agent copilot
+
+# Initialize with custom mission from file
+vibe-check init --lang c++ --agent claude --mission @docs/mission.md
 ```
 
 **Behavior:**
@@ -1087,6 +1097,9 @@ Run `vibe-check purge` to remove all agent files and AGENTS.md, or `vibe-check r
 **How do I preview changes before applying?**
 Use the `--dry-run` flag on any command: `vibe-check init --lang rust --agent claude --dry-run`
 
+**How do I customize the mission statement?**
+Use the `--mission` option with `init`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
+
 **What template version should I use?**
 - **V2 (recommended for v6.0.0+)**: agents.md standard - simpler, single AGENTS.md for all agents
 - **V1 (default in v5.x)**: Agent-specific files - separate files per agent
@@ -1141,4 +1154,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: December 13, 2025
+Last updated: January 24, 2026
