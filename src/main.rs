@@ -1,4 +1,4 @@
-use std::io;
+use std::{fs, io};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
@@ -52,6 +52,10 @@ enum Commands
         /// AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
         #[arg(long)]
         agent: Option<String>,
+
+        /// Custom mission statement (use @filename to read from file)
+        #[arg(long)]
+        mission: Option<String>,
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
@@ -129,6 +133,32 @@ enum Commands
         /// Unset a configuration key
         #[arg(long)]
         unset: Option<String>
+    }
+}
+
+/// Resolves mission content from CLI argument
+///
+/// If the value starts with `@`, reads content from the specified file path.
+/// Otherwise, returns the value as-is.
+///
+/// # Arguments
+///
+/// * `value` - The mission argument value (inline text or @filepath)
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read
+fn resolve_mission_content(value: &str) -> Result<String>
+{
+    if let Some(file_path) = value.strip_prefix('@')
+    {
+        // Read content from file
+        fs::read_to_string(file_path).map_err(|e| format!("Failed to read mission file '{}': {}", file_path, e).into())
+    }
+    else
+    {
+        // Return inline content as-is
+        Ok(value.to_string())
     }
 }
 
@@ -233,8 +263,26 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, force, dry_run } =>
         {
+            // Resolve mission content if provided (handles @filepath syntax)
+            let resolved_mission = if let Some(ref mission_value) = mission
+            {
+                match resolve_mission_content(mission_value)
+                {
+                    | Ok(content) => Some(content),
+                    | Err(e) =>
+                    {
+                        eprintln!("{} {}", "✗".red(), e.to_string().red());
+                        std::process::exit(1);
+                    }
+                }
+            }
+            else
+            {
+                None
+            };
+
             // Check if global templates exist, download if not
             if manager.has_global_templates() == false
             {
@@ -304,7 +352,7 @@ fn main()
             {
                 println!("{} Initializing project for {}", "→".blue(), lang.green());
             }
-            manager.update(&lang, agent.as_deref(), force, dry_run)
+            manager.update(&lang, agent.as_deref(), resolved_mission.as_deref(), force, dry_run)
         }
         | Commands::Update { from, dry_run } =>
         {

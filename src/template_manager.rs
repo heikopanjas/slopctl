@@ -155,6 +155,7 @@ impl TemplateManager
     ///
     /// * `lang` - Programming language or framework identifier
     /// * `agent` - AI coding agent identifier
+    /// * `mission` - Optional custom mission statement to override template default
     /// * `force` - If true, overwrite local modifications without warning
     /// * `dry_run` - If true, only show what would happen without making changes
     ///
@@ -164,7 +165,7 @@ impl TemplateManager
     /// - Global templates don't exist
     /// - Template version is unsupported
     /// - Template generation fails
-    pub fn update(&self, lang: &str, agent: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: Option<&str>, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         // Check if global templates exist
         if self.has_global_templates() == false
@@ -182,7 +183,7 @@ impl TemplateManager
                 // V1 requires agent parameter
                 let agent_str = agent.ok_or("--agent is required for v1 templates. Use: vibe-check init --lang <lang> --agent <agent>")?;
                 let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
-                engine.update(lang, agent_str, force, dry_run)
+                engine.update(lang, agent_str, mission, force, dry_run)
             }
             | 2 =>
             {
@@ -196,7 +197,7 @@ impl TemplateManager
                     println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
                 let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
-                engine.update(lang, agent, force, dry_run)
+                engine.update(lang, agent, mission, force, dry_run)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }
