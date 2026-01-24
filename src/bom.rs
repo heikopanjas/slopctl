@@ -51,6 +51,8 @@ pub struct MainConfig
 }
 
 /// Default version for templates.yml (used when version field is missing)
+///
+/// Note: Default will switch to version 2 with v7.0.0
 fn default_version() -> u32
 {
     1

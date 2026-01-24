@@ -180,6 +180,12 @@ impl TemplateManager
         {
             | 1 =>
             {
+                // Deprecation warning for v1 templates
+                println!("{} V1 templates are deprecated and will be removed in v7.0.0", "!".yellow());
+                println!("{} Consider migrating to V2 templates (agents.md standard)", "!".yellow());
+                println!("{} Run: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2", "→".blue());
+                println!();
+
                 // V1 requires agent parameter
                 let agent_str = agent.ok_or("--agent is required for v1 templates. Use: vibe-check init --lang <lang> --agent <agent>")?;
                 let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
