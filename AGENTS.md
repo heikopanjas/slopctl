@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-15
+**Last updated:** 2026-02-16
 
 <!-- {mission} -->
 
@@ -410,6 +410,8 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 
 - Use `std::env::current_dir()` over hardcoding paths
 - Use `Path` and `PathBuf` for filesystem paths
+- Use `Path::starts_with()` for path prefix/subpath checks; avoid string-based path comparison (e.g. `path.starts_with("foo/")`) to ensure cross-platform behavior (Windows uses `\`, Unix uses `/`)
+- When resolving placeholders in paths (e.g. `$workspace/AGENTS.md`), use `Path::join()` with the suffix instead of string replace; string replace can produce mixed separators on Windows
 - Leverage `std::io::Write` trait for flushing output buffers
 - Use `owo-colors` or similar crate for terminal output styling
 - Use platform-appropriate paths via `dirs` crate (prefer over `$HOME` env var)
@@ -695,6 +697,14 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-16
+
+- Fixed `get_installed_language_for_workspace` failing on Windows CI (path separator mismatch)
+- Fixed `resolve_placeholder` producing mixed path separators on Windows; use `Path::join()` instead of string replace
+- Use `Path::starts_with()` instead of string-based prefix check for cross-platform correctness
+- Added Rust coding convention: use `Path::starts_with()` for path comparison, not string prefix
+- Version bump: 6.4.0 → 6.4.2 (PATCH - bug fixes)
 
 ### 2026-02-15
 

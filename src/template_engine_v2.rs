@@ -614,7 +614,8 @@ impl<'a> TemplateEngineV2<'a>
     /// Resolves placeholder variables in target paths
     ///
     /// Replaces $workspace with the workspace directory path
-    /// and $userprofile with the user's home directory path
+    /// and $userprofile with the user's home directory path.
+    /// Uses Path::join for cross-platform correctness (avoids mixed separators on Windows).
     ///
     /// # Arguments
     ///
@@ -623,7 +624,16 @@ impl<'a> TemplateEngineV2<'a>
     /// * `userprofile` - User profile directory path
     fn resolve_placeholder(&self, path: &str, workspace: &Path, userprofile: &Path) -> PathBuf
     {
-        let resolved = path.replace("$workspace", workspace.to_str().unwrap_or("")).replace("$userprofile", userprofile.to_str().unwrap_or(""));
-        PathBuf::from(resolved)
+        if path.starts_with("$workspace") == true
+        {
+            let suffix = path["$workspace".len()..].trim_start_matches('/').trim_start_matches('\\');
+            return workspace.join(suffix);
+        }
+        if path.starts_with("$userprofile") == true
+        {
+            let suffix = path["$userprofile".len()..].trim_start_matches('/').trim_start_matches('\\');
+            return userprofile.join(suffix);
+        }
+        PathBuf::from(path)
     }
 }

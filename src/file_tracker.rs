@@ -189,12 +189,15 @@ impl FileTracker
     pub fn get_installed_language_for_workspace(&self, workspace: &Path) -> Option<String>
     {
         let workspace_canon = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())?;
-        let workspace_str = workspace_canon.to_string_lossy().to_string();
-        let prefix_with_sep = format!("{}/", workspace_str.trim_end_matches('/'));
 
-        for (path, meta) in &self.metadata
+        for (path_str, meta) in &self.metadata
         {
-            if (path.starts_with(&prefix_with_sep) || path == &workspace_str) && meta.lang.is_some() == true
+            if meta.lang.is_some() == false
+            {
+                continue;
+            }
+            let meta_path = Path::new(path_str);
+            if meta_path.starts_with(&workspace_canon) == true
             {
                 return meta.lang.clone();
             }
