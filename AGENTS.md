@@ -700,7 +700,29 @@ After making ANY code changes:
 
 ### 2026-02-16
 
+- Introduced `UpdateOptions` struct in `template_engine.rs` to aggregate CLI parameters
+- Introduced `TemplateContext` struct to aggregate source, target, and fragments
+- Reduced `handle_main_template` from 11 to 6 params, `merge_fragments` from 6 to 3 params
+- `copy_files_with_tracking` reduced from 8 to 5 params, `show_dry_run_files` uses both new structs
+- v1/v2 engines construct both structs in `update()` and pass through
+- Renamed `config_version` to `template_version` and moved into `TemplateContext`
+- `handle_main_template` reduced from 6 to 5 params (version now in context)
+- `copy_files_with_tracking` param renamed from `config_version` to `template_version`
+- Version bump: 6.5.0 to 6.5.3 (PATCH - internal refactor, no public API change)
 - Fixed `get_installed_language_for_workspace` failing on Windows CI (path separator mismatch)
+
+### 2026-02-15 (evening)
+
+- Major DRY refactoring across the codebase to eliminate 11 code duplication violations
+- Introduced `TemplateEngine` trait in new `template_engine.rs` with shared default implementations
+- Extracted `load_template_config` and `is_file_customized` as free functions (were triplicated across v1, v2, template_manager)
+- Moved `resolve_placeholder`, `merge_fragments`, `show_dry_run_files`, `handle_main_template`, `copy_files_with_tracking`, `show_skipped_files_summary` into trait default methods
+- Slimmed `template_engine_v1.rs` and `template_engine_v2.rs` to orchestration-only (removed ~300 duplicate lines)
+- Extracted `DEFAULT_SOURCE_URL` const, `resolve_source()`, and `download_with_fallback()` helpers in `main.rs`
+- Extracted `resolve_absolute_path()` helper in `file_tracker.rs` (was repeated 5 times)
+- Reused `download_entry` closure in `download_manager.rs` for agent files
+- Removed redundant `get_template_version()` from `template_manager.rs`
+- Version bump: 6.4.2 to 6.5.0 (MINOR - new TemplateEngine trait, internal refactor)
 - Fixed `resolve_placeholder` producing mixed path separators on Windows; use `Path::join()` instead of string replace
 - Use `Path::starts_with()` instead of string-based prefix check for cross-platform correctness
 - Added Rust coding convention: use `Path::starts_with()` for path comparison, not string prefix

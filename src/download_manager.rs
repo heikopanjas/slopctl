@@ -133,41 +133,19 @@ impl DownloadManager
         {
             for agent_config in agents.values()
             {
-                // Download instructions files if present
                 if let Some(instructions) = &agent_config.instructions
                 {
                     for instruction in instructions
                     {
-                        let file_url = format!("{}{}/{}", base_url, url_path, instruction.source);
-                        let dest_path = self.config_dir.join(&instruction.source);
-
-                        print!("{} Downloading {}... ", "→".blue(), instruction.source.yellow());
-                        io::stdout().flush()?;
-
-                        match self.download_file(&file_url, &dest_path)
-                        {
-                            | Ok(_) => println!("{}", "✓".green()),
-                            | Err(_) => println!("{} (skipped)", "✗".red())
-                        }
+                        download_entry(&instruction.source)?;
                     }
                 }
 
-                // Download prompt files if present
                 if let Some(prompts) = &agent_config.prompts
                 {
                     for prompt in prompts
                     {
-                        let file_url = format!("{}{}/{}", base_url, url_path, prompt.source);
-                        let dest_path = self.config_dir.join(&prompt.source);
-
-                        print!("{} Downloading {}... ", "→".blue(), prompt.source.yellow());
-                        io::stdout().flush()?;
-
-                        match self.download_file(&file_url, &dest_path)
-                        {
-                            | Ok(_) => println!("{}", "✓".green()),
-                            | Err(_) => println!("{} (skipped)", "✗".red())
-                        }
+                        download_entry(&prompt.source)?;
                     }
                 }
             }

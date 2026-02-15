@@ -9,9 +9,10 @@ use owo_colors::OwoColorize;
 
 use crate::{
     Result,
-    bom::{BillOfMaterials, TemplateConfig},
+    bom::BillOfMaterials,
     download_manager::DownloadManager,
     file_tracker::FileTracker,
+    template_engine,
     utils::{confirm_action, copy_dir_all, remove_file_and_cleanup_parents}
 };
 
@@ -57,75 +58,6 @@ impl TemplateManager
     pub fn get_config_dir(&self) -> &Path
     {
         &self.config_dir
-    }
-
-    /// Gets the template version from templates.yml
-    ///
-    /// Reads templates.yml and extracts the version field.
-    /// If the version field is missing, returns 1 as the default.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if templates.yml cannot be read or parsed
-    fn get_template_version(&self) -> Result<u32>
-    {
-        let config_path = self.config_dir.join("templates.yml");
-
-        if config_path.exists() == false
-        {
-            return Err("templates.yml not found in global template directory".into());
-        }
-
-        let content = fs::read_to_string(&config_path)?;
-        let config: TemplateConfig = serde_yaml::from_str(&content)?;
-
-        Ok(config.version)
-    }
-
-    /// Loads template configuration from templates.yml
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if templates.yml cannot be read or parsed
-    fn load_template_config(&self) -> Result<TemplateConfig>
-    {
-        let config_path = self.config_dir.join("templates.yml");
-
-        if config_path.exists() == false
-        {
-            return Err("templates.yml not found in global template directory".into());
-        }
-
-        let content = fs::read_to_string(&config_path)?;
-        let config: TemplateConfig = serde_yaml::from_str(&content)?;
-
-        Ok(config)
-    }
-
-    /// Checks if a local file has been customized by checking for the template marker
-    ///
-    /// If the template marker is missing from the local file, it means the file
-    /// has been merged or customized and should not be overwritten without confirmation.
-    ///
-    /// # Arguments
-    ///
-    /// * `local_path` - Path to local file to check
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if file exists and marker is missing (file is customized)
-    fn is_file_customized(&self, local_path: &Path) -> Result<bool>
-    {
-        if local_path.exists() == false
-        {
-            return Ok(false);
-        }
-
-        let content = fs::read_to_string(local_path)?;
-        let marker = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
-
-        // If marker is missing, file has been customized
-        Ok(content.contains(marker) == false)
     }
 
     /// Downloads or copies templates from a source (URL or local path)
@@ -196,7 +128,7 @@ impl TemplateManager
         }
 
         // Load config for version and optional lang resolution
-        let config = self.load_template_config()?;
+        let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
 
         // Resolve lang (only when not no_lang): use provided value, or existing installation, or first available
@@ -331,7 +263,7 @@ impl TemplateManager
         let agents_md_path = current_dir.join("AGENTS.md");
         if agents_md_path.exists() == true
         {
-            let agents_md_customized = self.is_file_customized(&agents_md_path)?;
+            let agents_md_customized = template_engine::is_file_customized(&agents_md_path)?;
 
             if agents_md_customized == true && force == false
             {
@@ -583,17 +515,11 @@ impl TemplateManager
         {
             println!("  {} Installed at: {}", "✓".green(), self.config_dir.display().to_string().yellow());
 
-            // Show template version
-            if let Ok(version) = self.get_template_version()
+            // Show template version, available agents and languages from templates.yml
+            if let Ok(config) = template_engine::load_template_config(&self.config_dir)
             {
-                println!("  {} Template version: {}", "→".blue(), version.to_string().green());
-            }
+                println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
 
-            // Show available agents and languages from templates.yml
-            let config_path = self.config_dir.join("templates.yml");
-            if let Ok(content) = fs::read_to_string(&config_path) &&
-                let Ok(config) = serde_yaml::from_str::<TemplateConfig>(&content)
-            {
                 // V2 templates don't have agents section (agents.md standard)
                 if let Some(agents_map) = &config.agents
                 {
@@ -624,7 +550,7 @@ impl TemplateManager
         let agents_md_path = current_dir.join("AGENTS.md");
         if agents_md_path.exists() == true
         {
-            let customized = self.is_file_customized(&agents_md_path).unwrap_or(false);
+            let customized = template_engine::is_file_customized(&agents_md_path).unwrap_or(false);
             if customized == true
             {
                 println!("  {} AGENTS.md: {} (customized)", "✓".green(), "exists".green());
@@ -724,11 +650,10 @@ impl TemplateManager
         }
 
         // Load template configuration
-        let config_path = self.config_dir.join("templates.yml");
-        let content = fs::read_to_string(&config_path)?;
-        let config: TemplateConfig = serde_yaml::from_str(&content)?;
+        let config = template_engine::load_template_config(&self.config_dir)?;
 
         // Build BoM for checking installed status
+        let config_path = self.config_dir.join("templates.yml");
         let bom = BillOfMaterials::from_config(&config_path)?;
 
         // List agents (V2 templates don't have agents section - agents.md standard)

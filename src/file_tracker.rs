@@ -43,6 +43,30 @@ pub struct FileTracker
 
 impl FileTracker
 {
+    /// Resolves a file path to its absolute string representation
+    ///
+    /// For existing files, uses `fs::canonicalize`. For deleted files,
+    /// attempts to resolve via the parent directory. Falls back to the
+    /// path as-is if neither approach works.
+    fn resolve_absolute_path(file_path: &Path) -> String
+    {
+        // Try direct canonicalize (works for existing files)
+        if let Ok(canonical) = fs::canonicalize(file_path)
+        {
+            return canonical.to_string_lossy().to_string();
+        }
+
+        // File doesn't exist, try to construct absolute path from parent
+        if let Some(parent) = file_path.parent() &&
+            let Ok(parent_abs) = fs::canonicalize(parent) &&
+            let Some(filename) = file_path.file_name()
+        {
+            return parent_abs.join(filename).to_string_lossy().to_string();
+        }
+
+        file_path.to_path_buf().to_string_lossy().to_string()
+    }
+
     /// Create a new FileTracker and load existing metadata
     pub fn new(data_dir: &Path) -> Result<Self, Box<dyn Error>>
     {
@@ -85,7 +109,7 @@ impl FileTracker
     pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: Option<String>, category: String)
     {
         let now = chrono::Utc::now().to_rfc3339();
-        let absolute_path = fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf()).to_string_lossy().to_string();
+        let absolute_path = Self::resolve_absolute_path(file_path);
 
         self.metadata.insert(absolute_path, FileMetadata { original_sha, template_version, installed_date: now, lang, category });
     }
@@ -93,37 +117,7 @@ impl FileTracker
     /// Check the modification status of a file
     pub fn check_modification(&self, file_path: &Path) -> Result<FileStatus, Box<dyn Error>>
     {
-        // Try to get the absolute path - for deleted files, we need to construct it manually
-        let absolute_path = if file_path.exists() == true
-        {
-            fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf()).to_string_lossy().to_string()
-        }
-        else
-        {
-            // File doesn't exist, try to construct absolute path from parent
-            if let Some(parent) = file_path.parent()
-            {
-                if let Ok(parent_abs) = fs::canonicalize(parent)
-                {
-                    if let Some(filename) = file_path.file_name()
-                    {
-                        parent_abs.join(filename).to_string_lossy().to_string()
-                    }
-                    else
-                    {
-                        file_path.to_path_buf().to_string_lossy().to_string()
-                    }
-                }
-                else
-                {
-                    file_path.to_path_buf().to_string_lossy().to_string()
-                }
-            }
-            else
-            {
-                file_path.to_path_buf().to_string_lossy().to_string()
-            }
-        };
+        let absolute_path = Self::resolve_absolute_path(file_path);
 
         // Check if file is tracked
         let metadata = match self.metadata.get(&absolute_path)
@@ -153,7 +147,7 @@ impl FileTracker
     /// Check if new template is different from original
     pub fn is_template_updated(&self, file_path: &Path, new_template_sha: &str) -> Result<bool, Box<dyn Error>>
     {
-        let absolute_path = fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf()).to_string_lossy().to_string();
+        let absolute_path = Self::resolve_absolute_path(file_path);
 
         if let Some(metadata) = self.metadata.get(&absolute_path)
         {
@@ -169,7 +163,7 @@ impl FileTracker
     /// Remove a tracked file entry
     pub fn remove_entry(&mut self, file_path: &Path)
     {
-        let absolute_path = fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf()).to_string_lossy().to_string();
+        let absolute_path = Self::resolve_absolute_path(file_path);
 
         self.metadata.remove(&absolute_path);
     }
@@ -177,7 +171,7 @@ impl FileTracker
     /// Get metadata for a tracked file
     pub fn get_metadata(&self, file_path: &Path) -> Option<&FileMetadata>
     {
-        let absolute_path = fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf()).to_string_lossy().to_string();
+        let absolute_path = Self::resolve_absolute_path(file_path);
 
         self.metadata.get(&absolute_path)
     }
