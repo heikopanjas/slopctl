@@ -182,6 +182,27 @@ impl FileTracker
         self.metadata.get(&absolute_path)
     }
 
+    /// Returns the installed language for files in the given workspace
+    ///
+    /// Used when re-initializing with only --agent to preserve the existing language
+    /// (e.g. switching from Cursor to Claude without changing Rust setup).
+    pub fn get_installed_language_for_workspace(&self, workspace: &Path) -> Option<String>
+    {
+        let workspace_canon = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())?;
+        let workspace_str = workspace_canon.to_string_lossy().to_string();
+        let prefix_with_sep = format!("{}/", workspace_str.trim_end_matches('/'));
+
+        for (path, meta) in &self.metadata
+        {
+            if (path.starts_with(&prefix_with_sep) || path == &workspace_str) && meta.lang.is_some() == true
+            {
+                return meta.lang.clone();
+            }
+        }
+
+        None
+    }
+
     /// Save metadata to disk
     pub fn save(&self) -> Result<(), Box<dyn Error>>
     {
@@ -248,6 +269,31 @@ mod tests
         fs::remove_file(&test_file)?;
         let status = tracker.check_modification(&test_file)?;
         assert_eq!(status, FileStatus::Deleted);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_installed_language_for_workspace() -> Result<(), Box<dyn Error>>
+    {
+        let temp_dir = TempDir::new()?;
+        let data_dir = temp_dir.path().join("data");
+        fs::create_dir_all(&data_dir)?;
+
+        let mut tracker = FileTracker::new(&data_dir)?;
+        let project_file = temp_dir.path().join("project/AGENTS.md");
+        fs::create_dir_all(project_file.parent().unwrap())?;
+        fs::write(&project_file, b"test")?;
+
+        tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string());
+
+        let project_dir = temp_dir.path().join("project");
+        let lang = tracker.get_installed_language_for_workspace(&project_dir);
+        assert_eq!(lang, Some("rust".to_string()));
+
+        let other_dir = temp_dir.path().join("other");
+        let lang_other = tracker.get_installed_language_for_workspace(&other_dir);
+        assert_eq!(lang_other, None);
 
         Ok(())
     }

@@ -96,8 +96,9 @@ impl<'a> TemplateEngineV1<'a>
     ///
     /// # Arguments
     ///
-    /// * `lang` - Programming language or framework identifier
+    /// * `lang` - Programming language or framework identifier (ignored when no_lang)
     /// * `agent` - AI coding agent identifier
+    /// * `no_lang` - If true, skip language-specific fragments
     /// * `mission` - Optional custom mission statement to override template default
     /// * `force` - If true, overwrite local modifications without warning
     /// * `dry_run` - If true, only show what would happen without making changes
@@ -108,7 +109,7 @@ impl<'a> TemplateEngineV1<'a>
     /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Copy operations fail
-    pub fn update(&self, lang: &str, agent: &str, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, lang: &str, agent: &str, no_lang: bool, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
@@ -182,8 +183,9 @@ impl<'a> TemplateEngineV1<'a>
             }
         }
 
-        // Add language-specific templates (fragments)
-        if let Some(lang_config) = config.languages.get(lang)
+        // Add language-specific templates (fragments) unless --no-lang
+        if no_lang == false &&
+            let Some(lang_config) = config.languages.get(lang)
         {
             for file_entry in &lang_config.files
             {
@@ -322,12 +324,25 @@ impl<'a> TemplateEngineV1<'a>
             else if fragments.is_empty() == false || mission.is_some() == true
             {
                 println!("{} Merging fragments into AGENTS.md", "→".blue());
-                self.merge_fragments(&main_source, &main_target, &fragments, mission)?;
+                self.merge_fragments(&main_source, &main_target, &fragments, no_lang, mission)?;
                 println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
 
                 // Record installation in file tracker
                 let sha = FileTracker::calculate_sha256(&main_target)?;
-                file_tracker.record_installation(&main_target, sha, config.version, Some(lang.to_string()), "main".to_string());
+                file_tracker.record_installation(
+                    &main_target,
+                    sha,
+                    config.version,
+                    if no_lang
+                    {
+                        None
+                    }
+                    else
+                    {
+                        Some(lang.to_string())
+                    },
+                    "main".to_string()
+                );
             }
             else
             {
@@ -341,7 +356,20 @@ impl<'a> TemplateEngineV1<'a>
 
                 // Record installation in file tracker
                 let sha = FileTracker::calculate_sha256(&main_target)?;
-                file_tracker.record_installation(&main_target, sha, config.version, Some(lang.to_string()), "main".to_string());
+                file_tracker.record_installation(
+                    &main_target,
+                    sha,
+                    config.version,
+                    if no_lang
+                    {
+                        None
+                    }
+                    else
+                    {
+                        Some(lang.to_string())
+                    },
+                    "main".to_string()
+                );
             }
         }
 
@@ -451,7 +479,20 @@ impl<'a> TemplateEngineV1<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, config.version, Some(lang.to_string()), category.to_string());
+                file_tracker.record_installation(
+                    target,
+                    new_template_sha,
+                    config.version,
+                    if no_lang
+                    {
+                        None
+                    }
+                    else
+                    {
+                        Some(lang.to_string())
+                    },
+                    category.to_string()
+                );
             }
         }
 
@@ -487,12 +528,13 @@ impl<'a> TemplateEngineV1<'a>
     /// * `main_source` - Path to the main AGENTS.md template in global storage
     /// * `main_target` - Path where merged AGENTS.md should be written
     /// * `fragments` - Vector of (source_path, category) tuples where category is "mission", "principles", "languages", or "integration"
+    /// * `no_lang` - If true, replace <!-- {languages} --> with empty content
     /// * `custom_mission` - Optional custom mission statement to override template default
     ///
     /// # Errors
     ///
     /// Returns an error if file reading or writing fails
-    fn merge_fragments(&self, main_source: &Path, main_target: &Path, fragments: &[(PathBuf, String)], custom_mission: Option<&str>) -> Result<()>
+    fn merge_fragments(&self, main_source: &Path, main_target: &Path, fragments: &[(PathBuf, String)], no_lang: bool, custom_mission: Option<&str>) -> Result<()>
     {
         // Read main AGENTS.md template
         let mut main_content = fs::read_to_string(main_source)?;
@@ -503,6 +545,11 @@ impl<'a> TemplateEngineV1<'a>
 
         // Group fragments by category to handle multiple fragments per insertion point
         let mut fragments_by_category: HashMap<String, Vec<String>> = HashMap::new();
+
+        if no_lang == true
+        {
+            fragments_by_category.entry("languages".to_string()).or_default();
+        }
 
         for (fragment_path, category) in fragments
         {

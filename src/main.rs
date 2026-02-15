@@ -47,11 +47,15 @@ enum Commands
     {
         /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(long)]
-        lang: String,
+        lang: Option<String>,
 
         /// AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
         #[arg(long)]
         agent: Option<String>,
+
+        /// Skip language-specific setup (AGENTS.md only, no coding-conventions fragments)
+        #[arg(long, default_value = "false")]
+        no_lang: bool,
 
         /// Custom mission statement (use @filename to read from file)
         #[arg(long)]
@@ -263,8 +267,26 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, mission, force, dry_run } =>
+        | Commands::Init { lang, agent, no_lang, mission, force, dry_run } =>
         {
+            // --lang and --no-lang are mutually exclusive
+            if lang.is_some() == true && no_lang == true
+            {
+                eprintln!("{} Cannot use --lang and --no-lang together", "✗".red());
+                std::process::exit(1);
+            }
+
+            // Must specify at least one of --lang, --agent, or --no-lang
+            if lang.is_none() == true && agent.is_none() == true && no_lang == false
+            {
+                eprintln!("{} Must specify at least one of --lang, --agent, or --no-lang", "✗".red());
+                eprintln!("{} Examples: vibe-check init --lang rust", "→".blue());
+                eprintln!("{}          vibe-check init --agent cursor", "→".blue());
+                eprintln!("{}          vibe-check init --no-lang", "→".blue());
+                eprintln!("{}          vibe-check init --no-lang --agent cursor", "→".blue());
+                std::process::exit(1);
+            }
+
             // Resolve mission content if provided (handles @filepath syntax)
             let resolved_mission = if let Some(ref mission_value) = mission
             {
@@ -335,24 +357,54 @@ fn main()
             // Install templates to project
             if dry_run == true
             {
-                if let Some(agent_name) = &agent
+                if no_lang == true
                 {
-                    println!("{} Dry run: previewing changes for {} with {}", "→".blue(), lang.green(), agent_name.green());
+                    if let Some(a) = agent.as_ref()
+                    {
+                        println!("{} Dry run: previewing language-independent setup with {}", "→".blue(), a.green());
+                    }
+                    else
+                    {
+                        println!("{} Dry run: previewing language-independent setup", "→".blue());
+                    }
+                }
+                else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
+                {
+                    println!("{} Dry run: previewing changes for {} with {}", "→".blue(), l.green(), a.green());
+                }
+                else if let Some(l) = lang.as_ref()
+                {
+                    println!("{} Dry run: previewing changes for {}", "→".blue(), l.green());
                 }
                 else
                 {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), lang.green());
+                    println!("{} Dry run: previewing changes for {}", "→".blue(), agent.as_ref().unwrap().green());
                 }
             }
-            else if let Some(agent_name) = &agent
+            else if no_lang == true
             {
-                println!("{} Initializing project for {} with {}", "→".blue(), lang.green(), agent_name.green());
+                if let Some(a) = agent.as_ref()
+                {
+                    println!("{} Initializing language-independent setup with {}", "→".blue(), a.green());
+                }
+                else
+                {
+                    println!("{} Initializing language-independent setup", "→".blue());
+                }
+            }
+            else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
+            {
+                println!("{} Initializing project for {} with {}", "→".blue(), l.green(), a.green());
+            }
+            else if let Some(l) = lang.as_ref()
+            {
+                println!("{} Initializing project for {}", "→".blue(), l.green());
             }
             else
             {
-                println!("{} Initializing project for {}", "→".blue(), lang.green());
+                println!("{} Initializing project for {}", "→".blue(), agent.as_ref().unwrap().green());
             }
-            manager.update(&lang, agent.as_deref(), resolved_mission.as_deref(), force, dry_run)
+            manager.update(lang.as_deref(), agent.as_deref(), no_lang, resolved_mission.as_deref(), force, dry_run)
         }
         | Commands::Update { from, dry_run } =>
         {

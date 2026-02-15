@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-01-24
+**Last updated:** 2026-02-15
 
 <!-- {mission} -->
 
@@ -695,6 +695,18 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-15
+
+- Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
+- Use for language-independent setup: `vibe-check init --no-lang` or `--no-lang --agent cursor`
+- Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
+- Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
+- When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)
+- Fallback: first available language from templates.yml (fresh init with agent only)
+- Version bump: 6.3.0 → 6.4.0 (MINOR - new features)
+- V1 templates still require both (error if only one specified)
+- Version bump: 6.2.0 → 6.3.0 (MINOR - new CLI behavior)
 
 ### 2026-01-24
 

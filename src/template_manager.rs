@@ -82,6 +82,26 @@ impl TemplateManager
         Ok(config.version)
     }
 
+    /// Loads template configuration from templates.yml
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if templates.yml cannot be read or parsed
+    fn load_template_config(&self) -> Result<TemplateConfig>
+    {
+        let config_path = self.config_dir.join("templates.yml");
+
+        if config_path.exists() == false
+        {
+            return Err("templates.yml not found in global template directory".into());
+        }
+
+        let content = fs::read_to_string(&config_path)?;
+        let config: TemplateConfig = serde_yaml::from_str(&content)?;
+
+        Ok(config)
+    }
+
     /// Checks if a local file has been customized by checking for the template marker
     ///
     /// If the template marker is missing from the local file, it means the file
@@ -153,8 +173,9 @@ impl TemplateManager
     ///
     /// # Arguments
     ///
-    /// * `lang` - Programming language or framework identifier
-    /// * `agent` - AI coding agent identifier
+    /// * `lang` - Programming language or framework identifier. If None (and no_lang false), uses existing installation or first available.
+    /// * `agent` - AI coding agent identifier. Required for v1 templates, optional for v2.
+    /// * `no_lang` - If true, skip language-specific setup (AGENTS.md + agent prompts only)
     /// * `mission` - Optional custom mission statement to override template default
     /// * `force` - If true, overwrite local modifications without warning
     /// * `dry_run` - If true, only show what would happen without making changes
@@ -164,8 +185,9 @@ impl TemplateManager
     /// Returns an error if:
     /// - Global templates don't exist
     /// - Template version is unsupported
+    /// - Lang is None, no_lang is false, and no languages are defined in templates
     /// - Template generation fails
-    pub fn update(&self, lang: &str, agent: Option<&str>, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, lang: Option<&str>, agent: Option<&str>, no_lang: bool, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         // Check if global templates exist
         if self.has_global_templates() == false
@@ -173,8 +195,51 @@ impl TemplateManager
             return Err("Global templates not found. Please run 'vibe-check update' first to download templates.".into());
         }
 
-        // Get template version and dispatch to appropriate engine
-        let version = self.get_template_version()?;
+        // Load config for version and optional lang resolution
+        let config = self.load_template_config()?;
+        let version = config.version;
+
+        // Resolve lang (only when not no_lang): use provided value, or existing installation, or first available
+        let lang_resolved: Option<String> = if no_lang == true
+        {
+            None
+        }
+        else
+        {
+            match lang
+            {
+                | Some(l) => Some(l.to_string()),
+                | None =>
+                {
+                    // Prefer language from existing installation (e.g. switching agent, keep lang)
+                    let workspace = std::env::current_dir().ok();
+                    let from_tracker = workspace.and_then(|w| FileTracker::new(&self.config_dir).ok().and_then(|t| t.get_installed_language_for_workspace(&w)));
+
+                    match from_tracker
+                    {
+                        | Some(l) =>
+                        {
+                            println!("{} Using existing language: {}", "→".blue(), l.green());
+                            Some(l)
+                        }
+                        | None =>
+                        {
+                            // Fresh init with only --agent: use first language from templates
+                            let first = config.languages.keys().next().cloned();
+                            match first
+                            {
+                                | Some(l) =>
+                                {
+                                    println!("{} No existing installation, using language: {}", "→".blue(), l.green());
+                                    Some(l)
+                                }
+                                | None => return Err("No languages defined in templates.yml".into())
+                            }
+                        }
+                    }
+                }
+            }
+        };
 
         match version
         {
@@ -187,14 +252,19 @@ impl TemplateManager
                 println!();
 
                 // V1 requires agent parameter
-                let agent_str = agent.ok_or("--agent is required for v1 templates. Use: vibe-check init --lang <lang> --agent <agent>")?;
+                let agent_str = agent.ok_or("--agent is required for v1 templates. Specify: vibe-check init --lang <lang> --agent <agent>")?;
                 let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
-                engine.update(lang, agent_str, mission, force, dry_run)
+                let lang_for_engine = lang_resolved.as_deref().unwrap_or("");
+                engine.update(lang_for_engine, agent_str, no_lang, mission, force, dry_run)
             }
             | 2 =>
             {
                 // V2: Single AGENTS.md for all agents, but agent-specific prompts can be copied
-                if agent.is_some()
+                if no_lang == true
+                {
+                    println!("{} V2 templates: Language-independent setup (no coding-conventions)", "→".blue());
+                }
+                else if agent.is_some()
                 {
                     println!("{} V2 templates: Using single AGENTS.md + copying agent-specific prompts", "→".blue());
                 }
@@ -203,7 +273,8 @@ impl TemplateManager
                     println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
                 let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
-                engine.update(lang, agent, mission, force, dry_run)
+                let lang_for_engine = lang_resolved.as_deref().unwrap_or("");
+                engine.update(lang_for_engine, agent, no_lang, mission, force, dry_run)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }
