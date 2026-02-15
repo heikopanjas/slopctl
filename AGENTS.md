@@ -712,7 +712,11 @@ After making ANY code changes:
 - `show_dry_run_files` takes `&TemplateContext` instead of `Option<&TemplateContext>`
 - `copy_files_with_tracking` takes `&TemplateContext` instead of `template_version: u32`
 - Removed dead `files_to_copy.is_empty() && main_template.is_none()` early return
-- Version bump: 6.5.0 to 6.5.4 (PATCH - internal refactor, no public API change)
+- Split `template_manager.rs` (713 lines) into directory module with per-command files
+- `src/template_manager/mod.rs` holds struct, constructor, and helpers (~100 lines)
+- Commands extracted to `update.rs`, `purge.rs`, `remove.rs`, `status.rs`, `list.rs`
+- Changed `config_dir` visibility to `pub(crate)` for submodule access
+- Version bump: 6.5.0 to 6.5.5 (PATCH - internal refactor, no public API change)
 - Fixed `get_installed_language_for_workspace` failing on Windows CI (path separator mismatch)
 
 ### 2026-02-15 (evening)
