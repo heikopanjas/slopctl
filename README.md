@@ -85,14 +85,17 @@ vibe-check supports two template formats through its versioning system:
 - Follows the [agents.md](https://agents.md) community standard
 - Single AGENTS.md file compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 - No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
-- Simpler initialization: `vibe-check init --lang rust`
+- Simpler initialization: `vibe-check init --lang rust` or `vibe-check init --no-lang` for language-independent setup
+- Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2`
 
 **Usage:**
 ```bash
 # V2 is the default in v6.0.0+
 vibe-check update                    # Downloads v2 templates
-vibe-check init --lang rust          # No --agent needed!
+vibe-check init --lang rust          # With language conventions
+vibe-check init --no-lang            # Language-independent (AGENTS.md only)
+vibe-check init --agent cursor       # Switch agent, keep existing language
 ```
 
 ### Version 1 (Default in v5.x) - Agent-Specific Files
@@ -157,17 +160,21 @@ cargo install --path .
 # 1. Download global templates (v2 by default)
 vibe-check update
 
-# 2. Initialize a Rust project (no --agent needed!)
+# 2. Initialize your project (choose one style)
 cd your-project
-vibe-check init --lang rust
+vibe-check init --lang rust         # With Rust conventions and config files
+vibe-check init --no-lang          # Language-independent (AGENTS.md + integration only)
+vibe-check init --agent cursor     # Agent prompts only (preserves existing language)
 ```
 
-This will:
+With `--lang rust` this will:
 
 1. Copy main AGENTS.md template to your project
 2. Merge language-specific fragments (Rust conventions, build commands) into AGENTS.md
 3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
 4. **Single AGENTS.md works with all agents** (Claude, Cursor, Copilot, Aider, Jules, Factory, etc.)
+
+With `--no-lang` you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
 ### Version 5.x (V1 - Agent-Specific Files)
 
@@ -357,16 +364,32 @@ vibe-check purge
 # Both: Preserves customized AGENTS.md unless --force is used
 ```
 
-**Scenario: Remove only agent-specific files (V1 only)**
+**Scenario: Remove only agent-specific files**
 
 ```bash
-# V1: Remove all agent files but keep AGENTS.md
+# Remove all agent files but keep AGENTS.md
 vibe-check remove --all
 
-# V1: Remove only one agent
+# Remove only one agent's files
 vibe-check remove --agent claude
 
-# V2: No agent-specific files to remove (only AGENTS.md exists)
+# V1: Removes CLAUDE.md, .claude/commands/, etc.
+# V2: Removes .cursor/commands/, .github/prompts/, etc. (agent prompts)
+```
+
+**Scenario: Switch from Cursor to Claude (keep Rust setup)**
+
+```bash
+# You have Rust + Cursor; want to add Claude prompts
+vibe-check init --agent claude
+# Uses existing Rust language; adds Claude prompts only
+```
+
+**Scenario: Language-independent project (e.g. docs-only repo)**
+
+```bash
+vibe-check init --no-lang
+# AGENTS.md with mission, principles, integration only—no .rustfmt.toml, no coding-conventions
 ```
 
 **Scenario: Use custom templates**
@@ -450,17 +473,26 @@ Initialize instruction files for AI coding agents in your project.
 **Usage:**
 
 ```bash
-# V2 templates (default in v6.0.0+)
-vibe-check init --lang <language> [--mission <text|@file>] [--force] [--dry-run]
+# Specify at least one of --lang, --agent, or --no-lang
 
-# V1 templates (or explicit agent in v6.0.0+)
+# V2: With language conventions
+vibe-check init --lang <language> [--agent <agent>] [--mission <text|@file>] [--force] [--dry-run]
+
+# V2: Language-independent (no coding-conventions fragments)
+vibe-check init --no-lang [--agent <agent>] [--mission <text|@file>] [--force] [--dry-run]
+
+# V2: Switch agent only (preserves existing language)
+vibe-check init --agent <agent> [--mission <text|@file>] [--force] [--dry-run]
+
+# V1 templates (requires --agent)
 vibe-check init --lang <language> --agent <agent> [--mission <text|@file>] [--force] [--dry-run]
 ```
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, rust, swift, c)
+- `--lang <string>` - Programming language or framework (e.g., c++, rust, swift, c). Mutually exclusive with `--no-lang`.
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
+- `--no-lang` - Skip language-specific setup (AGENTS.md with mission/principles/integration only, no coding-conventions). Mutually exclusive with `--lang`.
 - `--mission <string>` - Custom mission statement to override the template default. Use `@filename` to read from a file (e.g., `--mission @mission.md`)
 - `--force` - Force overwrite of local files without confirmation
 - `--dry-run` - Preview changes without applying them
@@ -473,6 +505,15 @@ vibe-check init --lang rust
 
 # Initialize C++ project
 vibe-check init --lang c++
+
+# Language-independent setup (AGENTS.md + integration only, no .rustfmt.toml etc.)
+vibe-check init --no-lang
+
+# Language-independent + agent prompts (e.g. init-session command for Cursor)
+vibe-check init --no-lang --agent cursor
+
+# Switch from Cursor to Claude (keeps existing language e.g. Rust)
+vibe-check init --agent claude
 
 # Initialize with custom mission statement (inline)
 vibe-check init --lang rust --mission "A CLI tool for managing AI agent instructions"
@@ -505,8 +546,11 @@ vibe-check init --lang c++ --agent claude --mission @docs/mission.md
 - Uses global templates to set up agent instructions in the current project
 - If global templates do not exist, automatically downloads them from the default repository
 - Detects template version (v1 or v2) from templates.yml
-- **V2 behavior**: Creates single AGENTS.md that works with all agents (--agent parameter ignored)
-- **V1 behavior**: Creates AGENTS.md plus agent-specific files (--agent parameter required)
+- **Must specify at least one** of `--lang`, `--agent`, or `--no-lang`; `--lang` and `--no-lang` cannot be used together
+- **V2 with `--agent` only**: Preserves existing installation language (e.g. switch Cursor→Claude, keep Rust); falls back to first available language for fresh init
+- **V2 with `--no-lang`**: Skips language fragments; creates AGENTS.md with mission, principles, integration only (no .rustfmt.toml, .editorconfig, etc.); optional `--agent` adds agent prompts
+- **V2 with `--lang`**: Creates single AGENTS.md plus language config files; optional `--agent` adds agent prompts
+- **V1 behavior**: Requires both `--lang` and `--agent`; creates AGENTS.md plus agent-specific files
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
 - If `--force` is specified, overwrites local files regardless of modifications
@@ -691,7 +735,7 @@ Available Languages:
   • rust
   • swift
 
-→ Use 'vibe-check init --lang <lang> --agent <agent>' to install
+→ Use 'vibe-check init --lang <lang>' or 'vibe-check init --no-lang' or 'vibe-check init --agent <agent>' to install
 ```
 
 ### `completions` - Generate Shell Completions
@@ -989,7 +1033,20 @@ vibe-check automatically detects the template version from `templates.yml` and u
 5. Merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
 6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
 7. **No agent-specific files** - single AGENTS.md works with all agents
-8. You're ready to start coding with any agent
+8. Optional `--agent` adds agent prompts (e.g. .cursor/commands/init-session.md)
+9. You're ready to start coding with any agent
+
+**V2 with `--no-lang`** (language-independent setup):
+
+1. Same as above but skips language fragments and language config files
+2. AGENTS.md contains mission, principles, integration (e.g. git, versioning) only
+3. Optional `--agent` adds agent prompts
+
+**V2 with `--agent` only** (switch agent, preserve language):
+
+1. Detects existing installation language from file tracker
+2. Uses that language; if none, uses first available from templates
+3. Adds/updates agent prompts only
 
 **V1 Templates** (when you run `vibe-check init --lang c++ --agent claude`):
 
@@ -1095,7 +1152,7 @@ Run `vibe-check update` to download the latest global templates, then `vibe-chec
 Run `vibe-check purge` to remove all agent files and AGENTS.md, or `vibe-check remove --all` to keep AGENTS.md.
 
 **How do I preview changes before applying?**
-Use the `--dry-run` flag on any command: `vibe-check init --lang rust --agent claude --dry-run`
+Use the `--dry-run` flag on any command: `vibe-check init --lang rust --dry-run` or `vibe-check init --no-lang --dry-run`
 
 **How do I customize the mission statement?**
 Use the `--mission` option with `init`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
@@ -1120,6 +1177,12 @@ vibe-check update
 - **V2**: One AGENTS.md file that works with all agents. Simpler, follows agents.md community standard.
 - **V1**: Separate instruction files per agent (CLAUDE.md, copilot-instructions.md, etc.). More files to manage.
 
+**When should I use --no-lang?**
+Use `--no-lang` when you want AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific coding conventions or config files (.rustfmt.toml, .editorconfig, etc.). Good for documentation repositories, multi-language projects, or when you prefer a minimal setup.
+
+**How do I switch agents without changing the language?**
+Run `vibe-check init --agent <new-agent>`. vibe-check detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
+
 ## License
 
 MIT License - See [LICENSE](LICENSE) for details.
@@ -1138,7 +1201,7 @@ cargo build
 cargo test
 
 # Run the application
-cargo run -- init --lang rust --agent claude
+cargo run -- init --lang rust
 
 # Build in release mode (optimized, generates man pages)
 cargo build --release
@@ -1154,4 +1217,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: January 24, 2026
+Last updated: February 15, 2026
