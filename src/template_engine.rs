@@ -235,29 +235,26 @@ pub trait TemplateEngine
     ///
     /// # Arguments
     ///
-    /// * `main_ctx` - Optional main template context for AGENTS.md
+    /// * `ctx` - Template context for main AGENTS.md
     /// * `skip_agents_md` - Whether AGENTS.md is customized and should be skipped
     /// * `options` - Update options containing force and dry_run settings
     /// * `files_to_copy` - List of (source, target) file pairs
-    fn show_dry_run_files(&self, main_ctx: Option<&TemplateContext>, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)])
+    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)])
     {
         println!("\n{} Files that would be created/modified:", "→".blue());
 
         // Show main AGENTS.md status
-        if let Some(ctx) = main_ctx
+        if skip_agents_md && options.force == false
         {
-            if skip_agents_md && options.force == false
-            {
-                println!("  {} {} (skipped - customized)", "○".yellow(), ctx.target.display());
-            }
-            else if ctx.target.exists()
-            {
-                println!("  {} {} (would be overwritten)", "●".yellow(), ctx.target.display());
-            }
-            else
-            {
-                println!("  {} {} (would be created)", "●".green(), ctx.target.display());
-            }
+            println!("  {} {} (skipped - customized)", "○".yellow(), ctx.target.display());
+        }
+        else if ctx.target.exists()
+        {
+            println!("  {} {} (would be overwritten)", "●".yellow(), ctx.target.display());
+        }
+        else
+        {
+            println!("  {} {} (would be created)", "●".green(), ctx.target.display());
         }
 
         // Show other files
@@ -349,7 +346,7 @@ pub trait TemplateEngine
     ///
     /// * `files_to_copy` - List of (source, target) file pairs
     /// * `file_tracker` - File tracker for checking modifications and recording installations
-    /// * `template_version` - Template version for file tracking
+    /// * `ctx` - Template context containing the template version for file tracking
     /// * `options` - Update options containing lang, no_lang, agent, and force settings
     ///
     /// # Returns
@@ -360,7 +357,7 @@ pub trait TemplateEngine
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
+        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, ctx: &TemplateContext, options: &UpdateOptions
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
@@ -478,7 +475,7 @@ pub trait TemplateEngine
                 file_tracker.record_installation(
                     target,
                     new_template_sha,
-                    template_version,
+                    ctx.template_version,
                     if options.no_lang
                     {
                         None

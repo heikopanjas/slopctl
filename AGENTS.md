@@ -708,7 +708,11 @@ After making ANY code changes:
 - Renamed `config_version` to `template_version` and moved into `TemplateContext`
 - `handle_main_template` reduced from 6 to 5 params (version now in context)
 - `copy_files_with_tracking` param renamed from `config_version` to `template_version`
-- Version bump: 6.5.0 to 6.5.3 (PATCH - internal refactor, no public API change)
+- Made `TemplateContext` non-optional: fail early if `config.main` missing
+- `show_dry_run_files` takes `&TemplateContext` instead of `Option<&TemplateContext>`
+- `copy_files_with_tracking` takes `&TemplateContext` instead of `template_version: u32`
+- Removed dead `files_to_copy.is_empty() && main_template.is_none()` early return
+- Version bump: 6.5.0 to 6.5.4 (PATCH - internal refactor, no public API change)
 - Fixed `get_installed_language_for_workspace` failing on Windows CI (path separator mismatch)
 
 ### 2026-02-15 (evening)

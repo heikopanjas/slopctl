@@ -84,21 +84,18 @@ impl<'a> TemplateEngineV1<'a>
         // Initialize file tracker
         let mut file_tracker = FileTracker::new(self.config_dir)?;
 
-        // Collect files to copy
+        // Resolve main template (required)
+        let main_config = config.main.as_ref().ok_or("Missing 'main' section in templates.yml")?;
+        let main_source = self.config_dir.join(&main_config.source);
+        if main_source.exists() == false
+        {
+            return Err(format!("Main template not found: {}", main_source.display()).into());
+        }
+        let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
+
+        // Collect files to copy and fragments to merge
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut fragments: Vec<(PathBuf, String)> = Vec::new();
-        let mut main_template: Option<(PathBuf, PathBuf)> = None;
-
-        // Check if main AGENTS.md should be copied
-        if let Some(main) = config.main.as_ref()
-        {
-            let source_path = self.config_dir.join(&main.source);
-            if source_path.exists()
-            {
-                let target_path = self.resolve_placeholder(&main.target, &workspace, &userprofile);
-                main_template = Some((source_path, target_path));
-            }
-        }
 
         // Helper closure to process file entries
         let mut process_entry = |source: &str, target: &str, category: &str| {
@@ -203,27 +200,12 @@ impl<'a> TemplateEngineV1<'a>
             return Err("V1 templates require agents section in templates.yml".into());
         }
 
-        if files_to_copy.is_empty() && main_template.is_none()
-        {
-            println!("{} No templates found to copy", "!".yellow());
-            return Ok(());
-        }
-
-        // Build main template context from collected data
-        let main_ctx = main_template.map(|(source, target)| TemplateContext { source, target, fragments, template_version: config.version });
+        // Build template context and update options
+        let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+        let options = UpdateOptions { lang, agent: Some(agent), no_lang, mission, force, dry_run };
 
         // Check if main AGENTS.md has been customized (marker removed)
-        let skip_agents_md = if let Some(ctx) = &main_ctx
-        {
-            ctx.target.exists() && template_engine::is_file_customized(&ctx.target)?
-        }
-        else
-        {
-            false
-        };
-
-        // Build update options from CLI parameters
-        let options = UpdateOptions { lang, agent: Some(agent), no_lang, mission, force, dry_run };
+        let skip_agents_md = ctx.target.exists() && template_engine::is_file_customized(&ctx.target)?;
 
         if skip_agents_md && options.force == false
         {
@@ -238,18 +220,15 @@ impl<'a> TemplateEngineV1<'a>
         // Dry run mode: just show what would happen
         if options.dry_run == true
         {
-            self.show_dry_run_files(main_ctx.as_ref(), skip_agents_md, &options, &files_to_copy);
+            self.show_dry_run_files(&ctx, skip_agents_md, &options, &files_to_copy);
             return Ok(());
         }
 
         // Handle main AGENTS.md with fragment merging
-        if let Some(ctx) = &main_ctx
-        {
-            self.handle_main_template(ctx, &options, skip_agents_md, &mut file_tracker)?;
-        }
+        self.handle_main_template(&ctx, &options, skip_agents_md, &mut file_tracker)?;
 
         // Copy templates with file modification checking
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, config.version, &options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, &options)?;
 
         match copy_result
         {
