@@ -451,13 +451,18 @@ pub trait TemplateEngine
                 println!("  {} {}", "✓".green(), target.display().to_string().yellow());
 
                 // Determine category based on target path
-                let category = if target.to_string_lossy().contains(".git")
+                let target_str = target.to_string_lossy();
+                let category = if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
+                {
+                    "skill"
+                }
+                else if target_str.contains(".git")
                 {
                     "integration"
                 }
                 else if let Some(name) = options.agent
                 {
-                    if target.to_string_lossy().contains(&format!(".{}", name)) || target.to_string_lossy().contains(name)
+                    if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
                     {
                         "agent"
                     }

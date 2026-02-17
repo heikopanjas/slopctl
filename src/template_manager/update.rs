@@ -87,7 +87,7 @@ impl TemplateManager
             | 1 =>
             {
                 // Deprecation warning for v1 templates
-                println!("{} V1 templates are deprecated and will be removed in v7.0.0", "!".yellow());
+                println!("{} V1 templates are deprecated and will be removed in a future release", "!".yellow());
                 println!("{} Consider migrating to V2 templates (agents.md standard)", "!".yellow());
                 println!("{} Run: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2", "→".blue());
                 println!();

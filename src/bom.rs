@@ -18,14 +18,16 @@ pub struct FileMapping
     pub target: String
 }
 
-/// Agent configuration with instructions and prompts
+/// Agent configuration with instructions, prompts, and skills
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<Vec<FileMapping>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompts:      Option<Vec<FileMapping>>
+    pub prompts:      Option<Vec<FileMapping>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills:       Option<Vec<FileMapping>>
 }
 
 /// Language configuration with files
@@ -52,10 +54,10 @@ pub struct MainConfig
 
 /// Default version for templates.yml (used when version field is missing)
 ///
-/// Note: Default will switch to version 2 with v7.0.0
+/// Switched to version 2 in v7.0.0 (agents.md standard)
 fn default_version() -> u32
 {
-    1
+    2
 }
 
 /// Template configuration structure parsed from templates.yml
@@ -143,6 +145,18 @@ impl BillOfMaterials
                 if let Some(prompts) = agent_config.prompts
                 {
                     for mapping in prompts
+                    {
+                        if let Some(path) = Self::resolve_workspace_path(&mapping.target)
+                        {
+                            file_paths.push(path);
+                        }
+                    }
+                }
+
+                // Collect skill files
+                if let Some(skills) = agent_config.skills
+                {
+                    for mapping in skills
                     {
                         if let Some(path) = Self::resolve_workspace_path(&mapping.target)
                         {

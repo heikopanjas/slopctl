@@ -1,6 +1,6 @@
 # vibe-check
 
-**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude, Cursor, Copilot, Aider, Jules, Factory, and others) with built-in governance guardrails and human-in-the-loop controls.
+**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude, Cursor, Copilot, Aider, Jules, Factory, and others) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
 ![MIT License](https://img.shields.io/badge/-MIT%20License-000000?style=flat-square&logo=opensource&logoColor=white)
 ![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=zsh&logoColor=white)
@@ -18,11 +18,12 @@ vibe-check is a command-line tool that helps you:
 - **Configure via YAML** – Define template structure and file mappings in `templates.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – V2 templates follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
+- **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) per agent for specialized capabilities
 - **Keep templates synchronized** – Update global templates from remote sources
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
-- **Template versioning** – V1 (agent-specific files) and V2 (agents.md standard) formats supported
+- **Template versioning** – V1 (agent-specific files, deprecated) and V2 (agents.md standard, default) formats supported
 
 ## Repository Structure
 
@@ -35,35 +36,37 @@ vibe-check/
 ├── src/                        # Rust source code
 │   ├── main.rs                 # Application entry point and CLI
 │   ├── lib.rs                  # Library public API
-│   ├── bom.rs                  # Bill of Materials structures and functions
+│   ├── bom.rs                  # Bill of Materials structures (AgentConfig, TemplateConfig)
 │   ├── config.rs               # Configuration management
 │   ├── download_manager.rs     # DownloadManager for URL downloads
-│   ├── template_engine_v1.rs   # Template engine for version 1 templates
+│   ├── file_tracker.rs         # SHA-256 file tracking for modification detection
+│   ├── template_engine.rs      # Shared TemplateEngine trait and utilities
+│   ├── template_engine_v1.rs   # Template engine for version 1 templates (deprecated)
 │   ├── template_engine_v2.rs   # Template engine for version 2 templates (agents.md standard)
-│   ├── template_manager.rs     # TemplateManager implementation
+│   ├── template_manager/       # TemplateManager implementation (directory module)
+│   │   ├── mod.rs              # Struct, constructor, and helpers
+│   │   ├── update.rs           # init/update command logic
+│   │   ├── purge.rs            # Purge all vibe-check files
+│   │   ├── remove.rs           # Remove agent-specific files
+│   │   ├── status.rs           # Show project status
+│   │   └── list.rs             # List available agents/languages
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # You are here
 ├── AGENTS.md                   # Primary project instructions
 ├── templates/                  # Template files organized by version
-│   ├── v1/                     # Version 1 templates (agent-specific files)
+│   ├── v1/                     # Version 1 templates (deprecated, agent-specific files)
 │   │   ├── templates.yml       # V1 template configuration (version: 1)
 │   │   ├── AGENTS.md           # Main instruction template
 │   │   ├── claude/             # Claude-specific files
-│   │   │   ├── CLAUDE.md
-│   │   │   └── commands/
-│   │   │       └── init-session.md
 │   │   ├── copilot/            # GitHub Copilot files
 │   │   ├── codex/              # Codex files
 │   │   ├── cursor/             # Cursor files
 │   │   └── ...                 # Language templates (coding conventions, build commands, etc.)
-│   └── v2/                     # Version 2 templates (agents.md standard)
+│   └── v2/                     # Version 2 templates (agents.md standard, default)
 │       ├── templates.yml       # V2 template configuration (version: 2)
 │       ├── AGENTS.md           # Single instruction file for all agents
-│       ├── claude/             # Claude-specific files
-│       │   ├── CLAUDE.md       # References AGENTS.md
-│       │   └── commands/
-│       │       └── init-session.md
+│       ├── claude/             # Claude-specific files (CLAUDE.md references AGENTS.md)
 │       ├── copilot/            # GitHub Copilot files
 │       ├── codex/              # Codex files
 │       ├── cursor/             # Cursor files
@@ -85,62 +88,76 @@ vibe-check/
 
 vibe-check supports two template formats through its versioning system:
 
-### Version 2 (Default in v6.0.0+) - agents.md Standard
+### Version 2 (Default) - agents.md Standard
 
 **Philosophy**: One AGENTS.md file that works across all agents.
 
 - Follows the [agents.md](https://agents.md) community standard
 - Single AGENTS.md file compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md when needed
+- [Agent Skills](https://agentskills.io) support: define SKILL.md files per agent for specialized capabilities
 - Simpler initialization: `vibe-check init --lang rust` or `vibe-check init --no-lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2`
 
 **Usage:**
 ```bash
-# V2 is the default in v6.0.0+
 vibe-check update                    # Downloads v2 templates
 vibe-check init --lang rust          # With language conventions
 vibe-check init --no-lang            # Language-independent (AGENTS.md only)
 vibe-check init --agent cursor       # Switch agent, keep existing language
 ```
 
-### Version 1 (Default in v5.x) - Agent-Specific Files
+### Version 1 (Deprecated) - Agent-Specific Files
 
 **Philosophy**: Separate instruction files per agent.
 
 - Separate instruction files per agent (CLAUDE.md, copilot-instructions.md, etc.)
 - Agent-specific prompt directories (.claude/commands/, .github/prompts/, etc.)
 - Requires `--agent` flag: `vibe-check init --lang rust --agent claude`
+- **Deprecated since v7.0.0** and will be removed in a future release
 - URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1`
 
 **Usage:**
 ```bash
-# Explicitly configure v1 (if needed in v6.0.0+)
+# Explicitly configure v1 (deprecated)
 vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1
 vibe-check update
 vibe-check init --lang rust --agent claude
 ```
 
-### Migration from v5 to v6
+### Migration from v6 to v7
 
-**Upgrading from v5.x to v6.0.0:**
+**Upgrading from v6.x to v7.0.0:**
 
-1. **If you want v2 (agents.md standard - recommended):**
+v7.0.0 is a major version bump with one breaking change: **the default template version switches from 1 to 2** when the `version` field is missing from `templates.yml`. If you were already using V2 templates (the default download since v6.0.0), no action is needed.
+
+1. **If you are already using V2 templates (most users):**
    ```bash
-   # No action needed! v6 defaults to v2
-   vibe-check update                    # Gets v2 templates
+   # No action needed! Just update the binary
+   cargo install --path .
+   ```
+
+2. **If you are still using V1 templates and want to migrate:**
+   ```bash
+   vibe-check update                    # Gets v2 templates (default)
    vibe-check purge --force             # Clean v1 files
    vibe-check init --lang rust          # Initialize with v2
    ```
 
-2. **If you want to stay on v1:**
+3. **If you want to stay on V1 (deprecated):**
    ```bash
-   # Configure v1 before updating
+   # Explicitly configure v1 before updating
    vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1
-   vibe-check update                    # Gets v1 templates
+   vibe-check update
    vibe-check init --lang rust --agent claude
    ```
+
+**Other changes in v7.0.0:**
+
+- Agent Skills infrastructure: agents in `templates.yml` can now define a `skills` section for SKILL.md files
+- `list` and `status` commands show available and installed skills
+- Skills are tracked with their own `"skill"` category in the file tracker
 
 ## Installation
 
@@ -161,7 +178,7 @@ cargo install --path .
 
 ## Quick Start
 
-### Version 6.0.0+ (V2 - agents.md Standard - Default)
+### V2 Templates (Default)
 
 ```bash
 # 1. Download global templates (v2 by default)
@@ -171,7 +188,7 @@ vibe-check update
 cd your-project
 vibe-check init --lang rust         # With Rust conventions and config files
 vibe-check init --no-lang          # Language-independent (AGENTS.md + integration only)
-vibe-check init --agent cursor     # Agent prompts only (preserves existing language)
+vibe-check init --agent cursor     # Agent prompts + skills (preserves existing language)
 ```
 
 With `--lang rust` this will:
@@ -183,9 +200,9 @@ With `--lang rust` this will:
 
 With `--no-lang` you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
-### Version 5.x (V1 - Agent-Specific Files)
+### V1 Templates (Deprecated)
 
-If you're using v5.x or explicitly configured v1 templates:
+If you explicitly configured v1 templates:
 
 ```bash
 # 1. Download global templates
@@ -218,7 +235,7 @@ vibe-check init --lang c++ --agent claude
 
 **Note:** The custom source must include a `templates.yml` file that defines the template structure.
 
-## Complete Walkthrough: Rust Project (V6.0.0+ with V2 Templates)
+## Complete Walkthrough: Rust Project (V2 Templates)
 
 This walkthrough demonstrates setting up a new Rust project using vibe-check with v2 templates (agents.md standard).
 
@@ -461,8 +478,7 @@ vibe-check update --dry-run
 
 - Downloads templates from specified source or default GitHub repository
 - If `--from` is not specified, downloads from:
-  - **v6.0.0+**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2` (agents.md standard)
-  - **v5.x**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v1` (agent-specific files)
+  - **Default**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2` (agents.md standard)
 - Downloads `templates.yml` configuration file and all template files
 - Stores templates in local data directory:
   - Linux: `$HOME/.local/share/vibe-check/templates`
@@ -504,7 +520,7 @@ vibe-check init --lang <language> --agent <agent> [--mission <text|@file>] [--fo
 - `--force` - Force overwrite of local files without confirmation
 - `--dry-run` - Preview changes without applying them
 
-**Examples (V6.0.0+ with V2 templates):**
+**Examples (V2 templates):**
 
 ```bash
 # Initialize Rust project (works with all agents)
@@ -535,7 +551,7 @@ vibe-check init --lang swift --force
 vibe-check init --lang rust --dry-run
 ```
 
-**Examples (V1 templates or v5.x):**
+**Examples (V1 templates, deprecated):**
 
 ```bash
 # Initialize C++ project with Claude
@@ -598,7 +614,7 @@ vibe-check purge --dry-run
 **Behavior:**
 
 - Uses Bill of Materials (BoM) from templates.yml to discover all agent-specific files
-- Removes all agent-specific files from all agents (instructions, prompts, directories)
+- Removes all agent-specific files from all agents (instructions, prompts, skills, directories)
 - Removes AGENTS.md from current directory
 - Automatically cleans up empty parent directories after file removal
 - Does NOT affect global templates in local data directory
@@ -660,7 +676,7 @@ vibe-check remove --all --dry-run
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
 - If `--dry-run` is specified, shows files that would be deleted without removing them
-- Removes agent-specific files (instructions and prompts)
+- Removes agent-specific files (instructions, prompts, and skills)
 - Automatically cleans up empty parent directories
 - **NEVER touches AGENTS.md** (use `purge` command to remove AGENTS.md)
 - Does NOT affect global templates in local data directory
@@ -696,18 +712,23 @@ vibe-check status
 
 Global Templates:
   ✓ Installed at: /Users/.../vibe-check/templates
-  → Template version: 1
+  → Template version: 2
   → Available agents: claude, copilot, codex, cursor
   → Available languages: c, c++, rust, swift
 
 Project Status:
   ✓ AGENTS.md: exists (customized)
-  ✓ Installed agents: claude, copilot
+  ✓ Installed agents: claude, cursor
+  ✓ Installed skills: 2
+    • .cursor/skills/create-rule/SKILL.md
+    • .cursor/skills/create-skill/SKILL.md
 
 Managed Files:
   • AGENTS.md
   • .claude/commands/init-session.md
   • CLAUDE.md
+  • .cursor/skills/create-rule/SKILL.md
+  • .cursor/skills/create-skill/SKILL.md
 ```
 
 ### `list` - List Available Options
@@ -722,7 +743,7 @@ vibe-check list
 
 **Output includes:**
 
-- **Available Agents:** All agents defined in templates.yml with installation status
+- **Available Agents:** All agents defined in templates.yml with installation status and skill counts
 - **Available Languages:** All languages defined in templates.yml
 
 **Example output:**
@@ -734,7 +755,7 @@ Available Agents:
   ✓ claude (installed)
   ○ codex
   ✓ copilot (installed)
-  ○ cursor
+  ○ cursor (2 skill(s))
 
 Available Languages:
   • c
@@ -845,21 +866,22 @@ All templates in this repository enforce these critical rules:
 
 ## Supported Agents
 
-### V2 Templates (v6.0.0+ Default)
+### V2 Templates (Default)
 
 **Universal Support**: Single AGENTS.md works with all agents following the [agents.md](https://agents.md) standard:
 
 - Claude (Anthropic)
 - Cursor (AI code editor)
 - GitHub Copilot (GitHub)
+- OpenAI Codex
 - Aider (command-line AI)
 - Jules (coding assistant)
 - Factory (AI dev tool)
 - Any agent that reads AGENTS.md
 
-One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md when needed.
+One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md when needed. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent.
 
-### V1 Templates (v5.x Default)
+### V1 Templates (Deprecated)
 
 Agent-specific files configuration:
 
@@ -899,22 +921,54 @@ Templates include:
 - **Integration fragments**: Tool/workflow templates (e.g., git-workflow-conventions.md) - merged into AGENTS.md
 - **Principle fragments**: Core principles and best practices - merged into AGENTS.md
 - **Mission fragments**: Mission statement, technology stack - merged into AGENTS.md
-- **Agent templates**: Agent-specific instruction files and prompts (copied to project directories)
+- **Agent templates**: Agent-specific instruction files, prompts, and skills (copied to project directories)
 - **Config files**: EditorConfig, format configurations, .gitignore, .gitattributes
+
+### Agent Skills
+
+vibe-check supports [Agent Skills](https://agentskills.io) – an open format for extending AI agent capabilities with specialized knowledge and workflows. Skills are defined per agent in `templates.yml` under the `skills` key, parallel to `instructions` and `prompts`.
+
+A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name, description) and Markdown instructions. Skills can optionally include `scripts/`, `references/`, and `assets/` subdirectories.
+
+**How skills work in vibe-check:**
+
+- Skills are defined per agent in `templates.yml` using the same `source`/`target` mapping as other files
+- When `vibe-check init --agent <name>` is run, skills are downloaded and installed alongside instructions and prompts
+- Skills are tracked with the `"skill"` category in the file tracker for modification detection
+- The `list` command shows available skills per agent; the `status` command shows installed skills
+- Removing an agent (`vibe-check remove --agent <name>`) also removes its skills
+
+**Example `templates.yml` entry:**
+
+```yaml
+agents:
+  cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
+    prompts:
+      - source: cursor/commands/init-session.md
+        target: '$workspace/.cursor/commands/init-session.md'
+    skills:
+      - source: cursor/skills/create-rule/SKILL.md
+        target: '$workspace/.cursor/skills/create-rule/SKILL.md'
+      - source: cursor/skills/create-skill/SKILL.md
+        target: '$workspace/.cursor/skills/create-skill/SKILL.md'
+```
 
 ### Template Configuration (templates.yml)
 
 The `templates.yml` file defines the template structure with a version field and multiple sections:
 
 **Version Field:**
-- `version: 1` - V1 templates with agent-specific files
+- `version: 1` - V1 templates with agent-specific files (deprecated)
 - `version: 2` - V2 templates following agents.md standard
-- Missing version defaults to 1 for backward compatibility
+- Missing version defaults to 2 (changed in v7.0.0; was 1 in v6.x)
 
 **Main Sections:**
 
 1. **main**: Main AGENTS.md instruction file (primary source of truth)
-2. **agents**: Agent-specific files with `instructions` and `prompts`
+2. **agents**: Agent-specific files with `instructions`, `prompts`, and `skills`
 3. **languages**: Language-specific coding standards fragments (merged into AGENTS.md)
 4. **integration**: Tool/workflow integration fragments (merged into AGENTS.md, e.g., git workflows)
 5. **principles**: Core principles and general guidelines fragments (merged into AGENTS.md)
@@ -957,6 +1011,16 @@ agents:
         prompts:
             - source: claude/commands/init-session.md
               target: '$workspace/.claude/commands/init-session.md'
+    cursor:
+        instructions:
+            - source: cursor/cursorrules
+              target: '$workspace/.cursorrules'
+        prompts:
+            - source: cursor/commands/init-session.md
+              target: '$workspace/.cursor/commands/init-session.md'
+        skills:
+            - source: cursor/skills/create-rule/SKILL.md
+              target: '$workspace/.cursor/skills/create-rule/SKILL.md'
 
 languages:
     rust:
@@ -1018,9 +1082,9 @@ principles:
 
 Templates include a version field to support different format approaches:
 
-- **Version 2** (default in v6.0.0+): agents.md standard - single AGENTS.md for all agents
-- **Version 1** (default in v5.x): Agent-specific files with separate instruction files per agent
-- Missing version field defaults to 1 for backward compatibility
+- **Version 2** (default): agents.md standard - single AGENTS.md for all agents, with Agent Skills support
+- **Version 1** (deprecated): Agent-specific files with separate instruction files per agent
+- Missing version field defaults to 2 (changed in v7.0.0; was 1 in v6.x)
 - Different template engines handle each version format
 
 The `status` command shows the template version currently installed.
@@ -1047,7 +1111,7 @@ vibe-check automatically detects the template version from `templates.yml` and u
 5. Merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
 6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
 7. Single AGENTS.md works with all agents
-8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md)
+8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md) and skills (SKILL.md)
 9. You're ready to start coding with any agent
 
 **V2 with `--no-lang`** (language-independent setup):
@@ -1172,8 +1236,8 @@ Use the `--dry-run` flag on any command: `vibe-check init --lang rust --dry-run`
 Use the `--mission` option with `init`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
 
 **What template version should I use?**
-- **V2 (recommended for v6.0.0+)**: agents.md standard - simpler, single AGENTS.md for all agents
-- **V1 (default in v5.x)**: Agent-specific files - separate files per agent
+- **V2 (recommended, default since v7.0.0)**: agents.md standard - simpler, single AGENTS.md for all agents, with Agent Skills support
+- **V1 (deprecated)**: Agent-specific files - separate files per agent
 Run `vibe-check status` to see the installed template version.
 
 **How do I switch between v1 and v2 templates?**
@@ -1196,6 +1260,9 @@ Use `--no-lang` when you want AGENTS.md with mission, principles, and integratio
 
 **How do I switch agents without changing the language?**
 Run `vibe-check init --agent <new-agent>`. vibe-check detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
+
+**What are Agent Skills?**
+[Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. In vibe-check, skills are defined per agent in `templates.yml` and installed alongside instructions and prompts when you use `--agent`. Skills are tracked and managed like other template files.
 
 ## License
 
@@ -1231,4 +1298,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: February 17, 2026
+Last updated: February 17, 2026 (v7.0.0)

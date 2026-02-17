@@ -147,6 +147,14 @@ impl DownloadManager
                         download_entry(&prompt.source)?;
                     }
                 }
+
+                if let Some(skills) = &agent_config.skills
+                {
+                    for skill in skills
+                    {
+                        download_entry(&skill.source)?;
+                    }
+                }
             }
         }
 
