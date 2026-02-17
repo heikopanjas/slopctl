@@ -705,6 +705,9 @@ After making ANY code changes:
 - Updated V2 templates.yml with claude instructions section
 - Fixed misleading comments claiming V2 has no agents section
 - Version bump: 6.5.5 to 6.5.6 (PATCH - bug fix, missing CLAUDE.md in V2)
+- Added instruction files for all V2 agents: copilot (.github/copilot-instructions.md), cursor (.cursorrules), codex (CODEX.md)
+- All instruction files redirect to AGENTS.md as single source of truth
+- Version bump: 6.5.6 to 6.5.7 (PATCH - add remaining agent instruction files)
 
 ### 2026-02-16
 

@@ -36,16 +36,25 @@ agents:
         target: '$workspace/.claude/commands/init-session.md'
 
   copilot:
+    instructions:
+      - source: copilot/copilot-instructions.md
+        target: '$workspace/.github/copilot-instructions.md'
     prompts:
       - source: copilot/prompts/init-session.prompt.md
         target: '$workspace/.github/prompts/init-session.prompt.md'
 
   codex:
+    instructions:
+      - source: codex/CODEX.md
+        target: '$workspace/CODEX.md'
     prompts:
       - source: codex/prompts/init-session.md
         target: '$userprofile/.codex/prompts/init-session.md'
 
   cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
     prompts:
       - source: cursor/commands/init-session.md
         target: '$workspace/.cursor/commands/init-session.md'
