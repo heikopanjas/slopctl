@@ -121,7 +121,6 @@ impl BillOfMaterials
         let mut bom = Self::new();
 
         // Process each agent's files (if agents section exists)
-        // V2 templates don't have agents section (agents.md standard)
         if let Some(agents) = template_config.agents
         {
             for (agent_name, agent_config) in agents

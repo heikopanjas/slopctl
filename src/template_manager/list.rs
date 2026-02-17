@@ -35,7 +35,7 @@ impl TemplateManager
         let config_path = self.config_dir.join("templates.yml");
         let bom = BillOfMaterials::from_config(&config_path)?;
 
-        // List agents (V2 templates don't have agents section - agents.md standard)
+        // List agents (if agents section exists)
         if let Some(agents_map) = &config.agents
         {
             println!("{}", "Available Agents:".bold());

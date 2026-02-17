@@ -128,7 +128,6 @@ impl DownloadManager
         }
 
         // Download agent templates (if agents section exists)
-        // V2 templates don't have agents section (agents.md standard)
         if let Some(agents) = &config.agents
         {
             for agent_config in agents.values()

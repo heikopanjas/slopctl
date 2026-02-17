@@ -38,7 +38,7 @@ impl TemplateManager
             {
                 println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
 
-                // V2 templates don't have agents section (agents.md standard)
+                // List agent-specific files (if agents section exists)
                 if let Some(agents_map) = &config.agents
                 {
                     let agents: Vec<&String> = agents_map.keys().collect();

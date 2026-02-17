@@ -5,7 +5,7 @@
 //!
 //! V2 Philosophy:
 //! - One AGENTS.md file that works across all agents
-//! - No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+//! - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md
 //! - Follows https://agents.md community standard
 //! - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 
@@ -22,7 +22,7 @@ use crate::{
 /// Template engine for version 2 templates (agents.md standard)
 ///
 /// Handles template generation, fragment merging, and placeholder resolution
-/// for the version 2 template format. V2 templates have no agent-specific files.
+/// for the version 2 template format.
 pub struct TemplateEngineV2<'a>
 {
     config_dir: &'a Path
@@ -55,13 +55,13 @@ impl<'a> TemplateEngineV2<'a>
     /// 2. Detects local modifications to AGENTS.md
     /// 3. Copies templates to current directory
     ///
-    /// V2 Philosophy: Single AGENTS.md works for all agents, but agent-specific
-    /// prompts/commands can still be copied if agent is specified.
+    /// V2 Philosophy: Single AGENTS.md works for all agents. Agent-specific
+    /// instruction files (e.g. CLAUDE.md) and prompts are copied if agent is specified.
     ///
     /// # Arguments
     ///
     /// * `lang` - Programming language or framework identifier (ignored when no_lang)
-    /// * `agent` - Optional agent identifier for copying agent-specific prompts
+    /// * `agent` - Optional agent identifier for copying agent-specific files
     /// * `no_lang` - If true, skip language-specific fragments
     /// * `mission` - Optional custom mission statement to override template default
     /// * `force` - If true, overwrite local modifications without warning
@@ -172,14 +172,26 @@ impl<'a> TemplateEngineV2<'a>
             }
         }
 
-        // V2: Process agent-specific prompts if agent is specified
-        // Note: V2 has no agent-specific instruction files (single AGENTS.md for all)
-        // but agents can still have operational prompts/commands
+        // Process agent-specific instruction and prompt files if agent is specified
         if let Some(agent_name) = agent &&
             let Some(agents) = config.agents.as_ref()
         {
             if let Some(agent_config) = agents.get(agent_name)
             {
+                // Add agent instruction files (e.g. CLAUDE.md referencing AGENTS.md)
+                if let Some(instructions) = &agent_config.instructions
+                {
+                    for instruction in instructions
+                    {
+                        let source_path = self.config_dir.join(&instruction.source);
+                        if source_path.exists()
+                        {
+                            let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                            files_to_copy.push((source_path, target_path));
+                        }
+                    }
+                }
+
                 // Add agent prompts
                 if let Some(prompts) = &agent_config.prompts
                 {
@@ -248,7 +260,7 @@ impl<'a> TemplateEngineV2<'a>
         println!("{} Templates updated successfully", "✓".green());
         if agent.is_some()
         {
-            println!("{} V2 templates: Single AGENTS.md + agent-specific prompts", "→".blue());
+            println!("{} V2 templates: Single AGENTS.md + agent-specific files", "→".blue());
         }
         else
         {

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-16
+**Last updated:** 2026-02-17
 
 <!-- {mission} -->
 
@@ -697,6 +697,14 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-17
+
+- Added CLAUDE.md instruction file to V2 templates (references AGENTS.md)
+- V2 engine now processes agent `instructions` alongside `prompts`
+- Updated V2 templates.yml with claude instructions section
+- Fixed misleading comments claiming V2 has no agents section
+- Version bump: 6.5.5 to 6.5.6 (PATCH - bug fix, missing CLAUDE.md in V2)
 
 ### 2026-02-16
 

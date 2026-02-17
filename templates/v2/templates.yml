@@ -4,7 +4,7 @@ version: 2
 # 
 # V2 Philosophy: One AGENTS.md file that works across all agents
 # - Follows https://agents.md community standard
-# - No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+# - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md
 # - Single source of truth: AGENTS.md
 # - Agent-specific prompts/commands are still supported (operational files)
 # - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
@@ -25,9 +25,12 @@ main:
   source: AGENTS.md
   target: '$workspace/AGENTS.md'
 
-# Agent-specific prompts/commands (V2: No instruction files, only operational prompts)
+# Agent-specific instruction files and prompts/commands
 agents:
   claude:
+    instructions:
+      - source: claude/CLAUDE.md
+        target: '$workspace/CLAUDE.md'
     prompts:
       - source: claude/commands/init-session.md
         target: '$workspace/.claude/commands/init-session.md'

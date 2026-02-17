@@ -58,9 +58,16 @@ vibe-check/
 │   │   ├── cursor/             # Cursor files
 │   │   └── ...                 # Language templates (coding conventions, build commands, etc.)
 │   └── v2/                     # Version 2 templates (agents.md standard)
-│       ├── templates.yml       # V2 template configuration (version: 2, no agents section)
+│       ├── templates.yml       # V2 template configuration (version: 2)
 │       ├── AGENTS.md           # Single instruction file for all agents
-│       └── ...                 # Language templates only (no agent directories)
+│       ├── claude/             # Claude-specific files
+│       │   ├── CLAUDE.md       # References AGENTS.md
+│       │   └── commands/
+│       │       └── init-session.md
+│       ├── copilot/            # GitHub Copilot files
+│       ├── codex/              # Codex files
+│       ├── cursor/             # Cursor files
+│       └── ...                 # Language templates (coding conventions, build commands, etc.)
 ├── CLAUDE.md                   # Claude-specific reference
 └── .github/
     └── copilot-instructions.md # GitHub Copilot reference
@@ -84,7 +91,7 @@ vibe-check supports two template formats through its versioning system:
 
 - Follows the [agents.md](https://agents.md) community standard
 - Single AGENTS.md file compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
-- No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+- Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md when needed
 - Simpler initialization: `vibe-check init --lang rust` or `vibe-check init --no-lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2`
@@ -360,7 +367,7 @@ vibe-check init --lang rust --force
 vibe-check purge
 
 # V1: Removes agent directories (.claude/, .github/, .cursor/) and AGENTS.md
-# V2: Removes AGENTS.md and language config files
+# V2: Removes AGENTS.md, agent files (e.g. CLAUDE.md), and language config files
 # Both: Preserves customized AGENTS.md unless --force is used
 ```
 
@@ -374,7 +381,7 @@ vibe-check remove --all
 vibe-check remove --agent claude
 
 # V1: Removes CLAUDE.md, .claude/commands/, etc.
-# V2: Removes .cursor/commands/, .github/prompts/, etc. (agent prompts)
+# V2: Removes CLAUDE.md, .cursor/commands/, .github/prompts/, etc.
 ```
 
 **Scenario: Switch from Cursor to Claude (keep Rust setup)**
@@ -850,7 +857,7 @@ All templates in this repository enforce these critical rules:
 - Factory (AI dev tool)
 - Any agent that reads AGENTS.md
 
-No agent-specific configuration needed. One file, all agents.
+One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md when needed.
 
 ### V1 Templates (v5.x Default)
 
@@ -901,13 +908,13 @@ The `templates.yml` file defines the template structure with a version field and
 
 **Version Field:**
 - `version: 1` - V1 templates with agent-specific files
-- `version: 2` - V2 templates following agents.md standard (no agent-specific files)
+- `version: 2` - V2 templates following agents.md standard
 - Missing version defaults to 1 for backward compatibility
 
 **Main Sections:**
 
 1. **main**: Main AGENTS.md instruction file (primary source of truth)
-2. **agents**: (V1 only) Agent-specific files with `instructions` and `prompts`
+2. **agents**: Agent-specific files with `instructions` and `prompts`
 3. **languages**: Language-specific coding standards fragments (merged into AGENTS.md)
 4. **integration**: Tool/workflow integration fragments (merged into AGENTS.md, e.g., git workflows)
 5. **principles**: Core principles and general guidelines fragments (merged into AGENTS.md)
@@ -942,7 +949,14 @@ main:
     source: AGENTS.md
     target: '$workspace/AGENTS.md'
 
-# No agents section in v2 - single AGENTS.md works for all agents
+agents:
+    claude:
+        instructions:
+            - source: claude/CLAUDE.md
+              target: '$workspace/CLAUDE.md'
+        prompts:
+            - source: claude/commands/init-session.md
+              target: '$workspace/.claude/commands/init-session.md'
 
 languages:
     rust:
@@ -1032,8 +1046,8 @@ vibe-check automatically detects the template version from `templates.yml` and u
 4. Downloads main AGENTS.md template
 5. Merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
 6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
-7. **No agent-specific files** - single AGENTS.md works with all agents
-8. Optional `--agent` adds agent prompts (e.g. .cursor/commands/init-session.md)
+7. Single AGENTS.md works with all agents
+8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md)
 9. You're ready to start coding with any agent
 
 **V2 with `--no-lang`** (language-independent setup):
@@ -1174,7 +1188,7 @@ vibe-check update
 ```
 
 **What's the difference between v1 and v2 templates?**
-- **V2**: One AGENTS.md file that works with all agents. Simpler, follows agents.md community standard.
+- **V2**: One AGENTS.md file that works with all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md. Follows agents.md community standard.
 - **V1**: Separate instruction files per agent (CLAUDE.md, copilot-instructions.md, etc.). More files to manage.
 
 **When should I use --no-lang?**
@@ -1217,4 +1231,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: February 15, 2026
+Last updated: February 17, 2026
