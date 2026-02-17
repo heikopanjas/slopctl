@@ -140,6 +140,74 @@ enum Commands
     }
 }
 
+/// Default template source URL (v2 is default in v6.x - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2";
+
+/// Resolves template source URL from CLI argument, config, or default
+///
+/// Returns (source_url, is_configured, fallback_url).
+/// Priority: CLI `from` argument > config `source.url` > default URL.
+///
+/// # Arguments
+///
+/// * `from` - Optional CLI-provided source URL
+fn resolve_source(from: Option<String>) -> (String, bool, Option<String>)
+{
+    let config = Config::load().ok();
+    let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
+    let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
+
+    let (source, is_configured) = if let Some(from_url) = from
+    {
+        (from_url, false)
+    }
+    else if let Some(config_url) = configured_source
+    {
+        (config_url, true)
+    }
+    else
+    {
+        (DEFAULT_SOURCE_URL.to_string(), false)
+    };
+
+    (source, is_configured, fallback_source)
+}
+
+/// Downloads or copies templates with automatic fallback
+///
+/// Tries the primary source first. If it fails and a fallback is configured,
+/// retries with the fallback source.
+///
+/// # Arguments
+///
+/// * `manager` - Template manager to use for download/copy
+/// * `source` - Primary source URL or path
+/// * `fallback` - Optional fallback source URL or path
+///
+/// # Errors
+///
+/// Returns an error if both primary and fallback sources fail
+fn download_with_fallback(manager: &TemplateManager, source: &str, fallback: Option<String>) -> Result<()>
+{
+    match manager.download_or_copy_templates(source)
+    {
+        | Ok(()) => Ok(()),
+        | Err(e) =>
+        {
+            if let Some(fallback_url) = fallback
+            {
+                println!("{} Primary source failed: {}", "!".yellow(), e);
+                println!("{} Trying fallback source: {}", "→".blue(), fallback_url.yellow());
+                manager.download_or_copy_templates(&fallback_url)
+            }
+            else
+            {
+                Err(e)
+            }
+        }
+    }
+}
+
 /// Resolves mission content from CLI argument
 ///
 /// If the value starts with `@`, reads content from the specified file path.
@@ -314,40 +382,15 @@ fn main()
                     return;
                 }
 
-                // Use configured source or default (v2 is default in v6.x - agents.md standard)
-                let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".to_string();
-                let config = Config::load().ok();
-                let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
-                let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
+                let (source, is_configured, fallback) = resolve_source(None);
 
-                let source = configured_source.clone().unwrap_or(default_source);
-
-                if configured_source.is_some() == true
+                if is_configured == true
                 {
                     println!("{} Using configured source", "→".blue());
                 }
                 println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
 
-                // Try primary source, fall back if configured and primary fails
-                let download_result = match manager.download_or_copy_templates(&source)
-                {
-                    | Ok(()) => Ok(()),
-                    | Err(e) =>
-                    {
-                        if let Some(fallback) = fallback_source
-                        {
-                            println!("{} Primary source failed: {}", "!".yellow(), e);
-                            println!("{} Trying fallback source: {}", "→".blue(), fallback.yellow());
-                            manager.download_or_copy_templates(&fallback)
-                        }
-                        else
-                        {
-                            Err(e)
-                        }
-                    }
-                };
-
-                if let Err(e) = download_result
+                if let Err(e) = download_with_fallback(&manager, &source, fallback)
                 {
                     eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
                     std::process::exit(1);
@@ -408,24 +451,7 @@ fn main()
         }
         | Commands::Update { from, dry_run } =>
         {
-            // Determine source: CLI --from > config source.url > default (v2 is default in v6.x - agents.md standard)
-            let default_source = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".to_string();
-            let config = Config::load().ok();
-            let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
-            let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
-
-            let (source, is_configured) = if let Some(from_url) = from
-            {
-                (from_url, false)
-            }
-            else if let Some(config_url) = configured_source.clone()
-            {
-                (config_url, true)
-            }
-            else
-            {
-                (default_source.clone(), false)
-            };
+            let (source, is_configured, fallback) = resolve_source(from);
 
             if dry_run == true
             {
@@ -434,9 +460,9 @@ fn main()
                     println!("{} Using configured source", "→".blue());
                 }
                 println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
-                if let Some(ref fallback) = fallback_source
+                if let Some(ref fallback_url) = fallback
                 {
-                    println!("{} Fallback source configured: {}", "→".blue(), fallback.yellow());
+                    println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
                 }
                 println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
                 println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -450,24 +476,7 @@ fn main()
                 }
                 println!("{} Updating global templates from {}", "→".blue(), source.yellow());
 
-                // Try primary source, fall back if configured and primary fails
-                match manager.download_or_copy_templates(&source)
-                {
-                    | Ok(()) => Ok(()),
-                    | Err(e) =>
-                    {
-                        if let Some(fallback) = fallback_source
-                        {
-                            println!("{} Primary source failed: {}", "!".yellow(), e);
-                            println!("{} Trying fallback source: {}", "→".blue(), fallback.yellow());
-                            manager.download_or_copy_templates(&fallback)
-                        }
-                        else
-                        {
-                            Err(e)
-                        }
-                    }
-                }
+                download_with_fallback(&manager, &source, fallback)
             }
         }
         | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),

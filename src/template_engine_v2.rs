@@ -5,32 +5,35 @@
 //!
 //! V2 Philosophy:
 //! - One AGENTS.md file that works across all agents
-//! - No agent-specific instruction files (CLAUDE.md, copilot-instructions.md, etc.)
+//! - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md
 //! - Follows https://agents.md community standard
 //! - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 
-use std::{
-    collections::HashMap,
-    fs,
-    path::{Path, PathBuf}
-};
+use std::path::{Path, PathBuf};
 
 use owo_colors::OwoColorize;
 
 use crate::{
     Result,
-    bom::TemplateConfig,
-    file_tracker::{FileStatus, FileTracker},
-    utils::{FileActionResponse, copy_file_with_mkdir, prompt_file_modification}
+    file_tracker::FileTracker,
+    template_engine::{self, CopyFilesResult, TemplateContext, TemplateEngine, UpdateOptions}
 };
 
 /// Template engine for version 2 templates (agents.md standard)
 ///
 /// Handles template generation, fragment merging, and placeholder resolution
-/// for the version 2 template format. V2 templates have no agent-specific files.
+/// for the version 2 template format.
 pub struct TemplateEngineV2<'a>
 {
     config_dir: &'a Path
+}
+
+impl<'a> TemplateEngine for TemplateEngineV2<'a>
+{
+    fn config_dir(&self) -> &Path
+    {
+        self.config_dir
+    }
 }
 
 impl<'a> TemplateEngineV2<'a>
@@ -45,54 +48,6 @@ impl<'a> TemplateEngineV2<'a>
         Self { config_dir }
     }
 
-    /// Loads template configuration from templates.yml
-    ///
-    /// Loads and parses templates.yml from the global config directory.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if templates.yml cannot be loaded or parsed
-    pub fn load_template_config(&self) -> Result<TemplateConfig>
-    {
-        let config_path = self.config_dir.join("templates.yml");
-
-        // Try to load and parse templates.yml
-        if config_path.exists() == false
-        {
-            return Err("templates.yml not found in global template directory".into());
-        }
-
-        let content = fs::read_to_string(&config_path)?;
-        let config: TemplateConfig = serde_yaml::from_str(&content)?;
-        Ok(config)
-    }
-
-    /// Checks if a local file has been customized by checking for the template marker
-    ///
-    /// If the template marker is missing from the local file, it means the file
-    /// has been merged or customized and should not be overwritten without confirmation.
-    ///
-    /// # Arguments
-    ///
-    /// * `local_path` - Path to local file to check
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if file exists and marker is missing (file is customized)
-    pub fn is_file_customized(&self, local_path: &Path) -> Result<bool>
-    {
-        if local_path.exists() == false
-        {
-            return Ok(false);
-        }
-
-        let content = fs::read_to_string(local_path)?;
-        let marker = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
-
-        // If marker is missing, file has been customized
-        Ok(content.contains(marker) == false)
-    }
-
     /// Updates local templates from global storage (V2 - agent parameter optional)
     ///
     /// This method:
@@ -100,13 +55,13 @@ impl<'a> TemplateEngineV2<'a>
     /// 2. Detects local modifications to AGENTS.md
     /// 3. Copies templates to current directory
     ///
-    /// V2 Philosophy: Single AGENTS.md works for all agents, but agent-specific
-    /// prompts/commands can still be copied if agent is specified.
+    /// V2 Philosophy: Single AGENTS.md works for all agents. Agent-specific
+    /// instruction files (e.g. CLAUDE.md) and prompts are copied if agent is specified.
     ///
     /// # Arguments
     ///
     /// * `lang` - Programming language or framework identifier (ignored when no_lang)
-    /// * `agent` - Optional agent identifier for copying agent-specific prompts
+    /// * `agent` - Optional agent identifier for copying agent-specific files
     /// * `no_lang` - If true, skip language-specific fragments
     /// * `mission` - Optional custom mission statement to override template default
     /// * `force` - If true, overwrite local modifications without warning
@@ -129,7 +84,7 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         // Load template configuration
-        let config = self.load_template_config()?;
+        let config = template_engine::load_template_config(self.config_dir)?;
 
         // Get current working directory and user home directory
         let workspace = std::env::current_dir()?;
@@ -138,21 +93,18 @@ impl<'a> TemplateEngineV2<'a>
         // Initialize file tracker
         let mut file_tracker = FileTracker::new(self.config_dir)?;
 
-        // Collect files to copy
+        // Resolve main template (required)
+        let main_config = config.main.as_ref().ok_or("Missing 'main' section in templates.yml")?;
+        let main_source = self.config_dir.join(&main_config.source);
+        if main_source.exists() == false
+        {
+            return Err(format!("Main template not found: {}", main_source.display()).into());
+        }
+        let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
+
+        // Collect files to copy and fragments to merge
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut fragments: Vec<(PathBuf, String)> = Vec::new();
-        let mut main_template: Option<(PathBuf, PathBuf)> = None;
-
-        // Check if main AGENTS.md should be copied
-        if let Some(main) = config.main.as_ref()
-        {
-            let source_path = self.config_dir.join(&main.source);
-            if source_path.exists()
-            {
-                let target_path = self.resolve_placeholder(&main.target, &workspace, &userprofile);
-                main_template = Some((source_path, target_path));
-            }
-        }
 
         // Helper closure to process file entries
         let mut process_entry = |source: &str, target: &str, category: &str| {
@@ -220,14 +172,26 @@ impl<'a> TemplateEngineV2<'a>
             }
         }
 
-        // V2: Process agent-specific prompts if agent is specified
-        // Note: V2 has no agent-specific instruction files (single AGENTS.md for all)
-        // but agents can still have operational prompts/commands
+        // Process agent-specific instruction and prompt files if agent is specified
         if let Some(agent_name) = agent &&
             let Some(agents) = config.agents.as_ref()
         {
             if let Some(agent_config) = agents.get(agent_name)
             {
+                // Add agent instruction files (e.g. CLAUDE.md referencing AGENTS.md)
+                if let Some(instructions) = &agent_config.instructions
+                {
+                    for instruction in instructions
+                    {
+                        let source_path = self.config_dir.join(&instruction.source);
+                        if source_path.exists()
+                        {
+                            let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
+                            files_to_copy.push((source_path, target_path));
+                        }
+                    }
+                }
+
                 // Add agent prompts
                 if let Some(prompts) = &agent_config.prompts
                 {
@@ -248,26 +212,17 @@ impl<'a> TemplateEngineV2<'a>
             }
         }
 
-        if files_to_copy.is_empty() && main_template.is_none()
-        {
-            println!("{} No templates found to copy", "!".yellow());
-            return Ok(());
-        }
+        // Build template context and update options
+        let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+        let options = UpdateOptions { lang, agent, no_lang, mission, force, dry_run };
 
         // Check if main AGENTS.md has been customized (marker removed)
-        let skip_agents_md = if let Some((_, main_target)) = &main_template
-        {
-            main_target.exists() && self.is_file_customized(main_target)?
-        }
-        else
-        {
-            false
-        };
+        let skip_agents_md = ctx.target.exists() && template_engine::is_file_customized(&ctx.target)?;
 
-        if skip_agents_md && force == false
+        if skip_agents_md && options.force == false
         {
             println!("{} Local AGENTS.md has been customized and will be skipped", "!".yellow());
-            if dry_run == false
+            if options.dry_run == false
             {
                 println!("{} Other files will still be updated", "→".blue());
             }
@@ -275,243 +230,28 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         // Dry run mode: just show what would happen
-        if dry_run == true
+        if options.dry_run == true
         {
-            println!("\n{} Files that would be created/modified:", "→".blue());
-
-            // Show main AGENTS.md status
-            if let Some((_, main_target)) = &main_template
-            {
-                if skip_agents_md && force == false
-                {
-                    println!("  {} {} (skipped - customized)", "○".yellow(), main_target.display());
-                }
-                else if main_target.exists()
-                {
-                    println!("  {} {} (would be overwritten)", "●".yellow(), main_target.display());
-                }
-                else
-                {
-                    println!("  {} {} (would be created)", "●".green(), main_target.display());
-                }
-            }
-
-            // Show other files
-            for (_, target) in &files_to_copy
-            {
-                if target.exists()
-                {
-                    println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
-                }
-                else
-                {
-                    println!("  {} {} (would be created)", "●".green(), target.display());
-                }
-            }
-
-            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            self.show_dry_run_files(&ctx, skip_agents_md, &options, &files_to_copy);
             return Ok(());
         }
 
-        // Handle main AGENTS.md with fragment merging if fragments exist
-        if let Some((main_source, main_target)) = main_template
-        {
-            // Skip AGENTS.md if customized and force is false
-            if skip_agents_md && force == false
-            {
-                println!("{} Skipping AGENTS.md (customized)", "→".blue());
-            }
-            else if fragments.is_empty() == false || mission.is_some() == true
-            {
-                println!("{} Merging fragments into AGENTS.md", "→".blue());
-                self.merge_fragments(&main_source, &main_target, &fragments, no_lang, mission)?;
-                println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
-
-                // Record installation in file tracker
-                let sha = FileTracker::calculate_sha256(&main_target)?;
-                file_tracker.record_installation(
-                    &main_target,
-                    sha,
-                    config.version,
-                    if no_lang
-                    {
-                        None
-                    }
-                    else
-                    {
-                        Some(lang.to_string())
-                    },
-                    "main".to_string()
-                );
-            }
-            else
-            {
-                // No fragments, just copy main file as-is
-                if let Some(parent) = main_target.parent()
-                {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::copy(&main_source, &main_target)?;
-                println!("  {} {}", "✓".green(), main_target.display().to_string().yellow());
-
-                // Record installation in file tracker
-                let sha = FileTracker::calculate_sha256(&main_target)?;
-                file_tracker.record_installation(
-                    &main_target,
-                    sha,
-                    config.version,
-                    if no_lang
-                    {
-                        None
-                    }
-                    else
-                    {
-                        Some(lang.to_string())
-                    },
-                    "main".to_string()
-                );
-            }
-        }
+        // Handle main AGENTS.md with fragment merging
+        self.handle_main_template(&ctx, &options, skip_agents_md, &mut file_tracker)?;
 
         // Copy templates with file modification checking
-        println!("{} Copying templates to target directories", "→".blue());
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, &options)?;
 
-        let mut skipped_files = Vec::new();
-
-        for (source, target) in &files_to_copy
+        match copy_result
         {
-            // Calculate new template SHA
-            let new_template_sha = FileTracker::calculate_sha256(source)?;
-
-            // Check if file needs to be processed
-            let should_copy = if target.exists() == false
+            | CopyFilesResult::Done { skipped } =>
             {
-                // File doesn't exist, safe to copy
-                true
+                self.show_skipped_files_summary(&skipped);
             }
-            else if force == true
+            | CopyFilesResult::Cancelled =>
             {
-                // Force flag set, always overwrite
-                true
+                return Ok(());
             }
-            else
-            {
-                // Check modification status
-                match file_tracker.check_modification(target)?
-                {
-                    | FileStatus::NotTracked =>
-                    {
-                        // Not tracked, could be user file - prompt for safety
-                        let response = prompt_file_modification(target, "<not tracked>", "<current file>", source)?;
-                        match response
-                        {
-                            | FileActionResponse::Overwrite => true,
-                            | FileActionResponse::Skip =>
-                            {
-                                skipped_files.push(target.clone());
-                                false
-                            }
-                            | FileActionResponse::Quit =>
-                            {
-                                println!("\n{} Operation cancelled by user", "!".yellow());
-                                return Ok(());
-                            }
-                        }
-                    }
-                    | FileStatus::Unmodified =>
-                    {
-                        // User didn't modify, safe to update
-                        true
-                    }
-                    | FileStatus::Modified =>
-                    {
-                        // User modified, prompt
-                        if let Some(metadata) = file_tracker.get_metadata(target)
-                        {
-                            let current_sha = FileTracker::calculate_sha256(target)?;
-                            let response = prompt_file_modification(target, &metadata.original_sha, &current_sha, source)?;
-                            match response
-                            {
-                                | FileActionResponse::Overwrite => true,
-                                | FileActionResponse::Skip =>
-                                {
-                                    skipped_files.push(target.clone());
-                                    false
-                                }
-                                | FileActionResponse::Quit =>
-                                {
-                                    println!("\n{} Operation cancelled by user", "!".yellow());
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Shouldn't happen, but treat as unmodified
-                            true
-                        }
-                    }
-                    | FileStatus::Deleted =>
-                    {
-                        // Was tracked but deleted, safe to recreate
-                        true
-                    }
-                }
-            };
-
-            if should_copy == true
-            {
-                copy_file_with_mkdir(source, target)?;
-                println!("  {} {}", "✓".green(), target.display().to_string().yellow());
-
-                // Record installation in file tracker
-                // Determine category based on target path
-                let category = if target.to_string_lossy().contains(".git")
-                {
-                    "integration"
-                }
-                else if let Some(agent_name) = agent
-                {
-                    if target.to_string_lossy().contains(&format!(".{}", agent_name)) || target.to_string_lossy().contains(agent_name)
-                    {
-                        "agent"
-                    }
-                    else
-                    {
-                        "language"
-                    }
-                }
-                else
-                {
-                    "language"
-                };
-
-                file_tracker.record_installation(
-                    target,
-                    new_template_sha,
-                    config.version,
-                    if no_lang
-                    {
-                        None
-                    }
-                    else
-                    {
-                        Some(lang.to_string())
-                    },
-                    category.to_string()
-                );
-            }
-        }
-
-        // Show summary of skipped files
-        if skipped_files.is_empty() == false
-        {
-            println!("\n{} Skipped {} modified file(s):", "!".yellow(), skipped_files.len());
-            for file in &skipped_files
-            {
-                println!("  {} {}", "○".yellow(), file.display());
-            }
-            println!("{} Use --force to overwrite modified files", "→".blue());
         }
 
         // Save file tracker metadata
@@ -520,7 +260,7 @@ impl<'a> TemplateEngineV2<'a>
         println!("{} Templates updated successfully", "✓".green());
         if agent.is_some()
         {
-            println!("{} V2 templates: Single AGENTS.md + agent-specific prompts", "→".blue());
+            println!("{} V2 templates: Single AGENTS.md + agent-specific files", "→".blue());
         }
         else
         {
@@ -528,112 +268,5 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         Ok(())
-    }
-
-    /// Merges fragment files into main AGENTS.md at insertion points
-    ///
-    /// Reads fragments that have `$instructions` placeholder in their target path
-    /// and inserts them into the main AGENTS.md template at the corresponding
-    /// insertion points: <!-- {mission} -->, <!-- {principles} -->, <!-- {languages} -->, <!-- {integration} -->
-    ///
-    /// The insertion point comments are preserved in the final merged file.
-    ///
-    /// # Arguments
-    ///
-    /// * `main_source` - Path to the main AGENTS.md template in global storage
-    /// * `main_target` - Path where merged AGENTS.md should be written
-    /// * `fragments` - Vector of (source_path, category) tuples where category is "mission", "principles", "languages", or "integration"
-    /// * `no_lang` - If true, replace <!-- {languages} --> with empty content
-    /// * `custom_mission` - Optional custom mission statement to override template default
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if file reading or writing fails
-    fn merge_fragments(&self, main_source: &Path, main_target: &Path, fragments: &[(PathBuf, String)], no_lang: bool, custom_mission: Option<&str>) -> Result<()>
-    {
-        // Read main AGENTS.md template
-        let mut main_content = fs::read_to_string(main_source)?;
-
-        // Remove the template marker to indicate this is a merged/customized file
-        let marker = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->\n";
-        main_content = main_content.replace(marker, "");
-
-        // Group fragments by category to handle multiple fragments per insertion point
-        let mut fragments_by_category: HashMap<String, Vec<String>> = HashMap::new();
-
-        if no_lang == true
-        {
-            fragments_by_category.entry("languages".to_string()).or_default();
-        }
-
-        for (fragment_path, category) in fragments
-        {
-            let fragment_content = fs::read_to_string(fragment_path)?;
-            fragments_by_category.entry(category.clone()).or_default().push(fragment_content);
-        }
-
-        // If custom mission is provided, add it to the fragments
-        if let Some(mission_content) = custom_mission
-        {
-            // Format mission content with header
-            let formatted_mission = format!("## Mission Statement\n\n{}", mission_content.trim());
-            fragments_by_category.entry("mission".to_string()).or_default().push(formatted_mission);
-            println!("{} Using custom mission statement", "→".blue());
-        }
-
-        // Process each category
-        for (category, contents) in fragments_by_category
-        {
-            let insertion_point = format!("<!-- {{{}}} -->", category);
-
-            // Combine all fragments for this category
-            let combined_content = contents.iter().map(|c| c.trim()).collect::<Vec<_>>().join("\n\n");
-
-            // Replace insertion point with comment + fragment content (keep single insertion point)
-            if main_content.contains(&insertion_point)
-            {
-                let replacement = format!("<!-- {{{}}} -->\n\n{}", category, combined_content);
-                main_content = main_content.replace(&insertion_point, &replacement);
-            }
-            else
-            {
-                println!("{} Warning: Insertion point {} not found in AGENTS.md", "!".yellow(), insertion_point.yellow());
-            }
-        }
-
-        // Write merged content to target
-        if let Some(parent) = main_target.parent()
-        {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(main_target, main_content)?;
-
-        Ok(())
-    }
-
-    /// Resolves placeholder variables in target paths
-    ///
-    /// Replaces $workspace with the workspace directory path
-    /// and $userprofile with the user's home directory path.
-    /// Uses Path::join for cross-platform correctness (avoids mixed separators on Windows).
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Path string containing placeholders
-    /// * `workspace` - Workspace directory path
-    /// * `userprofile` - User profile directory path
-    fn resolve_placeholder(&self, path: &str, workspace: &Path, userprofile: &Path) -> PathBuf
-    {
-        if path.starts_with("$workspace") == true
-        {
-            let suffix = path["$workspace".len()..].trim_start_matches('/').trim_start_matches('\\');
-            return workspace.join(suffix);
-        }
-        if path.starts_with("$userprofile") == true
-        {
-            let suffix = path["$userprofile".len()..].trim_start_matches('/').trim_start_matches('\\');
-            return userprofile.join(suffix);
-        }
-        PathBuf::from(path)
     }
 }
