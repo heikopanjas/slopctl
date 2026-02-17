@@ -114,6 +114,18 @@ impl TemplateManager
             println!("  {} No agents installed", "○".yellow());
         }
 
+        // Detect installed skills from managed files
+        let installed_skills: Vec<&PathBuf> = managed_files.iter().filter(|f| f.to_string_lossy().contains("SKILL.md")).collect();
+        if installed_skills.is_empty() == false
+        {
+            println!("  {} Installed skills: {}", "✓".green(), installed_skills.len().to_string().green());
+            for skill_file in &installed_skills
+            {
+                let display_path = skill_file.strip_prefix(&current_dir).unwrap_or(skill_file);
+                println!("    • {}", display_path.display().to_string().yellow());
+            }
+        }
+
         // Add AGENTS.md to managed files if it exists
         if agents_md_path.exists() == true
         {

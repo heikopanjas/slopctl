@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-17
+**Last updated:** 2026-02-17T3
 
 <!-- {mission} -->
 
@@ -698,6 +698,23 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-02-17 (evening, v7.0.0)
+
+- MAJOR version bump: 6.6.0 to 7.0.0
+- Switched default template version from 1 to 2 (agents.md standard)
+- V1 deprecation warning updated: no longer references v7.0.0, says future release
+- This was planned since v6.2.0 (2026-01-24)
+
+### 2026-02-17 (evening)
+
+- Added Agent Skills infrastructure to V2 template engine (agentskills.io spec)
+- New `skills` field in `AgentConfig` alongside `instructions` and `prompts`
+- Skills are agent-specific: defined per-agent in templates.yml, installed to agent-specific locations
+- Download, install, track, list, and status commands all support skills
+- Skill files tracked with "skill" category in file tracker
+- Infrastructure only: no pre-built skills ship yet; users can add their own
+- Version bump: 6.5.7 to 6.6.0 (MINOR - new feature)
+
 ### 2026-02-17
 
 - Added CLAUDE.md instruction file to V2 templates (references AGENTS.md)
@@ -766,7 +783,7 @@ After making ANY code changes:
 - Custom mission overrides default template mission statement in AGENTS.md
 - Implemented in both v1 and v2 template engines
 - Version bump: 6.1.1 → 6.2.0 (MINOR - new feature)
-- **Planned for v7.0.0:** Switch default template version from 1 to 2 (see `default_version()` in `src/bom.rs`)
+- **Done in v7.0.0:** Switched default template version from 1 to 2 (see `default_version()` in `src/bom.rs`)
 
 ### 2025-12-28
 

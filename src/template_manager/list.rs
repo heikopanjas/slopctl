@@ -54,13 +54,32 @@ impl TemplateManager
                     false
                 };
 
-                if is_installed == true
+                // Count available skills for this agent
+                let skill_count = agents_map.get(agent_name).and_then(|c| c.skills.as_ref()).map_or(0, |s| s.len());
+
+                let skill_info = if skill_count > 0
                 {
-                    println!("  {} {} (installed)", "✓".green(), agent_name.green());
+                    format!(", {} skill(s)", skill_count)
                 }
                 else
                 {
-                    println!("  {} {}", "○".blue(), agent_name);
+                    String::new()
+                };
+
+                if is_installed == true
+                {
+                    println!("  {} {} (installed{})", "✓".green(), agent_name.green(), skill_info);
+                }
+                else
+                {
+                    if skill_count > 0
+                    {
+                        println!("  {} {} ({} skill(s))", "○".blue(), agent_name, skill_count);
+                    }
+                    else
+                    {
+                        println!("  {} {}", "○".blue(), agent_name);
+                    }
                 }
             }
 

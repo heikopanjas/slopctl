@@ -205,6 +205,20 @@ impl<'a> TemplateEngineV2<'a>
                         }
                     }
                 }
+
+                // Add agent skills
+                if let Some(skills) = &agent_config.skills
+                {
+                    for skill in skills
+                    {
+                        let source_path = self.config_dir.join(&skill.source);
+                        if source_path.exists()
+                        {
+                            let target_path = self.resolve_placeholder(&skill.target, &workspace, &userprofile);
+                            files_to_copy.push((source_path, target_path));
+                        }
+                    }
+                }
             }
             else
             {
