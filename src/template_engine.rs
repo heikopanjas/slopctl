@@ -25,6 +25,7 @@ pub const TEMPLATE_MARKER: &str = "<!-- VIBE-CHECK-TEMPLATE: This marker indicat
 /// Options for the template update operation
 ///
 /// Aggregates CLI parameters that are passed through the update call chain.
+#[derive(Clone, Copy)]
 pub struct UpdateOptions<'a>
 {
     /// Programming language or framework identifier
@@ -35,6 +36,8 @@ pub struct UpdateOptions<'a>
     pub no_lang: bool,
     /// Custom mission statement to override template default
     pub mission: Option<&'a str>,
+    /// Ad-hoc skill URLs from CLI `--skill` flags
+    pub skills:  &'a [String],
     /// Force overwrite of local modifications without warning
     pub force:   bool,
     /// Preview changes without applying them

@@ -52,6 +52,17 @@ pub struct MainConfig
     pub target: String
 }
 
+/// Agent-agnostic skill definition (top-level in templates.yml)
+///
+/// Skills are directories containing SKILL.md + optional supporting files.
+/// The install target is resolved from `agent_defaults` based on the active agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillDefinition
+{
+    pub name:   String,
+    pub source: String
+}
+
 /// Default version for templates.yml (used when version field is missing)
 ///
 /// Switched to version 2 in v7.0.0 (agents.md standard)
@@ -76,7 +87,9 @@ pub struct TemplateConfig
     #[serde(skip_serializing_if = "Option::is_none")]
     pub principles:  Option<Vec<FileMapping>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mission:     Option<Vec<FileMapping>>
+    pub mission:     Option<Vec<FileMapping>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills:      Option<Vec<SkillDefinition>>
 }
 
 /// Bill of Materials - maps agent names to their target file paths

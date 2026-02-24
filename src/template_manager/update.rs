@@ -3,7 +3,11 @@
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{Result, file_tracker::FileTracker, template_engine};
+use crate::{
+    Result,
+    file_tracker::FileTracker,
+    template_engine::{self, UpdateOptions}
+};
 
 impl TemplateManager
 {
@@ -14,12 +18,7 @@ impl TemplateManager
     ///
     /// # Arguments
     ///
-    /// * `lang` - Programming language or framework identifier. If None (and no_lang false), uses existing installation or first available.
-    /// * `agent` - AI coding agent identifier. Required for v1 templates, optional for v2.
-    /// * `no_lang` - If true, skip language-specific setup (AGENTS.md + agent prompts only)
-    /// * `mission` - Optional custom mission statement to override template default
-    /// * `force` - If true, overwrite local modifications without warning
-    /// * `dry_run` - If true, only show what would happen without making changes
+    /// * `options` - Aggregated CLI parameters for the update operation
     ///
     /// # Errors
     ///
@@ -28,7 +27,7 @@ impl TemplateManager
     /// - Template version is unsupported
     /// - Lang is None, no_lang is false, and no languages are defined in templates
     /// - Template generation fails
-    pub fn update(&self, lang: Option<&str>, agent: Option<&str>, no_lang: bool, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, options: &UpdateOptions) -> Result<()>
     {
         // Check if global templates exist
         if self.has_global_templates() == false
@@ -41,46 +40,47 @@ impl TemplateManager
         let version = config.version;
 
         // Resolve lang (only when not no_lang): use provided value, or existing installation, or first available
-        let lang_resolved: Option<String> = if no_lang == true
+        let lang_resolved: Option<String> = if options.no_lang == true
         {
             None
         }
+        else if options.lang.is_empty() == false
+        {
+            Some(options.lang.to_string())
+        }
         else
         {
-            match lang
+            // Prefer language from existing installation (e.g. switching agent, keep lang)
+            let workspace = std::env::current_dir().ok();
+            let from_tracker = workspace.and_then(|w| FileTracker::new(&self.config_dir).ok().and_then(|t| t.get_installed_language_for_workspace(&w)));
+
+            match from_tracker
             {
-                | Some(l) => Some(l.to_string()),
+                | Some(l) =>
+                {
+                    println!("{} Using existing language: {}", "→".blue(), l.green());
+                    Some(l)
+                }
                 | None =>
                 {
-                    // Prefer language from existing installation (e.g. switching agent, keep lang)
-                    let workspace = std::env::current_dir().ok();
-                    let from_tracker = workspace.and_then(|w| FileTracker::new(&self.config_dir).ok().and_then(|t| t.get_installed_language_for_workspace(&w)));
-
-                    match from_tracker
+                    // Fresh init with only --agent: use first language from templates
+                    let first = config.languages.keys().next().cloned();
+                    match first
                     {
                         | Some(l) =>
                         {
-                            println!("{} Using existing language: {}", "→".blue(), l.green());
+                            println!("{} No existing installation, using language: {}", "→".blue(), l.green());
                             Some(l)
                         }
-                        | None =>
-                        {
-                            // Fresh init with only --agent: use first language from templates
-                            let first = config.languages.keys().next().cloned();
-                            match first
-                            {
-                                | Some(l) =>
-                                {
-                                    println!("{} No existing installation, using language: {}", "→".blue(), l.green());
-                                    Some(l)
-                                }
-                                | None => return Err("No languages defined in templates.yml".into())
-                            }
-                        }
+                        | None => return Err("No languages defined in templates.yml".into())
                     }
                 }
             }
         };
+
+        // Build engine-level options with resolved lang
+        let resolved_lang = lang_resolved.as_deref().unwrap_or("");
+        let engine_options = UpdateOptions { lang: resolved_lang, ..*options };
 
         match version
         {
@@ -93,19 +93,21 @@ impl TemplateManager
                 println!();
 
                 // V1 requires agent parameter
-                let agent_str = agent.ok_or("--agent is required for v1 templates. Specify: vibe-check init --lang <lang> --agent <agent>")?;
+                if options.agent.is_none() == true
+                {
+                    return Err("--agent is required for v1 templates. Specify: vibe-check install --lang <lang> --agent <agent>".into());
+                }
                 let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
-                let lang_for_engine = lang_resolved.as_deref().unwrap_or("");
-                engine.update(lang_for_engine, agent_str, no_lang, mission, force, dry_run)
+                engine.update(&engine_options)
             }
             | 2 =>
             {
                 // V2: Single AGENTS.md for all agents, but agent-specific prompts can be copied
-                if no_lang == true
+                if options.no_lang == true
                 {
                     println!("{} V2 templates: Language-independent setup (no coding-conventions)", "→".blue());
                 }
-                else if agent.is_some()
+                else if options.agent.is_some()
                 {
                     println!("{} V2 templates: Using single AGENTS.md + copying agent-specific prompts", "→".blue());
                 }
@@ -114,8 +116,7 @@ impl TemplateManager
                     println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
                 let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
-                let lang_for_engine = lang_resolved.as_deref().unwrap_or("");
-                engine.update(lang_for_engine, agent, no_lang, mission, force, dry_run)
+                engine.update(&engine_options)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }

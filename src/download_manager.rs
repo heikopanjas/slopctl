@@ -5,12 +5,12 @@
 use std::{
     fs,
     io::{self, Write},
-    path::{Path, PathBuf}
+    path::PathBuf
 };
 
 use owo_colors::OwoColorize;
 
-use crate::{Result, bom::TemplateConfig};
+use crate::{Result, bom::TemplateConfig, github};
 
 /// Manages downloading templates from remote sources
 ///
@@ -46,15 +46,15 @@ impl DownloadManager
     /// Returns an error if URL parsing or download fails
     pub fn download_templates_from_url(&self, url: &str) -> Result<()>
     {
-        let (owner, repo, branch, path) = self.parse_github_url(url).ok_or("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path")?;
+        let parsed = github::parse_github_url(url).ok_or("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path")?;
 
-        println!("{} Repository: {}/{} (branch: {})", "→".blue(), owner.green(), repo.green(), branch.yellow());
+        println!("{} Repository: {}/{} (branch: {})", "→".blue(), parsed.owner.green(), parsed.repo.green(), parsed.branch.yellow());
 
         // Build base raw URL
-        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", owner, repo, branch);
-        let url_path = if path.is_empty() == false
+        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", parsed.owner, parsed.repo, parsed.branch);
+        let url_path = if parsed.path.is_empty() == false
         {
-            format!("/{}", path)
+            format!("/{}", parsed.path)
         }
         else
         {
@@ -74,7 +74,7 @@ impl DownloadManager
             print!("{} Downloading {}... ", "→".blue(), source.yellow());
             io::stdout().flush()?;
 
-            match self.download_file(&file_url, &dest_path)
+            match github::download_file(&file_url, &dest_path)
             {
                 | Ok(_) => println!("{}", "✓".green()),
                 | Err(_) => println!("{} (skipped)", "✗".red())
@@ -183,7 +183,7 @@ impl DownloadManager
         print!("{} Downloading templates.yml... ", "→".blue());
         io::stdout().flush()?;
 
-        match self.download_file(&config_url, &config_path)
+        match github::download_file(&config_url, &config_path)
         {
             | Ok(_) => println!("{}", "✓".green()),
             | Err(e) =>
@@ -196,90 +196,5 @@ impl DownloadManager
         let content = fs::read_to_string(&config_path)?;
         let config: TemplateConfig = serde_yaml::from_str(&content)?;
         Ok(config)
-    }
-
-    /// Converts a GitHub tree URL to raw content URLs
-    ///
-    /// Converts URLs like:
-    /// `https://github.com/owner/repo/tree/branch/path`
-    /// to:
-    /// `https://raw.githubusercontent.com/owner/repo/branch/path`
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - GitHub tree URL
-    ///
-    /// # Returns
-    ///
-    /// Returns base raw URL and path components, or None if URL is not a GitHub tree URL
-    fn parse_github_url(&self, url: &str) -> Option<(String, String, String, String)>
-    {
-        // Parse URLs like: https://github.com/owner/repo/tree/branch/path
-        if url.contains("github.com") == false
-        {
-            return None;
-        }
-
-        let parts: Vec<&str> = url.split('/').collect();
-
-        // Find the indices for owner, repo, tree, branch
-        let github_idx = parts.iter().position(|&p| p == "github.com")?;
-
-        if parts.len() < github_idx + 5
-        {
-            return None;
-        }
-
-        let owner = parts[github_idx + 1];
-        let repo = parts[github_idx + 2];
-        let tree_or_blob = parts[github_idx + 3];
-
-        if tree_or_blob != "tree" && tree_or_blob != "blob"
-        {
-            return None;
-        }
-
-        let branch = parts[github_idx + 4];
-        let path = if parts.len() > github_idx + 5
-        {
-            parts[github_idx + 5..].join("/")
-        }
-        else
-        {
-            String::new()
-        };
-
-        Some((owner.to_string(), repo.to_string(), branch.to_string(), path))
-    }
-
-    /// Downloads a file from a URL
-    ///
-    /// # Arguments
-    ///
-    /// * `url` - URL to download from
-    /// * `dest_path` - Destination file path
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if download or file write fails
-    fn download_file(&self, url: &str, dest_path: &Path) -> Result<()>
-    {
-        let response = reqwest::blocking::get(url)?;
-
-        if response.status().is_success() == false
-        {
-            return Err(format!("Failed to download {}: HTTP {}", url, response.status()).into());
-        }
-
-        let content = response.bytes()?;
-
-        if let Some(parent) = dest_path.parent()
-        {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(dest_path, content)?;
-
-        Ok(())
     }
 }

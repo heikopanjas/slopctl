@@ -9,13 +9,17 @@
 //! - Follows https://agents.md community standard
 //! - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::{self, Write},
+    path::{Path, PathBuf}
+};
 
 use owo_colors::OwoColorize;
 
 use crate::{
-    Result,
+    Result, agent_defaults,
     file_tracker::FileTracker,
+    github,
     template_engine::{self, CopyFilesResult, TemplateContext, TemplateEngine, UpdateOptions}
 };
 
@@ -48,24 +52,57 @@ impl<'a> TemplateEngineV2<'a>
         Self { config_dir }
     }
 
+    /// Resolves a source string to a local file path
+    ///
+    /// If the source is a URL, downloads it to the temp directory and returns
+    /// the temp path. Otherwise, joins it with config_dir for local lookup.
+    fn resolve_source_to_path(&self, source: &str, temp_dir: &Path) -> Result<PathBuf>
+    {
+        if github::is_url(source) == true
+        {
+            let parsed = github::parse_github_url(source).ok_or_else(|| format!("Invalid GitHub URL: {}", source))?;
+
+            let filename = source.rsplit('/').next().unwrap_or("downloaded");
+            let temp_path = temp_dir.join(filename);
+
+            print!("{} Downloading {}... ", "→".blue(), filename.yellow());
+            io::stdout().flush()?;
+
+            match github::download_github_file(&parsed, &temp_path)
+            {
+                | Ok(_) =>
+                {
+                    println!("{}", "✓".green());
+                }
+                | Err(e) =>
+                {
+                    println!("{}", "✗".red());
+                    return Err(e);
+                }
+            }
+
+            Ok(temp_path)
+        }
+        else
+        {
+            Ok(self.config_dir.join(source))
+        }
+    }
+
     /// Updates local templates from global storage (V2 - agent parameter optional)
     ///
     /// This method:
     /// 1. Verifies global templates exist
     /// 2. Detects local modifications to AGENTS.md
     /// 3. Copies templates to current directory
+    /// 4. Installs skills from templates.yml and CLI args
     ///
     /// V2 Philosophy: Single AGENTS.md works for all agents. Agent-specific
     /// instruction files (e.g. CLAUDE.md) and prompts are copied if agent is specified.
     ///
     /// # Arguments
     ///
-    /// * `lang` - Programming language or framework identifier (ignored when no_lang)
-    /// * `agent` - Optional agent identifier for copying agent-specific files
-    /// * `no_lang` - If true, skip language-specific fragments
-    /// * `mission` - Optional custom mission statement to override template default
-    /// * `force` - If true, overwrite local modifications without warning
-    /// * `dry_run` - If true, only show what would happen without making changes
+    /// * `options` - Aggregated CLI parameters for the update operation
     ///
     /// # Errors
     ///
@@ -73,7 +110,7 @@ impl<'a> TemplateEngineV2<'a>
     /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Copy operations fail
-    pub fn update(&self, lang: &str, agent: Option<&str>, no_lang: bool, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, options: &UpdateOptions) -> Result<()>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
@@ -93,9 +130,12 @@ impl<'a> TemplateEngineV2<'a>
         // Initialize file tracker
         let mut file_tracker = FileTracker::new(self.config_dir)?;
 
+        // Temp directory for GitHub downloads (lives for duration of this method)
+        let temp_dir = tempfile::TempDir::new()?;
+
         // Resolve main template (required)
         let main_config = config.main.as_ref().ok_or("Missing 'main' section in templates.yml")?;
-        let main_source = self.config_dir.join(&main_config.source);
+        let main_source = self.resolve_source_to_path(&main_config.source, temp_dir.path())?;
         if main_source.exists() == false
         {
             return Err(format!("Main template not found: {}", main_source.display()).into());
@@ -106,9 +146,27 @@ impl<'a> TemplateEngineV2<'a>
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut fragments: Vec<(PathBuf, String)> = Vec::new();
 
-        // Helper closure to process file entries
+        // Helper closure to process file entries (supports both local and URL sources)
+        let temp_path = temp_dir.path();
+        let mut process_errors: Vec<String> = Vec::new();
         let mut process_entry = |source: &str, target: &str, category: &str| {
-            let source_path = self.config_dir.join(source);
+            let source_path = if github::is_url(source) == true
+            {
+                match self.resolve_source_to_path(source, temp_path)
+                {
+                    | Ok(p) => p,
+                    | Err(e) =>
+                    {
+                        process_errors.push(format!("Failed to download {}: {}", source, e));
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                self.config_dir.join(source)
+            };
+
             if source_path.exists() == false
             {
                 return;
@@ -135,7 +193,7 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         // Add mission templates (fragments) if present, unless custom mission is provided
-        if mission.is_none() == true &&
+        if options.mission.is_none() == true &&
             let Some(mission_entries) = &config.mission
         {
             for entry in mission_entries
@@ -145,9 +203,9 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         // Add language-specific templates (fragments) unless --no-lang
-        if no_lang == false
+        if options.no_lang == false
         {
-            if let Some(lang_config) = config.languages.get(lang)
+            if let Some(lang_config) = config.languages.get(options.lang)
             {
                 for file_entry in &lang_config.files
                 {
@@ -156,7 +214,7 @@ impl<'a> TemplateEngineV2<'a>
             }
             else
             {
-                return Err(format!("Language '{}' not found in templates.yml", lang).into());
+                return Err(format!("Language '{}' not found in templates.yml", options.lang).into());
             }
         }
 
@@ -173,48 +231,29 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         // Process agent-specific instruction and prompt files if agent is specified
-        if let Some(agent_name) = agent &&
+        if let Some(agent_name) = options.agent &&
             let Some(agents) = config.agents.as_ref()
         {
             if let Some(agent_config) = agents.get(agent_name)
             {
-                // Add agent instruction files (e.g. CLAUDE.md referencing AGENTS.md)
-                if let Some(instructions) = &agent_config.instructions
+                let all_mappings = [&agent_config.instructions, &agent_config.prompts, &agent_config.skills];
+                for entries in all_mappings.iter().copied().flatten()
                 {
-                    for instruction in instructions
+                    for entry in entries
                     {
-                        let source_path = self.config_dir.join(&instruction.source);
-                        if source_path.exists()
+                        let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
                         {
-                            let target_path = self.resolve_placeholder(&instruction.target, &workspace, &userprofile);
-                            files_to_copy.push((source_path, target_path));
-                        }
-                    }
-                }
+                            | Ok(p) => p,
+                            | Err(e) =>
+                            {
+                                println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
+                                continue;
+                            }
+                        };
 
-                // Add agent prompts
-                if let Some(prompts) = &agent_config.prompts
-                {
-                    for prompt in prompts
-                    {
-                        let source_path = self.config_dir.join(&prompt.source);
                         if source_path.exists()
                         {
-                            let target_path = self.resolve_placeholder(&prompt.target, &workspace, &userprofile);
-                            files_to_copy.push((source_path, target_path));
-                        }
-                    }
-                }
-
-                // Add agent skills
-                if let Some(skills) = &agent_config.skills
-                {
-                    for skill in skills
-                    {
-                        let source_path = self.config_dir.join(&skill.source);
-                        if source_path.exists()
-                        {
-                            let target_path = self.resolve_placeholder(&skill.target, &workspace, &userprofile);
+                            let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
                             files_to_copy.push((source_path, target_path));
                         }
                     }
@@ -226,9 +265,50 @@ impl<'a> TemplateEngineV2<'a>
             }
         }
 
-        // Build template context and update options
+        // Report non-fatal download errors from process_entry
+        for err in &process_errors
+        {
+            println!("{} {}", "!".yellow(), err.yellow());
+        }
+
+        // Resolve agent for skill installation (explicit or auto-detected)
+        let skill_agent = options.agent.map(|a| a.to_string()).or_else(|| agent_defaults::detect_installed_agent(&workspace));
+
+        // Install top-level skills from templates.yml
+        if let Some(ref agent_name) = skill_agent &&
+            let Some(template_skills) = &config.skills &&
+            template_skills.is_empty() == false
+        {
+            self.install_skills(
+                template_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
+                agent_name,
+                &workspace,
+                &userprofile,
+                temp_path,
+                &mut files_to_copy
+            )?;
+        }
+
+        // Install ad-hoc skills from --skill CLI args
+        if options.skills.is_empty() == false
+        {
+            let resolved_agent = skill_agent.as_deref().ok_or("Cannot install skills: no --agent specified and no agent detected in workspace")?;
+
+            let adhoc_skills: Vec<(String, String)> = options
+                .skills
+                .iter()
+                .map(|s| {
+                    let url = github::expand_shorthand(s);
+                    let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
+                    (name, url)
+                })
+                .collect();
+
+            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), resolved_agent, &workspace, &userprofile, temp_path, &mut files_to_copy)?;
+        }
+
+        // Build template context
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
-        let options = UpdateOptions { lang, agent, no_lang, mission, force, dry_run };
 
         // Check if main AGENTS.md has been customized (marker removed)
         let skip_agents_md = ctx.target.exists() && template_engine::is_file_customized(&ctx.target)?;
@@ -246,15 +326,15 @@ impl<'a> TemplateEngineV2<'a>
         // Dry run mode: just show what would happen
         if options.dry_run == true
         {
-            self.show_dry_run_files(&ctx, skip_agents_md, &options, &files_to_copy);
+            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy);
             return Ok(());
         }
 
         // Handle main AGENTS.md with fragment merging
-        self.handle_main_template(&ctx, &options, skip_agents_md, &mut file_tracker)?;
+        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker)?;
 
         // Copy templates with file modification checking
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, &options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, options)?;
 
         match copy_result
         {
@@ -272,7 +352,7 @@ impl<'a> TemplateEngineV2<'a>
         file_tracker.save()?;
 
         println!("{} Templates updated successfully", "✓".green());
-        if agent.is_some()
+        if options.agent.is_some()
         {
             println!("{} V2 templates: Single AGENTS.md + agent-specific files", "→".blue());
         }
@@ -282,5 +362,112 @@ impl<'a> TemplateEngineV2<'a>
         }
 
         Ok(())
+    }
+
+    /// Install skills into the agent's skill directory
+    ///
+    /// For each skill, resolves the source (local or GitHub) and adds file entries
+    /// to the files_to_copy list. GitHub directory skills are downloaded via the
+    /// Contents API; local skills are copied from the global template cache.
+    fn install_skills<'b, I>(
+        &self, skills: I, agent_name: &str, workspace: &Path, userprofile: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>
+    ) -> Result<()>
+    where I: Iterator<Item = (&'b str, &'b str)>
+    {
+        let skill_dir_template = agent_defaults::get_skill_dir(agent_name).ok_or_else(|| format!("Unknown agent '{}': no skill directory defined", agent_name))?;
+
+        for (skill_name, source) in skills
+        {
+            let target_base = self.resolve_placeholder(skill_dir_template, workspace, userprofile).join(skill_name);
+
+            if github::is_url(source) == true
+            {
+                let parsed = github::parse_github_url(source).ok_or_else(|| format!("Invalid GitHub URL for skill '{}': {}", skill_name, source))?;
+
+                println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill_name.green());
+
+                match github::list_directory_contents(&parsed)
+                {
+                    | Ok(entries) =>
+                    {
+                        for entry in &entries
+                        {
+                            if entry.entry_type != "file"
+                            {
+                                continue;
+                            }
+                            if let Some(ref dl_url) = entry.download_url
+                            {
+                                let temp_path = temp_dir.join(format!("skill_{}_{}", skill_name, entry.name));
+
+                                print!("  {} Downloading {}... ", "→".blue(), entry.name.yellow());
+                                io::stdout().flush()?;
+
+                                match github::download_file(dl_url, &temp_path)
+                                {
+                                    | Ok(_) =>
+                                    {
+                                        println!("{}", "✓".green());
+                                        files_to_copy.push((temp_path, target_base.join(&entry.name)));
+                                    }
+                                    | Err(e) =>
+                                    {
+                                        println!("{} ({})", "✗".red(), e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    | Err(e) =>
+                    {
+                        println!("{} Failed to list skill directory '{}': {}", "!".yellow(), skill_name, e);
+                    }
+                }
+            }
+            else
+            {
+                // Local skill directory
+                let source_dir = self.config_dir.join(source);
+                if source_dir.is_dir() == true
+                {
+                    println!("{} Installing skill '{}' from local templates...", "→".blue(), skill_name.green());
+
+                    if let Ok(entries) = std::fs::read_dir(&source_dir)
+                    {
+                        for entry in entries.flatten()
+                        {
+                            let path = entry.path();
+                            if path.is_file() == true &&
+                                let Some(filename) = path.file_name()
+                            {
+                                files_to_copy.push((path.clone(), target_base.join(filename)));
+                            }
+                        }
+                    }
+                }
+                else if source_dir.is_file() == true
+                {
+                    // Single file skill
+                    let filename = source_dir.file_name().map(|f| f.to_os_string());
+                    if let Some(fname) = filename
+                    {
+                        files_to_copy.push((source_dir, target_base.join(fname)));
+                    }
+                }
+                else
+                {
+                    println!("{} Skill source not found: {}", "!".yellow(), source.yellow());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Extract a skill name from a GitHub URL or expanded shorthand
+    fn skill_name_from_url(url: &str) -> Option<String>
+    {
+        let trimmed = url.trim_end_matches('/');
+        trimmed.rsplit('/').next().map(|s| s.to_string()).filter(|s| s.is_empty() == false)
     }
 }

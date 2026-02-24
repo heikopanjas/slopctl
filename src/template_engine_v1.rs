@@ -51,12 +51,7 @@ impl<'a> TemplateEngineV1<'a>
     ///
     /// # Arguments
     ///
-    /// * `lang` - Programming language or framework identifier (ignored when no_lang)
-    /// * `agent` - AI coding agent identifier
-    /// * `no_lang` - If true, skip language-specific fragments
-    /// * `mission` - Optional custom mission statement to override template default
-    /// * `force` - If true, overwrite local modifications without warning
-    /// * `dry_run` - If true, only show what would happen without making changes
+    /// * `options` - Aggregated CLI parameters for the update operation
     ///
     /// # Errors
     ///
@@ -64,14 +59,14 @@ impl<'a> TemplateEngineV1<'a>
     /// - Global templates don't exist
     /// - Local modifications detected and force is false
     /// - Copy operations fail
-    pub fn update(&self, lang: &str, agent: &str, no_lang: bool, mission: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    pub fn update(&self, options: &UpdateOptions) -> Result<()>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
         // Check if global templates exist
         if self.config_dir.exists() == false || templates_yml_path.exists() == false
         {
-            return Err("Global templates not found. Please run 'vibe-check init' first to download templates.".into());
+            return Err("Global templates not found. Please run 'vibe-check install' first to download templates.".into());
         }
 
         // Load template configuration
@@ -126,7 +121,7 @@ impl<'a> TemplateEngineV1<'a>
         }
 
         // Add mission templates (fragments) if present, unless custom mission is provided
-        if mission.is_none() == true &&
+        if options.mission.is_none() == true &&
             let Some(mission_entries) = &config.mission
         {
             for entry in mission_entries
@@ -136,8 +131,8 @@ impl<'a> TemplateEngineV1<'a>
         }
 
         // Add language-specific templates (fragments) unless --no-lang
-        if no_lang == false &&
-            let Some(lang_config) = config.languages.get(lang)
+        if options.no_lang == false &&
+            let Some(lang_config) = config.languages.get(options.lang)
         {
             for file_entry in &lang_config.files
             {
@@ -160,7 +155,8 @@ impl<'a> TemplateEngineV1<'a>
         // V1: Add agent-specific templates (agents section required)
         if let Some(agents) = &config.agents
         {
-            if let Some(agent_config) = agents.get(agent)
+            let agent_name = options.agent.ok_or("V1 templates require --agent")?;
+            if let Some(agent_config) = agents.get(agent_name)
             {
                 // Add instructions files if present
                 if let Some(instructions) = &agent_config.instructions
@@ -192,7 +188,7 @@ impl<'a> TemplateEngineV1<'a>
             }
             else
             {
-                return Err(format!("Agent '{}' not found in templates.yml", agent).into());
+                return Err(format!("Agent '{}' not found in templates.yml", agent_name).into());
             }
         }
         else
@@ -200,9 +196,8 @@ impl<'a> TemplateEngineV1<'a>
             return Err("V1 templates require agents section in templates.yml".into());
         }
 
-        // Build template context and update options
+        // Build template context
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
-        let options = UpdateOptions { lang, agent: Some(agent), no_lang, mission, force, dry_run };
 
         // Check if main AGENTS.md has been customized (marker removed)
         let skip_agents_md = ctx.target.exists() && template_engine::is_file_customized(&ctx.target)?;
@@ -220,15 +215,15 @@ impl<'a> TemplateEngineV1<'a>
         // Dry run mode: just show what would happen
         if options.dry_run == true
         {
-            self.show_dry_run_files(&ctx, skip_agents_md, &options, &files_to_copy);
+            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy);
             return Ok(());
         }
 
         // Handle main AGENTS.md with fragment merging
-        self.handle_main_template(&ctx, &options, skip_agents_md, &mut file_tracker)?;
+        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker)?;
 
         // Copy templates with file modification checking
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, &options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, options)?;
 
         match copy_result
         {

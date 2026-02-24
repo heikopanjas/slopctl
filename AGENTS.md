@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-17T3
+**Last updated:** 2026-02-24
 
 <!-- {mission} -->
 
@@ -697,6 +697,22 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-24 (v8.0.0)
+
+- MAJOR version bump: 7.0.0 to 8.0.0 (breaking CLI change)
+- Renamed `init` command to `install` for clearer semantics
+- Added `--skill` repeatable CLI flag for ad-hoc GitHub skill installation
+- Supports `user/repo` shorthand and full GitHub URLs
+- Added GitHub URL support in templates.yml `source` fields (full URLs only, no shorthand)
+- New `src/agent_defaults.rs`: single source of truth for agent paths (instructions, prompts, skills)
+- New `src/github.rs`: GitHub API integration (Contents API, URL parsing, shorthand expansion)
+- New top-level `skills` section in templates.yml for agent-agnostic skills
+- Added `SkillDefinition` struct to `bom.rs` and `skills` field to `TemplateConfig`
+- Skills downloaded on-the-fly during `install` (no local cache)
+- Automatic agent detection via `detect_installed_agent()` when `--agent` not specified
+- Moved `tempfile` from dev-dependencies to runtime dependency
+- Updated all user-facing messages from `init` to `install`
 
 ### 2026-02-17 (evening, v7.0.0)
 

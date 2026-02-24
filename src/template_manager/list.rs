@@ -103,8 +103,28 @@ impl TemplateManager
             println!("  • {}", lang_name);
         }
 
+        // List top-level skills (agent-agnostic)
+        if let Some(template_skills) = &config.skills &&
+            template_skills.is_empty() == false
+        {
+            println!();
+            println!("{}", "Available Skills:".bold());
+            for skill in template_skills
+            {
+                let source_info = if crate::github::is_url(&skill.source) == true
+                {
+                    "(GitHub)"
+                }
+                else
+                {
+                    "(local)"
+                };
+                println!("  • {} {}", skill.name, source_info.dimmed());
+            }
+        }
+
         println!();
-        println!("{} Use 'vibe-check init --lang <lang> --agent <agent>' to install", "→".blue());
+        println!("{} Use 'vibe-check install --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
     }

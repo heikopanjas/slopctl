@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use vibe_check::{Config, Result, TemplateManager};
+use vibe_check::{Config, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -42,8 +42,8 @@ struct Cli
 #[derive(Subcommand)]
 enum Commands
 {
-    /// Initialize agent instructions for a project
-    Init
+    /// Install agent instructions and skills for a project
+    Install
     {
         /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(long)]
@@ -60,6 +60,10 @@ enum Commands
         /// Custom mission statement (use @filename to read from file)
         #[arg(long)]
         mission: Option<String>,
+
+        /// Install skill(s) from GitHub (repeatable, supports user/repo shorthand)
+        #[arg(long)]
+        skill: Vec<String>,
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
@@ -335,7 +339,7 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, no_lang, mission, force, dry_run } =>
+        | Commands::Install { lang, agent, no_lang, mission, skill, force, dry_run } =>
         {
             // --lang and --no-lang are mutually exclusive
             if lang.is_some() == true && no_lang == true
@@ -344,14 +348,14 @@ fn main()
                 std::process::exit(1);
             }
 
-            // Must specify at least one of --lang, --agent, or --no-lang
-            if lang.is_none() == true && agent.is_none() == true && no_lang == false
+            // Must specify at least one of --lang, --agent, --no-lang, or --skill
+            if lang.is_none() == true && agent.is_none() == true && no_lang == false && skill.is_empty() == true
             {
-                eprintln!("{} Must specify at least one of --lang, --agent, or --no-lang", "✗".red());
-                eprintln!("{} Examples: vibe-check init --lang rust", "→".blue());
-                eprintln!("{}          vibe-check init --agent cursor", "→".blue());
-                eprintln!("{}          vibe-check init --no-lang", "→".blue());
-                eprintln!("{}          vibe-check init --no-lang --agent cursor", "→".blue());
+                eprintln!("{} Must specify at least one of --lang, --agent, --no-lang, or --skill", "✗".red());
+                eprintln!("{} Examples: vibe-check install --lang rust", "→".blue());
+                eprintln!("{}          vibe-check install --agent cursor", "→".blue());
+                eprintln!("{}          vibe-check install --no-lang", "→".blue());
+                eprintln!("{}          vibe-check install --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
@@ -419,35 +423,52 @@ fn main()
                 {
                     println!("{} Dry run: previewing changes for {}", "→".blue(), l.green());
                 }
+                else if let Some(a) = agent.as_ref()
+                {
+                    println!("{} Dry run: previewing changes for {}", "→".blue(), a.green());
+                }
                 else
                 {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), agent.as_ref().unwrap().green());
+                    println!("{} Dry run: previewing skill installation", "→".blue());
                 }
             }
             else if no_lang == true
             {
                 if let Some(a) = agent.as_ref()
                 {
-                    println!("{} Initializing language-independent setup with {}", "→".blue(), a.green());
+                    println!("{} Installing language-independent setup with {}", "→".blue(), a.green());
                 }
                 else
                 {
-                    println!("{} Initializing language-independent setup", "→".blue());
+                    println!("{} Installing language-independent setup", "→".blue());
                 }
             }
             else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
             {
-                println!("{} Initializing project for {} with {}", "→".blue(), l.green(), a.green());
+                println!("{} Installing project setup for {} with {}", "→".blue(), l.green(), a.green());
             }
             else if let Some(l) = lang.as_ref()
             {
-                println!("{} Initializing project for {}", "→".blue(), l.green());
+                println!("{} Installing project setup for {}", "→".blue(), l.green());
+            }
+            else if let Some(a) = agent.as_ref()
+            {
+                println!("{} Installing project setup for {}", "→".blue(), a.green());
             }
             else
             {
-                println!("{} Initializing project for {}", "→".blue(), agent.as_ref().unwrap().green());
+                println!("{} Installing skills", "→".blue());
             }
-            manager.update(lang.as_deref(), agent.as_deref(), no_lang, resolved_mission.as_deref(), force, dry_run)
+            let options = UpdateOptions {
+                lang: lang.as_deref().unwrap_or(""),
+                agent: agent.as_deref(),
+                no_lang,
+                mission: resolved_mission.as_deref(),
+                skills: &skill,
+                force,
+                dry_run
+            };
+            manager.update(&options)
         }
         | Commands::Update { from, dry_run } =>
         {

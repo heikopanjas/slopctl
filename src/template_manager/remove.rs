@@ -42,7 +42,7 @@ impl TemplateManager
         let config_file = self.config_dir.join("templates.yml");
         if config_file.exists() == false
         {
-            return Err("Global templates not found. Run 'vibe-check init' first to set up templates.".to_string().into());
+            return Err("Global templates not found. Run 'vibe-check install' first to set up templates.".to_string().into());
         }
 
         println!("{} Building Bill of Materials from templates.yml", "→".blue());

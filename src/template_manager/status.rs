@@ -152,7 +152,7 @@ impl TemplateManager
         {
             println!("{}", "Managed Files:".bold());
             println!("  {} No vibe-check files found in current directory", "○".yellow());
-            println!("  {} Run 'vibe-check init --lang <lang> --agent <agent>' to set up", "→".blue());
+            println!("  {} Run 'vibe-check install --lang <lang> --agent <agent>' to set up", "→".blue());
         }
 
         Ok(())

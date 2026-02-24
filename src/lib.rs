@@ -3,10 +3,12 @@
 //! This library provides functionality to manage, organize, and maintain
 //! initialization prompts and instruction files for AI coding assistants.
 
+pub mod agent_defaults;
 mod bom;
 mod config;
 mod download_manager;
 mod file_tracker;
+pub mod github;
 mod template_engine;
 mod template_engine_v1;
 mod template_engine_v2;
