@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    error::Error,
     fs,
     io::Read,
     path::{Path, PathBuf}
@@ -68,7 +67,7 @@ impl FileTracker
     }
 
     /// Create a new FileTracker and load existing metadata
-    pub fn new(data_dir: &Path) -> Result<Self, Box<dyn Error>>
+    pub fn new(data_dir: &Path) -> anyhow::Result<Self>
     {
         let metadata_path = data_dir.join("installed_files.json");
         let metadata = if metadata_path.exists() == true
@@ -85,7 +84,7 @@ impl FileTracker
     }
 
     /// Calculate SHA-256 checksum of a file
-    pub fn calculate_sha256(file_path: &Path) -> Result<String, Box<dyn Error>>
+    pub fn calculate_sha256(file_path: &Path) -> anyhow::Result<String>
     {
         let mut file = fs::File::open(file_path)?;
         let mut hasher = Sha256::new();
@@ -115,7 +114,7 @@ impl FileTracker
     }
 
     /// Check the modification status of a file
-    pub fn check_modification(&self, file_path: &Path) -> Result<FileStatus, Box<dyn Error>>
+    pub fn check_modification(&self, file_path: &Path) -> anyhow::Result<FileStatus>
     {
         let absolute_path = Self::resolve_absolute_path(file_path);
 
@@ -145,7 +144,7 @@ impl FileTracker
     }
 
     /// Check if new template is different from original
-    pub fn is_template_updated(&self, file_path: &Path, new_template_sha: &str) -> Result<bool, Box<dyn Error>>
+    pub fn is_template_updated(&self, file_path: &Path, new_template_sha: &str) -> anyhow::Result<bool>
     {
         let absolute_path = Self::resolve_absolute_path(file_path);
 
@@ -196,7 +195,7 @@ impl FileTracker
     }
 
     /// Save metadata to disk
-    pub fn save(&self) -> Result<(), Box<dyn Error>>
+    pub fn save(&self) -> anyhow::Result<()>
     {
         // Ensure parent directory exists
         if let Some(parent) = self.metadata_path.parent()
@@ -218,7 +217,7 @@ mod tests
     use super::*;
 
     #[test]
-    fn test_calculate_sha256() -> Result<(), Box<dyn Error>>
+    fn test_calculate_sha256() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
         let test_file = temp_dir.path().join("test.txt");
@@ -232,7 +231,7 @@ mod tests
     }
 
     #[test]
-    fn test_file_tracking() -> Result<(), Box<dyn Error>>
+    fn test_file_tracking() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
         let data_dir = temp_dir.path().join("data");
@@ -266,7 +265,7 @@ mod tests
     }
 
     #[test]
-    fn test_get_installed_language_for_workspace() -> Result<(), Box<dyn Error>>
+    fn test_get_installed_language_for_workspace() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
         let data_dir = temp_dir.path().join("data");
@@ -274,7 +273,7 @@ mod tests
 
         let mut tracker = FileTracker::new(&data_dir)?;
         let project_file = temp_dir.path().join("project/AGENTS.md");
-        fs::create_dir_all(project_file.parent().ok_or("expected parent directory")?)?;
+        fs::create_dir_all(project_file.parent().ok_or_else(|| anyhow::anyhow!("expected parent directory"))?)?;
         fs::write(&project_file, b"test")?;
 
         tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string());
@@ -291,7 +290,7 @@ mod tests
     }
 
     #[test]
-    fn test_save_and_load() -> Result<(), Box<dyn Error>>
+    fn test_save_and_load() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
         let data_dir = temp_dir.path().join("data");

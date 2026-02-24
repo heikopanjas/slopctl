@@ -225,7 +225,7 @@ fn resolve_mission_content(value: &str) -> Result<String>
     if let Some(file_path) = value.strip_prefix('@')
     {
         // Read content from file
-        fs::read_to_string(file_path).map_err(|e| format!("Failed to read mission file '{}': {}", file_path, e).into())
+        fs::read_to_string(file_path).map_err(|e| anyhow::anyhow!("Failed to read mission file '{}': {}", file_path, e))
     }
     else
     {
@@ -296,7 +296,7 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         }
         | (None, Some(_)) =>
         {
-            return Err("Must specify a key when setting a value".into());
+            return Err(anyhow::anyhow!("Must specify a key when setting a value"));
         }
         | (None, None) =>
         {
@@ -442,11 +442,11 @@ fn main()
             // Validate mutually exclusive options
             if all == true && agent.is_some() == true
             {
-                Err("Cannot specify both --agent and --all options".to_string().into())
+                Err(anyhow::anyhow!("Cannot specify both --agent and --all options"))
             }
             else if all == false && agent.is_none() == true
             {
-                Err("Must specify either --agent <name> or --all".to_string().into())
+                Err(anyhow::anyhow!("Must specify either --agent <name> or --all"))
             }
             else
             {

@@ -130,11 +130,9 @@ pub fn resolve_language_files(lang: &str, config: &TemplateConfig) -> Result<Vec
         if entry.target.starts_with("$instructions") == false &&
             let Some(previous_source) = seen_targets.insert(&entry.target, &entry.source)
         {
-            return Err(format!(
-                "Duplicate target '{}' in language '{}': '{}' and '{}' both write to the same file",
-                entry.target, lang, previous_source, entry.source
-            )
-            .into());
+            return Err(anyhow::anyhow!(
+                "Duplicate target '{}' in language '{}': '{}' and '{}' both write to the same file", entry.target, lang, previous_source, entry.source
+            ));
         }
     }
 
@@ -144,13 +142,10 @@ pub fn resolve_language_files(lang: &str, config: &TemplateConfig) -> Result<Vec
 /// Recursive helper for `resolve_language_files` with cycle detection
 fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &mut HashSet<String>) -> Result<Vec<FileMapping>>
 {
-    if visited.contains(lang) == true
-    {
-        return Err(format!("Circular include detected: '{}'", lang).into());
-    }
+    require!(visited.contains(lang) == false, Err(anyhow::anyhow!("Circular include detected: '{}'", lang)));
     visited.insert(lang.to_string());
 
-    let lang_config = config.languages.get(lang).ok_or_else(|| format!("Language '{}' not found in templates.yml", lang))?;
+    let lang_config = config.languages.get(lang).ok_or_else(|| anyhow::anyhow!("Language '{}' not found in templates.yml", lang))?;
 
     let mut files = Vec::new();
 
@@ -167,7 +162,7 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
         }
         else
         {
-            return Err(format!("Include '{}' (referenced by '{}') not found in shared or languages", include_name, lang).into());
+            return Err(anyhow::anyhow!("Include '{}' (referenced by '{}') not found in shared or languages", include_name, lang));
         }
     }
 
@@ -319,8 +314,6 @@ impl BillOfMaterials
 #[cfg(test)]
 mod tests
 {
-    use std::{error::Error, result::Result};
-
     use super::*;
 
     fn make_mapping(source: &str, target: &str) -> FileMapping
@@ -354,7 +347,7 @@ mod tests
     // -- TemplateConfig serde --
 
     #[test]
-    fn test_template_config_version_defaults_to_3() -> Result<(), Box<dyn Error>>
+    fn test_template_config_version_defaults_to_3() -> anyhow::Result<()>
     {
         let yaml = "languages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
@@ -363,7 +356,7 @@ mod tests
     }
 
     #[test]
-    fn test_template_config_explicit_version() -> Result<(), Box<dyn Error>>
+    fn test_template_config_explicit_version() -> anyhow::Result<()>
     {
         let yaml = "version: 2\nlanguages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
@@ -372,7 +365,7 @@ mod tests
     }
 
     #[test]
-    fn test_template_config_optional_fields_absent() -> Result<(), Box<dyn Error>>
+    fn test_template_config_optional_fields_absent() -> anyhow::Result<()>
     {
         let yaml = "languages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
@@ -389,7 +382,7 @@ mod tests
     // -- LanguageConfig serde --
 
     #[test]
-    fn test_language_config_files_defaults_empty() -> Result<(), Box<dyn Error>>
+    fn test_language_config_files_defaults_empty() -> anyhow::Result<()>
     {
         let yaml = "includes: [foo]";
         let config: LanguageConfig = serde_yaml::from_str(yaml)?;
@@ -399,7 +392,7 @@ mod tests
     }
 
     #[test]
-    fn test_language_config_includes_absent() -> Result<(), Box<dyn Error>>
+    fn test_language_config_includes_absent() -> anyhow::Result<()>
     {
         let yaml = "files:\n  - source: a.md\n    target: '$instructions'";
         let config: LanguageConfig = serde_yaml::from_str(yaml)?;
@@ -411,7 +404,7 @@ mod tests
     // -- resolve_language_files: basic --
 
     #[test]
-    fn test_resolve_simple_language_no_includes() -> Result<(), Box<dyn Error>>
+    fn test_resolve_simple_language_no_includes() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         config.languages.insert("rust".to_string(), LanguageConfig {
@@ -437,7 +430,7 @@ mod tests
     // -- resolve_language_files: shared includes --
 
     #[test]
-    fn test_resolve_includes_shared_group() -> Result<(), Box<dyn Error>>
+    fn test_resolve_includes_shared_group() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
@@ -457,7 +450,7 @@ mod tests
     // -- resolve_language_files: language includes --
 
     #[test]
-    fn test_resolve_includes_another_language() -> Result<(), Box<dyn Error>>
+    fn test_resolve_includes_another_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         config.languages.insert("swift".to_string(), LanguageConfig {
@@ -479,7 +472,7 @@ mod tests
     // -- resolve_language_files: transitive includes --
 
     #[test]
-    fn test_resolve_transitive_includes() -> Result<(), Box<dyn Error>>
+    fn test_resolve_transitive_includes() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
@@ -500,7 +493,7 @@ mod tests
     // -- resolve_language_files: mixed shared + language includes --
 
     #[test]
-    fn test_resolve_mixed_shared_and_language_includes() -> Result<(), Box<dyn Error>>
+    fn test_resolve_mixed_shared_and_language_includes() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
@@ -524,7 +517,7 @@ mod tests
     // -- resolve_language_files: include-only language (empty files) --
 
     #[test]
-    fn test_resolve_include_only_language() -> Result<(), Box<dyn Error>>
+    fn test_resolve_include_only_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         config.languages.insert("base".to_string(), LanguageConfig { includes: vec![], files: vec![make_mapping("base.md", "$instructions")] });
@@ -590,7 +583,7 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_multiple_instructions_targets_allowed() -> Result<(), Box<dyn Error>>
+    fn test_resolve_multiple_instructions_targets_allowed() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         config.languages.insert("rust".to_string(), LanguageConfig {
@@ -604,7 +597,7 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_duplicate_instructions_from_include_allowed() -> Result<(), Box<dyn Error>>
+    fn test_resolve_duplicate_instructions_from_include_allowed() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
@@ -645,13 +638,13 @@ mod tests
     }
 
     #[test]
-    fn test_bom_get_agent_files() -> Result<(), Box<dyn Error>>
+    fn test_bom_get_agent_files() -> anyhow::Result<()>
     {
         let mut bom = BillOfMaterials::new();
         bom.agent_files.insert("cursor".to_string(), vec![PathBuf::from("./.cursorrules")]);
 
         assert!(bom.get_agent_files("cursor").is_some() == true);
-        assert_eq!(bom.get_agent_files("cursor").ok_or("missing cursor agent files")?.len(), 1);
+        assert_eq!(bom.get_agent_files("cursor").ok_or_else(|| anyhow::anyhow!("missing cursor agent files"))?.len(), 1);
         assert!(bom.get_agent_files("unknown").is_none() == true);
         Ok(())
     }
@@ -683,25 +676,25 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_workspace_path_workspace() -> Result<(), Box<dyn Error>>
+    fn test_resolve_workspace_path_workspace() -> anyhow::Result<()>
     {
         let result = BillOfMaterials::resolve_workspace_path("$workspace/CLAUDE.md");
-        assert_eq!(result.ok_or("expected workspace path")?, PathBuf::from("./CLAUDE.md"));
+        assert_eq!(result.ok_or_else(|| anyhow::anyhow!("expected workspace path"))?, PathBuf::from("./CLAUDE.md"));
         Ok(())
     }
 
     #[test]
-    fn test_resolve_workspace_path_no_placeholder() -> Result<(), Box<dyn Error>>
+    fn test_resolve_workspace_path_no_placeholder() -> anyhow::Result<()>
     {
         let result = BillOfMaterials::resolve_workspace_path("relative/path.md");
-        assert_eq!(result.ok_or("expected relative path")?, PathBuf::from("relative/path.md"));
+        assert_eq!(result.ok_or_else(|| anyhow::anyhow!("expected relative path"))?, PathBuf::from("relative/path.md"));
         Ok(())
     }
 
     // -- BillOfMaterials::from_config --
 
     #[test]
-    fn test_bom_from_config_with_agents() -> Result<(), Box<dyn Error>>
+    fn test_bom_from_config_with_agents() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -725,14 +718,14 @@ agents:
 
         let bom = BillOfMaterials::from_config(&config_path)?;
         assert!(bom.has_agent("claude") == true);
-        assert_eq!(bom.get_agent_files("claude").ok_or("missing claude agent files")?.len(), 2);
+        assert_eq!(bom.get_agent_files("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent files"))?.len(), 2);
         // codex has only $userprofile paths, so all are skipped -> no entry
         assert!(bom.has_agent("codex") == false);
         Ok(())
     }
 
     #[test]
-    fn test_bom_from_config_no_agents() -> Result<(), Box<dyn Error>>
+    fn test_bom_from_config_no_agents() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -746,7 +739,7 @@ agents:
     }
 
     #[test]
-    fn test_bom_from_config_agent_with_skills() -> Result<(), Box<dyn Error>>
+    fn test_bom_from_config_agent_with_skills() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -763,7 +756,7 @@ agents:
 
         let bom = BillOfMaterials::from_config(&config_path)?;
         assert!(bom.has_agent("cursor") == true);
-        assert_eq!(bom.get_agent_files("cursor").ok_or("missing cursor agent files")?.len(), 1);
+        assert_eq!(bom.get_agent_files("cursor").ok_or_else(|| anyhow::anyhow!("missing cursor agent files"))?.len(), 1);
         Ok(())
     }
 
@@ -777,7 +770,7 @@ agents:
     // -- Full YAML round-trip --
 
     #[test]
-    fn test_full_template_config_parse() -> Result<(), Box<dyn Error>>
+    fn test_full_template_config_parse() -> anyhow::Result<()>
     {
         let yaml = r#"
 version: 3
@@ -821,13 +814,13 @@ skills:
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.version, 3);
         assert!(config.main.is_some() == true);
-        assert_eq!(config.main.as_ref().ok_or("missing main config")?.source, "AGENTS.md");
+        assert_eq!(config.main.as_ref().ok_or_else(|| anyhow::anyhow!("missing main config"))?.source, "AGENTS.md");
         assert!(config.agents.is_empty() == false);
         assert!(config.shared.is_empty() == false);
-        assert_eq!(config.shared.get("cmake").ok_or("missing cmake group")?.len(), 1);
+        assert_eq!(config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?.len(), 1);
         assert_eq!(config.languages.len(), 2);
-        assert!(config.languages.get("c").ok_or("missing c language")?.includes.is_empty() == false);
-        assert!(config.languages.get("rust").ok_or("missing rust language")?.includes.is_empty() == true);
+        assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.includes.is_empty() == false);
+        assert!(config.languages.get("rust").ok_or_else(|| anyhow::anyhow!("missing rust language"))?.includes.is_empty() == true);
         assert!(config.integration.is_empty() == false);
         assert!(config.principles.is_empty() == false);
         assert!(config.mission.is_empty() == false);

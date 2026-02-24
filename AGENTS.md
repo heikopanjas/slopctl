@@ -145,7 +145,8 @@ When initializing a session or analyzing the workspace, refer to instruction fil
   - Syntax: `require!(condition, return_expression)`
   - Returns the expression when the condition is **false**
   - Works with any return type: `Result`, `Option`, or bare values
-  - Prefer `require!` over multi-line `if condition { return ... }` blocks for simple precondition guards
+  - Use `require!` only for precondition checks at the **top of a function** (before any real work), mimicking design-by-contract
+  - Do NOT use `require!` for conditional logic deep inside function bodies; those should remain as regular `if` blocks
 
 **Comparison and Conditional Expressions:**
 

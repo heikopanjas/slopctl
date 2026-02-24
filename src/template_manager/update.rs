@@ -24,10 +24,7 @@ impl TemplateManager
     /// - Template generation fails
     pub fn update(&self, options: &template_engine::UpdateOptions) -> Result<()>
     {
-        if self.has_global_templates() == false
-        {
-            return Err("Global templates not found. Please run 'vibe-check update' first to download templates.".into());
-        }
+        require!(self.has_global_templates() == true, Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-check update' first to download templates.")));
 
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
@@ -36,7 +33,7 @@ impl TemplateManager
         {
             | 1 =>
             {
-                Err("V1 templates are no longer supported. Migrate to V3: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3".into())
+                Err(anyhow::anyhow!("V1 templates are no longer supported. Migrate to V3: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3"))
             }
             | 2 | 3 =>
             {
@@ -56,7 +53,7 @@ impl TemplateManager
                 let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
                 engine.update(options)
             }
-            | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
+            | _ => Err(anyhow::anyhow!("Unsupported template version: {}. Please update vibe-check to the latest version.", version))
         }
     }
 }

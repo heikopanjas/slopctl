@@ -46,7 +46,8 @@ impl DownloadManager
     /// Returns an error if URL parsing or download fails
     pub fn download_templates_from_url(&self, url: &str) -> Result<()>
     {
-        let parsed = github::parse_github_url(url).ok_or("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path")?;
+        let parsed =
+            github::parse_github_url(url).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path"))?;
 
         println!("{} Repository: {}/{} (branch: {})", "→".blue(), parsed.owner.green(), parsed.repo.green(), parsed.branch.yellow());
 
@@ -154,7 +155,7 @@ impl DownloadManager
             | Err(e) =>
             {
                 println!("{}", "✗".red());
-                return Err(format!("Failed to download templates.yml: {}", e).into());
+                return Err(anyhow::anyhow!("Failed to download templates.yml: {}", e));
             }
         }
 

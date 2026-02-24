@@ -86,7 +86,7 @@ impl TemplateManager
             let source_path = Path::new(source);
             if source_path.exists() == false
             {
-                return Err(format!("Source path does not exist: {}", source).into());
+                return Err(anyhow::anyhow!("Source path does not exist: {}", source));
             }
 
             println!("{} Copying templates from local path...", "→".blue());

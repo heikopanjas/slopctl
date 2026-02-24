@@ -85,10 +85,7 @@ pub fn load_template_config(config_dir: &Path) -> Result<TemplateConfig>
 {
     let config_path = config_dir.join("templates.yml");
 
-    if config_path.exists() == false
-    {
-        return Err("templates.yml not found in global template directory".into());
-    }
+    require!(config_path.exists() == true, Err(anyhow::anyhow!("templates.yml not found in global template directory")));
 
     let content = fs::read_to_string(&config_path)?;
     let config: TemplateConfig = serde_yaml::from_str(&content)?;
@@ -109,10 +106,7 @@ pub fn load_template_config(config_dir: &Path) -> Result<TemplateConfig>
 /// Returns `true` if file exists and marker is missing (file is customized)
 pub fn is_file_customized(local_path: &Path) -> Result<bool>
 {
-    if local_path.exists() == false
-    {
-        return Ok(false);
-    }
+    require!(local_path.exists() == true, Ok(false));
 
     let content = fs::read_to_string(local_path)?;
     Ok(content.contains(TEMPLATE_MARKER) == false)
@@ -179,7 +173,7 @@ impl<'a> TemplateEngine<'a>
     {
         if github::is_url(source) == true
         {
-            let parsed = github::parse_github_url(source).ok_or_else(|| format!("Invalid GitHub URL: {}", source))?;
+            let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL: {}", source))?;
 
             let filename = source.rsplit('/').next().unwrap_or("downloaded");
             let temp_path = temp_dir.join(filename);
@@ -233,10 +227,10 @@ impl<'a> TemplateEngine<'a>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
-        if self.config_dir.exists() == false || templates_yml_path.exists() == false
-        {
-            return Err("Global templates not found. Please run 'vibe-check update' first to download templates.".into());
-        }
+        require!(
+            self.config_dir.exists() == true && templates_yml_path.exists() == true,
+            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-check update' first to download templates."))
+        );
 
         let config = load_template_config(self.config_dir)?;
 
@@ -247,11 +241,11 @@ impl<'a> TemplateEngine<'a>
 
         let temp_dir = tempfile::TempDir::new()?;
 
-        let main_config = config.main.as_ref().ok_or("Missing 'main' section in templates.yml")?;
+        let main_config = config.main.as_ref().ok_or_else(|| anyhow::anyhow!("Missing 'main' section in templates.yml"))?;
         let main_source = self.resolve_source_to_path(&main_config.source, temp_dir.path())?;
         if main_source.exists() == false
         {
-            return Err(format!("Main template not found: {}", main_source.display()).into());
+            return Err(anyhow::anyhow!("Main template not found: {}", main_source.display()));
         }
         let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
 
@@ -375,7 +369,8 @@ impl<'a> TemplateEngine<'a>
 
         if options.skills.is_empty() == false
         {
-            let resolved_agent = skill_agent.as_deref().ok_or("Cannot install skills: no --agent specified and no agent detected in workspace")?;
+            let resolved_agent =
+                skill_agent.as_deref().ok_or_else(|| anyhow::anyhow!("Cannot install skills: no --agent specified and no agent detected in workspace"))?;
 
             let adhoc_skills: Vec<(String, String)> = options
                 .skills
@@ -751,7 +746,8 @@ impl<'a> TemplateEngine<'a>
     ) -> Result<()>
     where I: Iterator<Item = (&'b str, &'b str)>
     {
-        let skill_dir_template = agent_defaults::get_skill_dir(agent_name).ok_or_else(|| format!("Unknown agent '{}': no skill directory defined", agent_name))?;
+        let skill_dir_template =
+            agent_defaults::get_skill_dir(agent_name).ok_or_else(|| anyhow::anyhow!("Unknown agent '{}': no skill directory defined", agent_name))?;
 
         for (skill_name, source) in skills
         {
@@ -759,7 +755,7 @@ impl<'a> TemplateEngine<'a>
 
             if github::is_url(source) == true
             {
-                let parsed = github::parse_github_url(source).ok_or_else(|| format!("Invalid GitHub URL for skill '{}': {}", skill_name, source))?;
+                let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL for skill '{}': {}", skill_name, source))?;
 
                 println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill_name.green());
 
@@ -847,14 +843,14 @@ impl<'a> TemplateEngine<'a>
 #[cfg(test)]
 mod tests
 {
-    use std::{error::Error, fs, path::PathBuf, result::Result};
+    use std::{fs, path::PathBuf};
 
     use super::*;
 
     // -- load_template_config --
 
     #[test]
-    fn test_load_template_config_valid() -> Result<(), Box<dyn Error>>
+    fn test_load_template_config_valid() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         fs::write(dir.path().join("templates.yml"), "version: 3\nlanguages: {}")?;
@@ -865,7 +861,7 @@ mod tests
     }
 
     #[test]
-    fn test_load_template_config_missing() -> Result<(), Box<dyn Error>>
+    fn test_load_template_config_missing() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let err = load_template_config(dir.path()).unwrap_err();
@@ -876,7 +872,7 @@ mod tests
     // -- is_file_customized --
 
     #[test]
-    fn test_is_file_customized_with_marker() -> Result<(), Box<dyn Error>>
+    fn test_is_file_customized_with_marker() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let path = dir.path().join("test.md");
@@ -887,7 +883,7 @@ mod tests
     }
 
     #[test]
-    fn test_is_file_customized_without_marker() -> Result<(), Box<dyn Error>>
+    fn test_is_file_customized_without_marker() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let path = dir.path().join("test.md");
@@ -898,7 +894,7 @@ mod tests
     }
 
     #[test]
-    fn test_is_file_customized_nonexistent() -> Result<(), Box<dyn Error>>
+    fn test_is_file_customized_nonexistent() -> anyhow::Result<()>
     {
         assert!(is_file_customized(Path::new("/nonexistent/file.md"))? == false);
         Ok(())
@@ -942,16 +938,22 @@ mod tests
     // -- skill_name_from_url --
 
     #[test]
-    fn test_skill_name_from_url_simple() -> Result<(), Box<dyn Error>>
+    fn test_skill_name_from_url_simple() -> anyhow::Result<()>
     {
-        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").ok_or("expected skill name")?, "my-skill");
+        assert_eq!(
+            TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
+            "my-skill"
+        );
         Ok(())
     }
 
     #[test]
-    fn test_skill_name_from_url_trailing_slash() -> Result<(), Box<dyn Error>>
+    fn test_skill_name_from_url_trailing_slash() -> anyhow::Result<()>
     {
-        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").ok_or("expected skill name")?, "skill");
+        assert_eq!(
+            TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
+            "skill"
+        );
         Ok(())
     }
 
@@ -963,14 +965,14 @@ mod tests
 
     // -- merge_fragments --
 
-    fn write_template(dir: &Path, content: &str) -> Result<PathBuf, Box<dyn Error>>
+    fn write_template(dir: &Path, content: &str) -> anyhow::Result<PathBuf>
     {
         let path = dir.join("AGENTS.md");
         fs::write(&path, content)?;
         Ok(path)
     }
 
-    fn write_fragment(dir: &Path, name: &str, content: &str) -> Result<PathBuf, Box<dyn Error>>
+    fn write_fragment(dir: &Path, name: &str, content: &str) -> anyhow::Result<PathBuf>
     {
         let path = dir.join(name);
         fs::write(&path, content)?;
@@ -990,7 +992,7 @@ mod tests
 ";
 
     #[test]
-    fn test_merge_fragments_single_category() -> Result<(), Box<dyn Error>>
+    fn test_merge_fragments_single_category() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let source = write_template(dir.path(), TEMPLATE_BASE)?;
@@ -1010,7 +1012,7 @@ mod tests
     }
 
     #[test]
-    fn test_merge_fragments_multiple_categories() -> Result<(), Box<dyn Error>>
+    fn test_merge_fragments_multiple_categories() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let source = write_template(dir.path(), TEMPLATE_BASE)?;
@@ -1039,7 +1041,7 @@ mod tests
     }
 
     #[test]
-    fn test_merge_fragments_no_lang() -> Result<(), Box<dyn Error>>
+    fn test_merge_fragments_no_lang() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let source = write_template(dir.path(), TEMPLATE_BASE)?;
@@ -1059,7 +1061,7 @@ mod tests
     }
 
     #[test]
-    fn test_merge_fragments_custom_mission() -> Result<(), Box<dyn Error>>
+    fn test_merge_fragments_custom_mission() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let source = write_template(dir.path(), TEMPLATE_BASE)?;
@@ -1078,7 +1080,7 @@ mod tests
     }
 
     #[test]
-    fn test_merge_fragments_removes_template_marker() -> Result<(), Box<dyn Error>>
+    fn test_merge_fragments_removes_template_marker() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let content_with_marker = format!("{}\n{}", TEMPLATE_MARKER, TEMPLATE_BASE);

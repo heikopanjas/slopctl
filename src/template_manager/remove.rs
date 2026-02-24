@@ -40,10 +40,7 @@ impl TemplateManager
     {
         // Load templates.yml and build Bill of Materials
         let config_file = self.config_dir.join("templates.yml");
-        if config_file.exists() == false
-        {
-            return Err("Global templates not found. Run 'vibe-check install' first to set up templates.".to_string().into());
-        }
+        require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'vibe-check install' first to set up templates.")));
 
         println!("{} Building Bill of Materials from templates.yml", "→".blue());
         let bom = BillOfMaterials::from_config(&config_file)?;
@@ -55,10 +52,10 @@ impl TemplateManager
             if bom.has_agent(agent_name) == false
             {
                 let available_agents = bom.get_agent_names();
-                return Err(format!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent_name, available_agents.join(", ")).into());
+                return Err(anyhow::anyhow!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent_name, available_agents.join(", ")));
             }
 
-            let agent_files = bom.get_agent_files(agent_name).ok_or_else(|| format!("Agent '{}' files missing from Bill of Materials", agent_name))?;
+            let agent_files = bom.get_agent_files(agent_name).ok_or_else(|| anyhow::anyhow!("Agent '{}' files missing from Bill of Materials", agent_name))?;
             let existing: Vec<PathBuf> = agent_files.iter().filter(|f| f.exists()).cloned().collect();
             (existing, format!("agent '{}'", agent_name.yellow()))
         }

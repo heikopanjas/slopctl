@@ -194,7 +194,7 @@ pub fn list_directory_contents(github_url: &GitHubUrl) -> Result<Vec<GitHubConte
 
     if response.status().is_success() == false
     {
-        return Err(format!("GitHub API request failed: HTTP {} for {}", response.status(), api_url).into());
+        return Err(anyhow::anyhow!("GitHub API request failed: HTTP {} for {}", response.status(), api_url));
     }
 
     let entries: Vec<GitHubContentEntry> = response.json()?;
@@ -218,7 +218,7 @@ pub fn download_file(url: &str, dest_path: &Path) -> Result<()>
 
     if response.status().is_success() == false
     {
-        return Err(format!("Failed to download {}: HTTP {}", url, response.status()).into());
+        return Err(anyhow::anyhow!("Failed to download {}: HTTP {}", url, response.status()));
     }
 
     let content = response.bytes()?;
@@ -255,8 +255,6 @@ pub fn download_github_file(github_url: &GitHubUrl, dest_path: &Path) -> Result<
 #[cfg(test)]
 mod tests
 {
-    use std::{error::Error, result::Result};
-
     use super::*;
 
     #[test]
@@ -279,9 +277,9 @@ mod tests
     }
 
     #[test]
-    fn test_parse_github_url_full() -> Result<(), Box<dyn Error>>
+    fn test_parse_github_url_full() -> anyhow::Result<()>
     {
-        let parsed = parse_github_url("https://github.com/user/repo/tree/main/path/to/dir").ok_or("expected parsed URL")?;
+        let parsed = parse_github_url("https://github.com/user/repo/tree/main/path/to/dir").ok_or_else(|| anyhow::anyhow!("expected parsed URL"))?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "main");
@@ -290,9 +288,9 @@ mod tests
     }
 
     #[test]
-    fn test_parse_github_url_bare_repo() -> Result<(), Box<dyn Error>>
+    fn test_parse_github_url_bare_repo() -> anyhow::Result<()>
     {
-        let parsed = parse_github_url("https://github.com/user/repo").ok_or("expected parsed URL")?;
+        let parsed = parse_github_url("https://github.com/user/repo").ok_or_else(|| anyhow::anyhow!("expected parsed URL"))?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "main");
@@ -301,9 +299,9 @@ mod tests
     }
 
     #[test]
-    fn test_parse_github_url_blob() -> Result<(), Box<dyn Error>>
+    fn test_parse_github_url_blob() -> anyhow::Result<()>
     {
-        let parsed = parse_github_url("https://github.com/user/repo/blob/develop/src/file.rs").ok_or("expected parsed URL")?;
+        let parsed = parse_github_url("https://github.com/user/repo/blob/develop/src/file.rs").ok_or_else(|| anyhow::anyhow!("expected parsed URL"))?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "develop");

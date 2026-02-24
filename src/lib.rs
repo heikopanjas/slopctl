@@ -11,7 +11,7 @@
 /// # Examples
 ///
 /// ```rust,ignore
-/// require!(path.exists() == true, Err("File not found".into()));
+/// require!(path.exists() == true, Err(anyhow::anyhow!("File not found")));
 /// require!(count > 0, None);
 /// require!(input.is_empty() == false, Ok(()));
 /// ```
@@ -35,6 +35,7 @@ mod template_engine;
 mod template_manager;
 mod utils;
 
+pub use anyhow::Result;
 pub use bom::BillOfMaterials;
 pub use config::Config;
 pub use download_manager::DownloadManager;
@@ -42,9 +43,6 @@ pub use file_tracker::{FileMetadata, FileStatus, FileTracker};
 pub use template_engine::{TemplateContext, TemplateEngine, UpdateOptions};
 pub use template_manager::TemplateManager;
 pub use utils::{FileActionResponse, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents};
-
-/// Result type used throughout the library
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[cfg(test)]
 mod tests
@@ -72,11 +70,11 @@ mod tests
     }
 
     #[test]
-    fn test_require_with_result() -> std::result::Result<(), Box<dyn std::error::Error>>
+    fn test_require_with_result() -> anyhow::Result<()>
     {
         fn validate(name: &str) -> crate::Result<()>
         {
-            require!(name.is_empty() == false, Err("name must not be empty".into()));
+            require!(name.is_empty() == false, Err(anyhow::anyhow!("name must not be empty")));
             Ok(())
         }
         assert!(validate("hello").is_ok() == true);

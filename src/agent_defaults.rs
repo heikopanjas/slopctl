@@ -123,16 +123,14 @@ pub fn detect_installed_agent(workspace: &Path) -> Option<String>
 #[cfg(test)]
 mod tests
 {
-    use std::error::Error;
-
     use super::*;
 
     #[test]
-    fn test_get_defaults_known_agent() -> Result<(), Box<dyn Error>>
+    fn test_get_defaults_known_agent() -> anyhow::Result<()>
     {
         let defaults = get_defaults("cursor");
         assert!(defaults.is_some());
-        let defaults = defaults.ok_or("expected defaults")?;
+        let defaults = defaults.ok_or_else(|| anyhow::anyhow!("expected defaults"))?;
         assert_eq!(defaults.name, "cursor");
         assert_eq!(defaults.skill_dir, "$workspace/.cursor/skills");
         assert_eq!(defaults.prompt_dir, "$workspace/.cursor/commands");
@@ -165,7 +163,7 @@ mod tests
     }
 
     #[test]
-    fn test_detect_installed_agent() -> Result<(), Box<dyn Error>>
+    fn test_detect_installed_agent() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
@@ -180,7 +178,7 @@ mod tests
     }
 
     #[test]
-    fn test_detect_installed_agent_claude() -> Result<(), Box<dyn Error>>
+    fn test_detect_installed_agent_claude() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();

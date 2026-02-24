@@ -298,12 +298,12 @@ fn show_simple_diff(file_a: &Path, file_b: &Path) -> Result<()>
 #[cfg(test)]
 mod tests
 {
-    use std::{error::Error, fs, result::Result};
+    use std::fs;
 
     use super::*;
 
     #[test]
-    fn test_copy_dir_all_flat() -> Result<(), Box<dyn Error>>
+    fn test_copy_dir_all_flat() -> anyhow::Result<()>
     {
         let src = tempfile::TempDir::new()?;
         let dst = tempfile::TempDir::new()?;
@@ -320,7 +320,7 @@ mod tests
     }
 
     #[test]
-    fn test_copy_dir_all_nested() -> Result<(), Box<dyn Error>>
+    fn test_copy_dir_all_nested() -> anyhow::Result<()>
     {
         let src = tempfile::TempDir::new()?;
         let dst = tempfile::TempDir::new()?;
@@ -340,7 +340,7 @@ mod tests
     }
 
     #[test]
-    fn test_copy_file_with_mkdir_creates_parents() -> Result<(), Box<dyn Error>>
+    fn test_copy_file_with_mkdir_creates_parents() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let src = dir.path().join("source.txt");
@@ -355,7 +355,7 @@ mod tests
     }
 
     #[test]
-    fn test_copy_file_with_mkdir_existing_dir() -> Result<(), Box<dyn Error>>
+    fn test_copy_file_with_mkdir_existing_dir() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let src = dir.path().join("source.txt");
@@ -370,7 +370,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_file_and_cleanup_empty_parents() -> Result<(), Box<dyn Error>>
+    fn test_remove_file_and_cleanup_empty_parents() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let nested = dir.path().join("a/b/file.txt");
@@ -388,7 +388,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_file_and_cleanup_nonempty_parent() -> Result<(), Box<dyn Error>>
+    fn test_remove_file_and_cleanup_nonempty_parent() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         fs::create_dir_all(dir.path().join("parent"))?;
@@ -405,7 +405,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_file_nonexistent() -> Result<(), Box<dyn Error>>
+    fn test_remove_file_nonexistent() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let result = remove_file_and_cleanup_parents(&dir.path().join("nonexistent.txt"));
