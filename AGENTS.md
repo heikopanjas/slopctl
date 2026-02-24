@@ -699,6 +699,22 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-02-24 (v9.0.0)
+
+- MAJOR version bump: 8.0.0 to 9.0.0 (V1 removed, V3 template format)
+- Removed V1 template engine and all V1 templates (deprecated since v7.0.0)
+- Deleted `src/template_engine_v1.rs` and entire `templates/v1/` directory (39 files)
+- Introduced V3 template format: `shared` file groups and `includes` directive on languages
+- New `shared` section in templates.yml for reusable file groups (e.g. cmake files shared by C and C++)
+- New `includes` field on `LanguageConfig`: compose shared groups or extend other languages
+- Recursive include resolution with cycle detection via `resolve_language_files()` in `bom.rs`
+- Merged `template_engine_v2.rs` into `template_engine.rs`: dissolved `TemplateEngine` trait into struct
+- Single `TemplateEngine` struct replaces the old trait + `TemplateEngineV2` struct
+- Default template version changed from 2 to 3
+- V2 templates remain backward-compatible (V3 is a superset)
+- Updated `list` command to show includes annotations on composed languages
+- DRY: cmake-build-commands.md and cmake-git-ignore.txt now defined once in shared section
+
 ### 2026-02-24 (v8.0.0)
 
 - MAJOR version bump: 7.0.0 to 8.0.0 (breaking CLI change)
