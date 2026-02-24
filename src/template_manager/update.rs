@@ -86,36 +86,23 @@ impl TemplateManager
         {
             | 1 =>
             {
-                // Deprecation warning for v1 templates
-                println!("{} V1 templates are deprecated and will be removed in a future release", "!".yellow());
-                println!("{} Consider migrating to V2 templates (agents.md standard)", "!".yellow());
-                println!("{} Run: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2", "→".blue());
-                println!();
-
-                // V1 requires agent parameter
-                if options.agent.is_none() == true
-                {
-                    return Err("--agent is required for v1 templates. Specify: vibe-check install --lang <lang> --agent <agent>".into());
-                }
-                let engine = crate::template_engine_v1::TemplateEngineV1::new(&self.config_dir);
-                engine.update(&engine_options)
+                Err("V1 templates are no longer supported. Migrate to V3: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".into())
             }
-            | 2 =>
+            | 2 | 3 =>
             {
-                // V2: Single AGENTS.md for all agents, but agent-specific prompts can be copied
                 if options.no_lang == true
                 {
-                    println!("{} V2 templates: Language-independent setup (no coding-conventions)", "→".blue());
+                    println!("{} Language-independent setup (no coding-conventions)", "→".blue());
                 }
                 else if options.agent.is_some()
                 {
-                    println!("{} V2 templates: Using single AGENTS.md + copying agent-specific prompts", "→".blue());
+                    println!("{} Using single AGENTS.md + copying agent-specific prompts", "→".blue());
                 }
                 else
                 {
-                    println!("{} V2 templates: Using single AGENTS.md (no agent-specific prompts)", "→".blue());
+                    println!("{} Using single AGENTS.md (no agent-specific prompts)", "→".blue());
                 }
-                let engine = crate::template_engine_v2::TemplateEngineV2::new(&self.config_dir);
+                let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
                 engine.update(&engine_options)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())

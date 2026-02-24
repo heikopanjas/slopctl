@@ -49,7 +49,7 @@ enum Commands
         #[arg(long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(long)]
         agent: Option<String>,
 

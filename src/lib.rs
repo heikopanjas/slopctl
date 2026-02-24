@@ -10,8 +10,6 @@ mod download_manager;
 mod file_tracker;
 pub mod github;
 mod template_engine;
-mod template_engine_v1;
-mod template_engine_v2;
 mod template_manager;
 mod utils;
 
@@ -20,8 +18,6 @@ pub use config::Config;
 pub use download_manager::DownloadManager;
 pub use file_tracker::{FileMetadata, FileStatus, FileTracker};
 pub use template_engine::{TemplateContext, TemplateEngine, UpdateOptions};
-pub use template_engine_v1::TemplateEngineV1;
-pub use template_engine_v2::TemplateEngineV2;
 pub use template_manager::TemplateManager;
 pub use utils::{FileActionResponse, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents};
 

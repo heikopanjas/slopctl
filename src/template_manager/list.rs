@@ -88,7 +88,7 @@ impl TemplateManager
         else
         {
             println!("{}", "Available Agents:".bold());
-            println!("  {} V2 templates (agents.md standard) - no agent-specific files", "→".blue());
+            println!("  {} agents.md standard - no agent-specific files", "→".blue());
             println!("  {} Single AGENTS.md works with all agents", "→".blue());
             println!();
         }
@@ -100,7 +100,18 @@ impl TemplateManager
 
         for lang_name in languages
         {
-            println!("  • {}", lang_name);
+            let lang_config = config.languages.get(lang_name.as_str());
+            let includes_annotation =
+                lang_config.and_then(|lc| lc.includes.as_ref()).filter(|inc| inc.is_empty() == false).map(|inc| format!(" (includes: {})", inc.join(", ")));
+
+            if let Some(annotation) = includes_annotation
+            {
+                println!("  • {}{}", lang_name, annotation.dimmed());
+            }
+            else
+            {
+                println!("  • {}", lang_name);
+            }
         }
 
         // List top-level skills (agent-agnostic)
