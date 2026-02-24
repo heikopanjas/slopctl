@@ -1,13 +1,17 @@
-version: 2
+version: 3
 
-# Template Configuration - Version 2 (agents.md standard)
-# 
-# V2 Philosophy: One AGENTS.md file that works across all agents
+# Template Configuration - Version 3 (agents.md standard)
+#
+# Philosophy: One AGENTS.md file that works across all agents
 # - Follows https://agents.md community standard
 # - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md
 # - Single source of truth: AGENTS.md
 # - Agent-specific prompts/commands are still supported (operational files)
 # - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+#
+# V3 additions:
+# - `shared` section for reusable file groups
+# - `includes` field on languages to compose shared groups or other languages
 #
 # Placeholders:
 #   $workspace     - Project root directory
@@ -59,32 +63,34 @@ agents:
       - source: cursor/commands/init-session.md
         target: '$workspace/.cursor/commands/init-session.md'
 
+# Reusable file groups shared across multiple languages
+shared:
+  cmake:
+    - source: cmake-build-commands.md
+      target: '$instructions'
+    - source: cmake-git-ignore.txt
+      target: '$workspace/.gitignore'
+
 # Language-specific coding standards templates
 languages:
   c:
+    includes: [cmake]
     files:
       - source: c-coding-conventions.md
-        target: '$instructions'
-      - source: cmake-build-commands.md
         target: '$instructions'
       - source: c-format-instructions.yml
         target: '$workspace/.clang-format'
       - source: c-editor-config.ini
         target: '$workspace/.editorconfig'
-      - source: cmake-git-ignore.txt
-        target: '$workspace/.gitignore'
   c++:
+    includes: [cmake]
     files:
       - source: c++-coding-conventions.md
-        target: '$instructions'
-      - source: cmake-build-commands.md
         target: '$instructions'
       - source: c++-format-instructions.yml
         target: '$workspace/.clang-format'
       - source: c++-editor-config.ini
         target: '$workspace/.editorconfig'
-      - source: cmake-git-ignore.txt
-        target: '$workspace/.gitignore'
   rust:
     files:
       - source: rust-coding-conventions.md
@@ -135,3 +141,15 @@ mission:
     target: '$instructions'
   - source: technology-stack.md
     target: '$instructions'
+# Agent-agnostic skills (installed to the active agent's skill directory)
+#
+# Skills are directories containing SKILL.md + optional supporting files.
+# The install target is resolved from agent_defaults based on --agent.
+# Source can be a local path or a full GitHub URL (no user/repo shorthand).
+#
+# Example:
+#   skills:
+#     - name: create-rule
+#       source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+#     - name: my-local-skill
+#       source: 'skills/my-local-skill'

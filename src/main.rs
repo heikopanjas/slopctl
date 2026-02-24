@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use vibe_check::{Config, Result, TemplateManager};
+use vibe_check::{Config, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -42,24 +42,24 @@ struct Cli
 #[derive(Subcommand)]
 enum Commands
 {
-    /// Initialize agent instructions for a project
-    Init
+    /// Install agent instructions and skills for a project
+    Install
     {
         /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor). Required for v1 templates, optional for v2.
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(long)]
         agent: Option<String>,
-
-        /// Skip language-specific setup (AGENTS.md only, no coding-conventions fragments)
-        #[arg(long, default_value = "false")]
-        no_lang: bool,
 
         /// Custom mission statement (use @filename to read from file)
         #[arg(long)]
         mission: Option<String>,
+
+        /// Install skill(s) from GitHub (repeatable, supports user/repo shorthand)
+        #[arg(long)]
+        skill: Vec<String>,
 
         /// Force overwrite of local files without confirmation
         #[arg(long, default_value = "false")]
@@ -140,8 +140,8 @@ enum Commands
     }
 }
 
-/// Default template source URL (v2 is default in v6.x - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2";
+/// Default template source URL (V3 templates - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -225,7 +225,7 @@ fn resolve_mission_content(value: &str) -> Result<String>
     if let Some(file_path) = value.strip_prefix('@')
     {
         // Read content from file
-        fs::read_to_string(file_path).map_err(|e| format!("Failed to read mission file '{}': {}", file_path, e).into())
+        fs::read_to_string(file_path).map_err(|e| anyhow::anyhow!("Failed to read mission file '{}': {}", file_path, e))
     }
     else
     {
@@ -296,7 +296,7 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         }
         | (None, Some(_)) =>
         {
-            return Err("Must specify a key when setting a value".into());
+            return Err(anyhow::anyhow!("Must specify a key when setting a value"));
         }
         | (None, None) =>
         {
@@ -335,27 +335,18 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, no_lang, mission, force, dry_run } =>
+        | Commands::Install { lang, agent, mission, skill, force, dry_run } =>
         {
-            // --lang and --no-lang are mutually exclusive
-            if lang.is_some() == true && no_lang == true
+            if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
-                eprintln!("{} Cannot use --lang and --no-lang together", "✗".red());
+                eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
+                eprintln!("{} Examples: vibe-check install --lang rust", "→".blue());
+                eprintln!("{}          vibe-check install --agent cursor", "→".blue());
+                eprintln!("{}          vibe-check install --lang rust --agent cursor", "→".blue());
+                eprintln!("{}          vibe-check install --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
-            // Must specify at least one of --lang, --agent, or --no-lang
-            if lang.is_none() == true && agent.is_none() == true && no_lang == false
-            {
-                eprintln!("{} Must specify at least one of --lang, --agent, or --no-lang", "✗".red());
-                eprintln!("{} Examples: vibe-check init --lang rust", "→".blue());
-                eprintln!("{}          vibe-check init --agent cursor", "→".blue());
-                eprintln!("{}          vibe-check init --no-lang", "→".blue());
-                eprintln!("{}          vibe-check init --no-lang --agent cursor", "→".blue());
-                std::process::exit(1);
-            }
-
-            // Resolve mission content if provided (handles @filepath syntax)
             let resolved_mission = if let Some(ref mission_value) = mission
             {
                 match resolve_mission_content(mission_value)
@@ -373,7 +364,6 @@ fn main()
                 None
             };
 
-            // Check if global templates exist, download if not
             if manager.has_global_templates() == false
             {
                 if dry_run == true
@@ -397,57 +387,24 @@ fn main()
                 }
             }
 
-            // Install templates to project
-            if dry_run == true
+            let prefix = if dry_run == true
             {
-                if no_lang == true
-                {
-                    if let Some(a) = agent.as_ref()
-                    {
-                        println!("{} Dry run: previewing language-independent setup with {}", "→".blue(), a.green());
-                    }
-                    else
-                    {
-                        println!("{} Dry run: previewing language-independent setup", "→".blue());
-                    }
-                }
-                else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
-                {
-                    println!("{} Dry run: previewing changes for {} with {}", "→".blue(), l.green(), a.green());
-                }
-                else if let Some(l) = lang.as_ref()
-                {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), l.green());
-                }
-                else
-                {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), agent.as_ref().unwrap().green());
-                }
-            }
-            else if no_lang == true
-            {
-                if let Some(a) = agent.as_ref()
-                {
-                    println!("{} Initializing language-independent setup with {}", "→".blue(), a.green());
-                }
-                else
-                {
-                    println!("{} Initializing language-independent setup", "→".blue());
-                }
-            }
-            else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
-            {
-                println!("{} Initializing project for {} with {}", "→".blue(), l.green(), a.green());
-            }
-            else if let Some(l) = lang.as_ref()
-            {
-                println!("{} Initializing project for {}", "→".blue(), l.green());
+                "Dry run: previewing"
             }
             else
             {
-                println!("{} Initializing project for {}", "→".blue(), agent.as_ref().unwrap().green());
+                "Installing"
+            };
+            match (lang.as_ref(), agent.as_ref())
+            {
+                | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
+                | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
+                | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
+                | (None, None) => println!("{} {} skills", "→".blue(), prefix)
             }
-            manager.update(lang.as_deref(), agent.as_deref(), no_lang, resolved_mission.as_deref(), force, dry_run)
+
+            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
+            manager.update(&options)
         }
         | Commands::Update { from, dry_run } =>
         {
@@ -485,11 +442,11 @@ fn main()
             // Validate mutually exclusive options
             if all == true && agent.is_some() == true
             {
-                Err("Cannot specify both --agent and --all options".to_string().into())
+                Err(anyhow::anyhow!("Cannot specify both --agent and --all options"))
             }
             else if all == false && agent.is_none() == true
             {
-                Err("Must specify either --agent <name> or --all".to_string().into())
+                Err(anyhow::anyhow!("Must specify either --agent <name> or --all"))
             }
             else
             {
