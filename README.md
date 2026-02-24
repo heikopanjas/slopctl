@@ -56,7 +56,7 @@ vibe-check/
 ├── README.md                   # You are here
 ├── AGENTS.md                   # Primary project instructions
 ├── templates/                  # Template files organized by version
-│   └── v2/                     # Version 3 templates (agents.md standard, default)
+│   └── v3/                     # Version 3 templates (agents.md standard, default)
 │       ├── templates.yml       # V3 template configuration (version: 3)
 │       ├── AGENTS.md           # Single instruction file for all agents
 │       ├── claude/             # Claude-specific files (CLAUDE.md references AGENTS.md)
@@ -93,7 +93,7 @@ vibe-check uses the V3 template format (agents.md standard):
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Ad-hoc skill loading: `--skill user/repo` shorthand or full GitHub URLs
-- URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2`
+- URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3`
 
 **V3 additions:** Shared file groups (`shared` section in templates.yml) and composable languages (`includes` on language configs) let you reuse files (e.g. cmake) across C and C++ without duplication.
 
@@ -108,7 +108,7 @@ vibe-check install --skill user/repo    # Install a skill from GitHub
 
 ### Migration from v8 to v9
 
-**Upgrading from v8.x to v9.0.0:** Only V2/V3 templates are supported. Use V3 templates (default source: `templates/v2`).
+**Upgrading from v8.x to v9.0.0:** Only V2/V3 templates are supported. Use V3 templates (default source: `templates/v3`).
 
 ```bash
 vibe-check update                    # Gets V3 templates
@@ -429,7 +429,7 @@ vibe-check update --dry-run
 
 - Downloads templates from specified source or default GitHub repository
 - If `--from` is not specified, downloads from:
-  - **Default**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2` (agents.md standard)
+  - **Default**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3` (agents.md standard)
 - Downloads `templates.yml` configuration file and all template files
 - Stores templates in local data directory:
   - Linux: `$HOME/.local/share/vibe-check/templates`

@@ -3,11 +3,7 @@
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{
-    Result,
-    file_tracker::FileTracker,
-    template_engine::{self, UpdateOptions}
-};
+use crate::{Result, template_engine};
 
 impl TemplateManager
 {
@@ -25,85 +21,40 @@ impl TemplateManager
     /// Returns an error if:
     /// - Global templates don't exist
     /// - Template version is unsupported
-    /// - Lang is None, no_lang is false, and no languages are defined in templates
     /// - Template generation fails
-    pub fn update(&self, options: &UpdateOptions) -> Result<()>
+    pub fn update(&self, options: &template_engine::UpdateOptions) -> Result<()>
     {
-        // Check if global templates exist
         if self.has_global_templates() == false
         {
             return Err("Global templates not found. Please run 'vibe-check update' first to download templates.".into());
         }
 
-        // Load config for version and optional lang resolution
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
-
-        // Resolve lang (only when not no_lang): use provided value, or existing installation, or first available
-        let lang_resolved: Option<String> = if options.no_lang == true
-        {
-            None
-        }
-        else if options.lang.is_empty() == false
-        {
-            Some(options.lang.to_string())
-        }
-        else
-        {
-            // Prefer language from existing installation (e.g. switching agent, keep lang)
-            let workspace = std::env::current_dir().ok();
-            let from_tracker = workspace.and_then(|w| FileTracker::new(&self.config_dir).ok().and_then(|t| t.get_installed_language_for_workspace(&w)));
-
-            match from_tracker
-            {
-                | Some(l) =>
-                {
-                    println!("{} Using existing language: {}", "→".blue(), l.green());
-                    Some(l)
-                }
-                | None =>
-                {
-                    // Fresh init with only --agent: use first language from templates
-                    let first = config.languages.keys().next().cloned();
-                    match first
-                    {
-                        | Some(l) =>
-                        {
-                            println!("{} No existing installation, using language: {}", "→".blue(), l.green());
-                            Some(l)
-                        }
-                        | None => return Err("No languages defined in templates.yml".into())
-                    }
-                }
-            }
-        };
-
-        // Build engine-level options with resolved lang
-        let resolved_lang = lang_resolved.as_deref().unwrap_or("");
-        let engine_options = UpdateOptions { lang: resolved_lang, ..*options };
 
         match version
         {
             | 1 =>
             {
-                Err("V1 templates are no longer supported. Migrate to V3: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2".into())
+                Err("V1 templates are no longer supported. Migrate to V3: vibe-check config source.url https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3".into())
             }
             | 2 | 3 =>
             {
-                if options.no_lang == true
+                if options.lang.is_some() && options.agent.is_some()
                 {
-                    println!("{} Language-independent setup (no coding-conventions)", "→".blue());
+                    println!("{} Installing language setup + agent-specific files", "→".blue());
+                }
+                else if options.lang.is_some()
+                {
+                    println!("{} Installing language setup", "→".blue());
                 }
                 else if options.agent.is_some()
                 {
-                    println!("{} Using single AGENTS.md + copying agent-specific prompts", "→".blue());
+                    println!("{} Installing agent-specific files", "→".blue());
                 }
-                else
-                {
-                    println!("{} Using single AGENTS.md (no agent-specific prompts)", "→".blue());
-                }
+
                 let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
-                engine.update(&engine_options)
+                engine.update(options)
             }
             | _ => Err(format!("Unsupported template version: {}. Please update vibe-check to the latest version.", version).into())
         }

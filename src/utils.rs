@@ -294,3 +294,109 @@ fn show_simple_diff(file_a: &Path, file_b: &Path) -> Result<()>
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests
+{
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn test_copy_dir_all_flat()
+    {
+        let src = tempfile::TempDir::new().unwrap();
+        let dst = tempfile::TempDir::new().unwrap();
+
+        fs::write(src.path().join("a.txt"), "hello").unwrap();
+        fs::write(src.path().join("b.txt"), "world").unwrap();
+
+        copy_dir_all(src.path(), &dst.path().join("out")).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.path().join("out/a.txt")).unwrap(), "hello");
+        assert_eq!(fs::read_to_string(dst.path().join("out/b.txt")).unwrap(), "world");
+    }
+
+    #[test]
+    fn test_copy_dir_all_nested()
+    {
+        let src = tempfile::TempDir::new().unwrap();
+        let dst = tempfile::TempDir::new().unwrap();
+
+        fs::create_dir_all(src.path().join("sub/deep")).unwrap();
+        fs::write(src.path().join("top.txt"), "top").unwrap();
+        fs::write(src.path().join("sub/mid.txt"), "mid").unwrap();
+        fs::write(src.path().join("sub/deep/leaf.txt"), "leaf").unwrap();
+
+        copy_dir_all(src.path(), &dst.path().join("out")).unwrap();
+
+        assert_eq!(fs::read_to_string(dst.path().join("out/top.txt")).unwrap(), "top");
+        assert_eq!(fs::read_to_string(dst.path().join("out/sub/mid.txt")).unwrap(), "mid");
+        assert_eq!(fs::read_to_string(dst.path().join("out/sub/deep/leaf.txt")).unwrap(), "leaf");
+    }
+
+    #[test]
+    fn test_copy_file_with_mkdir_creates_parents()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src = dir.path().join("source.txt");
+        let dst = dir.path().join("a/b/c/dest.txt");
+
+        fs::write(&src, "content").unwrap();
+        copy_file_with_mkdir(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "content");
+    }
+
+    #[test]
+    fn test_copy_file_with_mkdir_existing_dir()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let src = dir.path().join("source.txt");
+        let dst = dir.path().join("dest.txt");
+
+        fs::write(&src, "data").unwrap();
+        copy_file_with_mkdir(&src, &dst).unwrap();
+
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "data");
+    }
+
+    #[test]
+    fn test_remove_file_and_cleanup_empty_parents()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let nested = dir.path().join("a/b/file.txt");
+
+        fs::create_dir_all(dir.path().join("a/b")).unwrap();
+        fs::write(&nested, "temp").unwrap();
+
+        remove_file_and_cleanup_parents(&nested).unwrap();
+
+        assert!(nested.exists() == false);
+        assert!(dir.path().join("a/b").exists() == false);
+        assert!(dir.path().join("a").exists() == false);
+    }
+
+    #[test]
+    fn test_remove_file_and_cleanup_nonempty_parent()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("parent")).unwrap();
+        fs::write(dir.path().join("parent/keep.txt"), "keep").unwrap();
+        fs::write(dir.path().join("parent/remove.txt"), "remove").unwrap();
+
+        remove_file_and_cleanup_parents(&dir.path().join("parent/remove.txt")).unwrap();
+
+        assert!(dir.path().join("parent/remove.txt").exists() == false);
+        assert!(dir.path().join("parent").exists() == true);
+        assert!(dir.path().join("parent/keep.txt").exists() == true);
+    }
+
+    #[test]
+    fn test_remove_file_nonexistent()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = remove_file_and_cleanup_parents(&dir.path().join("nonexistent.txt"));
+        assert!(result.is_err() == true);
+    }
+}

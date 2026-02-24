@@ -30,12 +30,10 @@ pub const TEMPLATE_MARKER: &str = "<!-- VIBE-CHECK-TEMPLATE: This marker indicat
 #[derive(Clone, Copy)]
 pub struct UpdateOptions<'a>
 {
-    /// Programming language or framework identifier
-    pub lang:    &'a str,
-    /// AI coding agent identifier (optional)
+    /// Programming language or framework identifier (None = no language setup)
+    pub lang:    Option<&'a str>,
+    /// AI coding agent identifier (None = no agent-specific files)
     pub agent:   Option<&'a str>,
-    /// Skip language-specific setup
-    pub no_lang: bool,
     /// Custom mission statement to override template default
     pub mission: Option<&'a str>,
     /// Ad-hoc skill URLs from CLI `--skill` flags
@@ -313,9 +311,9 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
-        if options.no_lang == false
+        if let Some(lang) = options.lang
         {
-            let resolved_files = bom::resolve_language_files(options.lang, &config)?;
+            let resolved_files = bom::resolve_language_files(lang, &config)?;
             for file_entry in &resolved_files
             {
                 process_entry(&file_entry.source, &file_entry.target, "languages");
@@ -468,7 +466,7 @@ impl<'a> TemplateEngine<'a>
     /// # Arguments
     ///
     /// * `ctx` - Main template context containing source, target, and fragments
-    /// * `options` - Update options containing no_lang and mission settings
+    /// * `options` - Update options containing lang and mission settings
     ///
     /// # Errors
     ///
@@ -482,7 +480,7 @@ impl<'a> TemplateEngine<'a>
 
         let mut fragments_by_category: HashMap<String, Vec<String>> = HashMap::new();
 
-        if options.no_lang == true
+        if options.lang.is_none() == true
         {
             fragments_by_category.entry("languages".to_string()).or_default();
         }
@@ -574,7 +572,7 @@ impl<'a> TemplateEngine<'a>
     /// # Arguments
     ///
     /// * `ctx` - Main template context containing source, target, fragments, and template version
-    /// * `options` - Update options containing mission, no_lang, lang, and force settings
+    /// * `options` - Update options containing mission, lang, and force settings
     /// * `skip_agents_md` - Whether AGENTS.md is customized and should be skipped
     /// * `file_tracker` - File tracker for recording installations
     ///
@@ -610,14 +608,7 @@ impl<'a> TemplateEngine<'a>
             &ctx.target,
             sha,
             ctx.template_version,
-            if options.no_lang
-            {
-                None
-            }
-            else
-            {
-                Some(options.lang.to_string())
-            },
+            options.lang.map(|l| l.to_string()),
             "main".to_string()
         );
 
@@ -636,7 +627,7 @@ impl<'a> TemplateEngine<'a>
     /// * `files_to_copy` - List of (source, target) file pairs
     /// * `file_tracker` - File tracker for checking modifications and recording installations
     /// * `ctx` - Template context containing the template version for file tracking
-    /// * `options` - Update options containing lang, no_lang, agent, and force settings
+    /// * `options` - Update options containing lang, agent, and force settings
     ///
     /// # Returns
     ///
@@ -748,14 +739,7 @@ impl<'a> TemplateEngine<'a>
                     target,
                     new_template_sha,
                     ctx.template_version,
-                    if options.no_lang
-                    {
-                        None
-                    }
-                    else
-                    {
-                        Some(options.lang.to_string())
-                    },
+                    options.lang.map(|l| l.to_string()),
                     category.to_string()
                 );
             }
@@ -885,5 +869,270 @@ impl<'a> TemplateEngine<'a>
     {
         let trimmed = url.trim_end_matches('/');
         trimmed.rsplit('/').next().map(|s| s.to_string()).filter(|s| s.is_empty() == false)
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use std::{fs, path::PathBuf};
+
+    use super::*;
+
+    // -- load_template_config --
+
+    #[test]
+    fn test_load_template_config_valid()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::write(dir.path().join("templates.yml"), "version: 3\nlanguages: {}").unwrap();
+
+        let config = load_template_config(dir.path()).unwrap();
+        assert_eq!(config.version, 3);
+    }
+
+    #[test]
+    fn test_load_template_config_missing()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let err = load_template_config(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("not found") == true);
+    }
+
+    // -- is_file_customized --
+
+    #[test]
+    fn test_is_file_customized_with_marker()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, format!("{}\n# Content", TEMPLATE_MARKER)).unwrap();
+
+        assert!(is_file_customized(&path).unwrap() == false);
+    }
+
+    #[test]
+    fn test_is_file_customized_without_marker()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "# Custom content with no marker").unwrap();
+
+        assert!(is_file_customized(&path).unwrap() == true);
+    }
+
+    #[test]
+    fn test_is_file_customized_nonexistent()
+    {
+        assert!(is_file_customized(Path::new("/nonexistent/file.md")).unwrap() == false);
+    }
+
+    // -- resolve_placeholder --
+
+    #[test]
+    fn test_resolve_placeholder_workspace()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let result = engine.resolve_placeholder("$workspace/AGENTS.md", &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("/projects/myapp/AGENTS.md"));
+    }
+
+    #[test]
+    fn test_resolve_placeholder_userprofile()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let result = engine.resolve_placeholder("$userprofile/.codex/prompts/init.md", &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("/home/user/.codex/prompts/init.md"));
+    }
+
+    #[test]
+    fn test_resolve_placeholder_no_placeholder()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let result = engine.resolve_placeholder("relative/path.md", &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("relative/path.md"));
+    }
+
+    // -- skill_name_from_url --
+
+    #[test]
+    fn test_skill_name_from_url_simple()
+    {
+        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").unwrap(), "my-skill");
+    }
+
+    #[test]
+    fn test_skill_name_from_url_trailing_slash()
+    {
+        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").unwrap(), "skill");
+    }
+
+    #[test]
+    fn test_skill_name_from_url_empty()
+    {
+        assert!(TemplateEngine::skill_name_from_url("").is_none() == true);
+    }
+
+    // -- merge_fragments --
+
+    fn write_template(dir: &Path, content: &str) -> PathBuf
+    {
+        let path = dir.join("AGENTS.md");
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn write_fragment(dir: &Path, name: &str, content: &str) -> PathBuf
+    {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    static TEMPLATE_BASE: &str = "\
+# AGENTS.md
+
+<!-- {mission} -->
+
+<!-- {principles} -->
+
+<!-- {languages} -->
+
+<!-- {integration} -->
+";
+
+    #[test]
+    fn test_merge_fragments_single_category()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let target = dir.path().join("output/AGENTS.md");
+        let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.");
+
+        let engine = TemplateEngine::new(dir.path());
+        let ctx = TemplateContext {
+            source,
+            target: target.clone(),
+            fragments: vec![(frag, "languages".to_string())],
+            template_version: 3
+        };
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
+
+        engine.merge_fragments(&ctx, &options).unwrap();
+
+        let output = fs::read_to_string(&target).unwrap();
+        assert!(output.contains("## Rust Conventions") == true);
+        assert!(output.contains("<!-- {languages} -->") == true);
+    }
+
+    #[test]
+    fn test_merge_fragments_multiple_categories()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let target = dir.path().join("output/AGENTS.md");
+
+        let mission_frag = write_fragment(dir.path(), "mission.md", "## Mission\n\nBuild great software.");
+        let principles_frag = write_fragment(dir.path(), "principles.md", "## Principles\n\nKeep it simple.");
+        let lang_frag = write_fragment(dir.path(), "lang.md", "## Rust\n\nUse clippy.");
+
+        let engine = TemplateEngine::new(dir.path());
+        let ctx = TemplateContext {
+            source,
+            target: target.clone(),
+            fragments: vec![
+                (mission_frag, "mission".to_string()),
+                (principles_frag, "principles".to_string()),
+                (lang_frag, "languages".to_string())
+            ],
+            template_version: 3
+        };
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
+
+        engine.merge_fragments(&ctx, &options).unwrap();
+
+        let output = fs::read_to_string(&target).unwrap();
+        assert!(output.contains("Build great software") == true);
+        assert!(output.contains("Keep it simple") == true);
+        assert!(output.contains("Use clippy") == true);
+    }
+
+    #[test]
+    fn test_merge_fragments_no_lang()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let target = dir.path().join("output/AGENTS.md");
+
+        let engine = TemplateEngine::new(dir.path());
+        let ctx = TemplateContext {
+            source,
+            target: target.clone(),
+            fragments: vec![],
+            template_version: 3
+        };
+        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
+
+        engine.merge_fragments(&ctx, &options).unwrap();
+
+        let output = fs::read_to_string(&target).unwrap();
+        assert!(output.contains("<!-- {languages} -->") == true);
+        // Languages insertion point should be followed by empty content (just newlines)
+        assert!(output.contains("<!-- {languages} -->\n\n") == true);
+    }
+
+    #[test]
+    fn test_merge_fragments_custom_mission()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let target = dir.path().join("output/AGENTS.md");
+
+        let engine = TemplateEngine::new(dir.path());
+        let ctx = TemplateContext {
+            source,
+            target: target.clone(),
+            fragments: vec![],
+            template_version: 3
+        };
+        let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
+
+        engine.merge_fragments(&ctx, &options).unwrap();
+
+        let output = fs::read_to_string(&target).unwrap();
+        assert!(output.contains("## Mission Statement") == true);
+        assert!(output.contains("We build CLI tools.") == true);
+    }
+
+    #[test]
+    fn test_merge_fragments_removes_template_marker()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let content_with_marker = format!("{}\n{}", TEMPLATE_MARKER, TEMPLATE_BASE);
+        let source = write_template(dir.path(), &content_with_marker);
+        let target = dir.path().join("output/AGENTS.md");
+
+        let engine = TemplateEngine::new(dir.path());
+        let ctx = TemplateContext {
+            source,
+            target: target.clone(),
+            fragments: vec![],
+            template_version: 3
+        };
+        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
+
+        engine.merge_fragments(&ctx, &options).unwrap();
+
+        let output = fs::read_to_string(&target).unwrap();
+        assert!(output.contains(TEMPLATE_MARKER) == false);
     }
 }
