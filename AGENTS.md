@@ -699,6 +699,23 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-02-24 (v9.0.1)
+
+- Decoupled `--lang` and `--agent` CLI flags: each now operates independently
+- Removed `--no-lang` flag (redundant: omitting `--lang` has the same effect)
+- Changed `UpdateOptions.lang` from `&str` to `Option<&str>`; removed `no_lang: bool` field
+- Removed auto-resolution of language when only `--agent` is specified
+- `--agent cursor` alone now installs only agent files; `--lang rust` alone installs only language files
+- Simplified `template_manager/update.rs`: removed lang resolution block, pass options through
+- Simplified CLI message branching in `main.rs`
+- Version bump: 9.0.0 to 9.0.1 (PATCH - behavioral refinement)
+
+### 2026-02-24 (v9.0.0, post-release)
+
+- Added duplicate disk-file target validation in `resolve_language_files()`
+- Two entries targeting the same workspace file now produce a clear error
+- Entries targeting `$instructions` (AGENTS.md fragments) are exempt since multiple fragments are expected
+
 ### 2026-02-24 (v9.0.0)
 
 - MAJOR version bump: 8.0.0 to 9.0.0 (V1 removed, V3 template format)

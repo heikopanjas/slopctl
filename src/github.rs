@@ -260,20 +260,20 @@ mod tests
     #[test]
     fn test_is_github_url()
     {
-        assert_eq!(is_github_url("https://github.com/user/repo"), true);
-        assert_eq!(is_github_url("http://github.com/user/repo"), true);
-        assert_eq!(is_github_url("https://gitlab.com/user/repo"), false);
-        assert_eq!(is_github_url("user/repo"), false);
-        assert_eq!(is_github_url("local-path/file.md"), false);
+        assert!(is_github_url("https://github.com/user/repo") == true);
+        assert!(is_github_url("http://github.com/user/repo") == true);
+        assert!(is_github_url("https://gitlab.com/user/repo") == false);
+        assert!(is_github_url("user/repo") == false);
+        assert!(is_github_url("local-path/file.md") == false);
     }
 
     #[test]
     fn test_is_url()
     {
-        assert_eq!(is_url("https://example.com"), true);
-        assert_eq!(is_url("http://example.com"), true);
-        assert_eq!(is_url("local-path"), false);
-        assert_eq!(is_url("user/repo"), false);
+        assert!(is_url("https://example.com") == true);
+        assert!(is_url("http://example.com") == true);
+        assert!(is_url("local-path") == false);
+        assert!(is_url("user/repo") == false);
     }
 
     #[test]

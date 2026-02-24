@@ -169,3 +169,150 @@ impl Config
         vec!["source.url", "source.fallback"]
     }
 }
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn test_config_default()
+    {
+        let config = Config::default();
+        assert!(config.source.url.is_none() == true);
+        assert!(config.source.fallback.is_none() == true);
+    }
+
+    #[test]
+    fn test_config_get_set_url()
+    {
+        let mut config = Config::default();
+        config.set("source.url", "https://example.com").unwrap();
+        assert_eq!(config.get("source.url").unwrap(), "https://example.com");
+    }
+
+    #[test]
+    fn test_config_get_set_fallback()
+    {
+        let mut config = Config::default();
+        config.set("source.fallback", "https://fallback.com").unwrap();
+        assert_eq!(config.get("source.fallback").unwrap(), "https://fallback.com");
+    }
+
+    #[test]
+    fn test_config_get_unknown_key()
+    {
+        let config = Config::default();
+        assert!(config.get("unknown.key").is_none() == true);
+    }
+
+    #[test]
+    fn test_config_set_unknown_key()
+    {
+        let mut config = Config::default();
+        let err = config.set("unknown.key", "value").unwrap_err();
+        assert!(err.to_string().contains("Unknown config key") == true);
+    }
+
+    #[test]
+    fn test_config_unset_url()
+    {
+        let mut config = Config::default();
+        config.set("source.url", "https://example.com").unwrap();
+        config.unset("source.url").unwrap();
+        assert!(config.get("source.url").is_none() == true);
+    }
+
+    #[test]
+    fn test_config_unset_fallback()
+    {
+        let mut config = Config::default();
+        config.set("source.fallback", "https://fallback.com").unwrap();
+        config.unset("source.fallback").unwrap();
+        assert!(config.get("source.fallback").is_none() == true);
+    }
+
+    #[test]
+    fn test_config_unset_unknown_key()
+    {
+        let mut config = Config::default();
+        let err = config.unset("unknown.key").unwrap_err();
+        assert!(err.to_string().contains("Unknown config key") == true);
+    }
+
+    #[test]
+    fn test_config_list_empty()
+    {
+        let config = Config::default();
+        assert!(config.list().is_empty() == true);
+    }
+
+    #[test]
+    fn test_config_list_populated()
+    {
+        let mut config = Config::default();
+        config.set("source.url", "https://example.com").unwrap();
+        config.set("source.fallback", "https://fallback.com").unwrap();
+
+        let values = config.list();
+        assert_eq!(values.len(), 2);
+        assert_eq!(values.get("source.url").unwrap(), "https://example.com");
+        assert_eq!(values.get("source.fallback").unwrap(), "https://fallback.com");
+    }
+
+    #[test]
+    fn test_config_valid_keys()
+    {
+        let keys = Config::valid_keys();
+        assert_eq!(keys, vec!["source.url", "source.fallback"]);
+    }
+
+    #[test]
+    fn test_config_serde_round_trip()
+    {
+        let mut config = Config::default();
+        config.set("source.url", "https://example.com").unwrap();
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let loaded: Config = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(loaded.get("source.url").unwrap(), "https://example.com");
+        assert!(loaded.get("source.fallback").is_none() == true);
+    }
+
+    #[test]
+    fn test_config_save_and_load()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
+
+        let mut config = Config::default();
+        config.set("source.url", "https://test.com").unwrap();
+        config.save().unwrap();
+
+        let loaded = Config::load().unwrap();
+        assert_eq!(loaded.get("source.url").unwrap(), "https://test.com");
+
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+    }
+
+    #[test]
+    fn test_config_load_missing_file()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
+
+        let loaded = Config::load().unwrap();
+        assert!(loaded.source.url.is_none() == true);
+
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+    }
+
+    #[test]
+    fn test_config_get_config_path_xdg()
+    {
+        unsafe { env::set_var("XDG_CONFIG_HOME", "/tmp/test-xdg") };
+        let path = Config::get_config_path().unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/test-xdg/vibe-check/config.yml"));
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+    }
+}

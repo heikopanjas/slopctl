@@ -53,10 +53,6 @@ enum Commands
         #[arg(long)]
         agent: Option<String>,
 
-        /// Skip language-specific setup (AGENTS.md only, no coding-conventions fragments)
-        #[arg(long, default_value = "false")]
-        no_lang: bool,
-
         /// Custom mission statement (use @filename to read from file)
         #[arg(long)]
         mission: Option<String>,
@@ -144,8 +140,8 @@ enum Commands
     }
 }
 
-/// Default template source URL (v2 is default in v6.x - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v2";
+/// Default template source URL (V3 templates - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -339,27 +335,18 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Install { lang, agent, no_lang, mission, skill, force, dry_run } =>
+        | Commands::Install { lang, agent, mission, skill, force, dry_run } =>
         {
-            // --lang and --no-lang are mutually exclusive
-            if lang.is_some() == true && no_lang == true
+            if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
-                eprintln!("{} Cannot use --lang and --no-lang together", "✗".red());
-                std::process::exit(1);
-            }
-
-            // Must specify at least one of --lang, --agent, --no-lang, or --skill
-            if lang.is_none() == true && agent.is_none() == true && no_lang == false && skill.is_empty() == true
-            {
-                eprintln!("{} Must specify at least one of --lang, --agent, --no-lang, or --skill", "✗".red());
+                eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
                 eprintln!("{} Examples: vibe-check install --lang rust", "→".blue());
                 eprintln!("{}          vibe-check install --agent cursor", "→".blue());
-                eprintln!("{}          vibe-check install --no-lang", "→".blue());
+                eprintln!("{}          vibe-check install --lang rust --agent cursor", "→".blue());
                 eprintln!("{}          vibe-check install --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
-            // Resolve mission content if provided (handles @filepath syntax)
             let resolved_mission = if let Some(ref mission_value) = mission
             {
                 match resolve_mission_content(mission_value)
@@ -377,7 +364,6 @@ fn main()
                 None
             };
 
-            // Check if global templates exist, download if not
             if manager.has_global_templates() == false
             {
                 if dry_run == true
@@ -401,68 +387,18 @@ fn main()
                 }
             }
 
-            // Install templates to project
-            if dry_run == true
+            let prefix = if dry_run == true { "Dry run: previewing" } else { "Installing" };
+            match (lang.as_ref(), agent.as_ref())
             {
-                if no_lang == true
-                {
-                    if let Some(a) = agent.as_ref()
-                    {
-                        println!("{} Dry run: previewing language-independent setup with {}", "→".blue(), a.green());
-                    }
-                    else
-                    {
-                        println!("{} Dry run: previewing language-independent setup", "→".blue());
-                    }
-                }
-                else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
-                {
-                    println!("{} Dry run: previewing changes for {} with {}", "→".blue(), l.green(), a.green());
-                }
-                else if let Some(l) = lang.as_ref()
-                {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), l.green());
-                }
-                else if let Some(a) = agent.as_ref()
-                {
-                    println!("{} Dry run: previewing changes for {}", "→".blue(), a.green());
-                }
-                else
-                {
-                    println!("{} Dry run: previewing skill installation", "→".blue());
-                }
+                | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
+                | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
+                | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
+                | (None, None) => println!("{} {} skills", "→".blue(), prefix)
             }
-            else if no_lang == true
-            {
-                if let Some(a) = agent.as_ref()
-                {
-                    println!("{} Installing language-independent setup with {}", "→".blue(), a.green());
-                }
-                else
-                {
-                    println!("{} Installing language-independent setup", "→".blue());
-                }
-            }
-            else if let (Some(l), Some(a)) = (lang.as_ref(), agent.as_ref())
-            {
-                println!("{} Installing project setup for {} with {}", "→".blue(), l.green(), a.green());
-            }
-            else if let Some(l) = lang.as_ref()
-            {
-                println!("{} Installing project setup for {}", "→".blue(), l.green());
-            }
-            else if let Some(a) = agent.as_ref()
-            {
-                println!("{} Installing project setup for {}", "→".blue(), a.green());
-            }
-            else
-            {
-                println!("{} Installing skills", "→".blue());
-            }
+
             let options = UpdateOptions {
-                lang: lang.as_deref().unwrap_or(""),
+                lang: lang.as_deref(),
                 agent: agent.as_deref(),
-                no_lang,
                 mission: resolved_mission.as_deref(),
                 skills: &skill,
                 force,
