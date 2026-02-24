@@ -88,22 +88,14 @@ impl DownloadManager
             download_entry(&main.source)?;
         }
 
-        // Download principles templates if present
-        if let Some(principles_entries) = &config.principles
+        for entry in &config.principles
         {
-            for entry in principles_entries
-            {
-                download_entry(&entry.source)?;
-            }
+            download_entry(&entry.source)?;
         }
 
-        // Download mission templates if present
-        if let Some(mission_entries) = &config.mission
+        for entry in &config.mission
         {
-            for entry in mission_entries
-            {
-                download_entry(&entry.source)?;
-            }
+            download_entry(&entry.source)?;
         }
 
         // Download language templates
@@ -115,46 +107,19 @@ impl DownloadManager
             }
         }
 
-        // Download integration templates
-        if let Some(integration_map) = &config.integration
+        for integration_config in config.integration.values()
         {
-            for integration_config in integration_map.values()
+            for file_entry in &integration_config.files
             {
-                for file_entry in &integration_config.files
-                {
-                    download_entry(&file_entry.source)?;
-                }
+                download_entry(&file_entry.source)?;
             }
         }
 
-        // Download agent templates (if agents section exists)
-        if let Some(agents) = &config.agents
+        for agent_config in config.agents.values()
         {
-            for agent_config in agents.values()
+            for entry in agent_config.instructions.iter().chain(&agent_config.prompts).chain(&agent_config.skills)
             {
-                if let Some(instructions) = &agent_config.instructions
-                {
-                    for instruction in instructions
-                    {
-                        download_entry(&instruction.source)?;
-                    }
-                }
-
-                if let Some(prompts) = &agent_config.prompts
-                {
-                    for prompt in prompts
-                    {
-                        download_entry(&prompt.source)?;
-                    }
-                }
-
-                if let Some(skills) = &agent_config.skills
-                {
-                    for skill in skills
-                    {
-                        download_entry(&skill.source)?;
-                    }
-                }
+                download_entry(&entry.source)?;
             }
         }
 

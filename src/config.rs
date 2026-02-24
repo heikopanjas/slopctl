@@ -173,6 +173,8 @@ impl Config
 #[cfg(test)]
 mod tests
 {
+    use std::{error::Error, result::Result};
+
     use super::*;
 
     #[test]
@@ -184,19 +186,21 @@ mod tests
     }
 
     #[test]
-    fn test_config_get_set_url()
+    fn test_config_get_set_url() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com").unwrap();
-        assert_eq!(config.get("source.url").unwrap(), "https://example.com");
+        config.set("source.url", "https://example.com")?;
+        assert_eq!(config.get("source.url").ok_or("source.url not set")?, "https://example.com");
+        Ok(())
     }
 
     #[test]
-    fn test_config_get_set_fallback()
+    fn test_config_get_set_fallback() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.fallback", "https://fallback.com").unwrap();
-        assert_eq!(config.get("source.fallback").unwrap(), "https://fallback.com");
+        config.set("source.fallback", "https://fallback.com")?;
+        assert_eq!(config.get("source.fallback").ok_or("source.fallback not set")?, "https://fallback.com");
+        Ok(())
     }
 
     #[test]
@@ -215,21 +219,23 @@ mod tests
     }
 
     #[test]
-    fn test_config_unset_url()
+    fn test_config_unset_url() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com").unwrap();
-        config.unset("source.url").unwrap();
+        config.set("source.url", "https://example.com")?;
+        config.unset("source.url")?;
         assert!(config.get("source.url").is_none() == true);
+        Ok(())
     }
 
     #[test]
-    fn test_config_unset_fallback()
+    fn test_config_unset_fallback() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.fallback", "https://fallback.com").unwrap();
-        config.unset("source.fallback").unwrap();
+        config.set("source.fallback", "https://fallback.com")?;
+        config.unset("source.fallback")?;
         assert!(config.get("source.fallback").is_none() == true);
+        Ok(())
     }
 
     #[test]
@@ -248,16 +254,17 @@ mod tests
     }
 
     #[test]
-    fn test_config_list_populated()
+    fn test_config_list_populated() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com").unwrap();
-        config.set("source.fallback", "https://fallback.com").unwrap();
+        config.set("source.url", "https://example.com")?;
+        config.set("source.fallback", "https://fallback.com")?;
 
         let values = config.list();
         assert_eq!(values.len(), 2);
-        assert_eq!(values.get("source.url").unwrap(), "https://example.com");
-        assert_eq!(values.get("source.fallback").unwrap(), "https://fallback.com");
+        assert_eq!(values.get("source.url").ok_or("source.url not in list")?, "https://example.com");
+        assert_eq!(values.get("source.fallback").ok_or("source.fallback not in list")?, "https://fallback.com");
+        Ok(())
     }
 
     #[test]
@@ -268,51 +275,55 @@ mod tests
     }
 
     #[test]
-    fn test_config_serde_round_trip()
+    fn test_config_serde_round_trip() -> Result<(), Box<dyn Error>>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com").unwrap();
+        config.set("source.url", "https://example.com")?;
 
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        let loaded: Config = serde_yaml::from_str(&yaml).unwrap();
-        assert_eq!(loaded.get("source.url").unwrap(), "https://example.com");
+        let yaml = serde_yaml::to_string(&config)?;
+        let loaded: Config = serde_yaml::from_str(&yaml)?;
+        assert_eq!(loaded.get("source.url").ok_or("source.url not set")?, "https://example.com");
         assert!(loaded.get("source.fallback").is_none() == true);
+        Ok(())
     }
 
     #[test]
-    fn test_config_save_and_load()
+    fn test_config_save_and_load() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
         let mut config = Config::default();
-        config.set("source.url", "https://test.com").unwrap();
-        config.save().unwrap();
+        config.set("source.url", "https://test.com")?;
+        config.save()?;
 
-        let loaded = Config::load().unwrap();
-        assert_eq!(loaded.get("source.url").unwrap(), "https://test.com");
+        let loaded = Config::load()?;
+        assert_eq!(loaded.get("source.url").ok_or("source.url not set")?, "https://test.com");
 
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
     }
 
     #[test]
-    fn test_config_load_missing_file()
+    fn test_config_load_missing_file() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
-        let loaded = Config::load().unwrap();
+        let loaded = Config::load()?;
         assert!(loaded.source.url.is_none() == true);
 
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
     }
 
     #[test]
-    fn test_config_get_config_path_xdg()
+    fn test_config_get_config_path_xdg() -> Result<(), Box<dyn Error>>
     {
         unsafe { env::set_var("XDG_CONFIG_HOME", "/tmp/test-xdg") };
-        let path = Config::get_config_path().unwrap();
+        let path = Config::get_config_path()?;
         assert_eq!(path, PathBuf::from("/tmp/test-xdg/vibe-check/config.yml"));
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
     }
 }

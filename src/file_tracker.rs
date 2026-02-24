@@ -279,7 +279,7 @@ mod tests
 
         let mut tracker = FileTracker::new(&data_dir)?;
         let project_file = temp_dir.path().join("project/AGENTS.md");
-        fs::create_dir_all(project_file.parent().unwrap())?;
+        fs::create_dir_all(project_file.parent().ok_or("expected parent directory")?)?;
         fs::write(&project_file, b"test")?;
 
         tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string());

@@ -255,6 +255,8 @@ pub fn download_github_file(github_url: &GitHubUrl, dest_path: &Path) -> Result<
 #[cfg(test)]
 mod tests
 {
+    use std::{error::Error, result::Result};
+
     use super::*;
 
     #[test]
@@ -277,33 +279,36 @@ mod tests
     }
 
     #[test]
-    fn test_parse_github_url_full()
+    fn test_parse_github_url_full() -> Result<(), Box<dyn Error>>
     {
-        let parsed = parse_github_url("https://github.com/user/repo/tree/main/path/to/dir").unwrap();
+        let parsed = parse_github_url("https://github.com/user/repo/tree/main/path/to/dir").ok_or("expected parsed URL")?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "main");
         assert_eq!(parsed.path, "path/to/dir");
+        Ok(())
     }
 
     #[test]
-    fn test_parse_github_url_bare_repo()
+    fn test_parse_github_url_bare_repo() -> Result<(), Box<dyn Error>>
     {
-        let parsed = parse_github_url("https://github.com/user/repo").unwrap();
+        let parsed = parse_github_url("https://github.com/user/repo").ok_or("expected parsed URL")?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "main");
         assert_eq!(parsed.path, "");
+        Ok(())
     }
 
     #[test]
-    fn test_parse_github_url_blob()
+    fn test_parse_github_url_blob() -> Result<(), Box<dyn Error>>
     {
-        let parsed = parse_github_url("https://github.com/user/repo/blob/develop/src/file.rs").unwrap();
+        let parsed = parse_github_url("https://github.com/user/repo/blob/develop/src/file.rs").ok_or("expected parsed URL")?;
         assert_eq!(parsed.owner, "user");
         assert_eq!(parsed.repo, "repo");
         assert_eq!(parsed.branch, "develop");
         assert_eq!(parsed.path, "src/file.rs");
+        Ok(())
     }
 
     #[test]

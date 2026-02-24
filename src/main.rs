@@ -387,7 +387,14 @@ fn main()
                 }
             }
 
-            let prefix = if dry_run == true { "Dry run: previewing" } else { "Installing" };
+            let prefix = if dry_run == true
+            {
+                "Dry run: previewing"
+            }
+            else
+            {
+                "Installing"
+            };
             match (lang.as_ref(), agent.as_ref())
             {
                 | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
@@ -396,14 +403,7 @@ fn main()
                 | (None, None) => println!("{} {} skills", "→".blue(), prefix)
             }
 
-            let options = UpdateOptions {
-                lang: lang.as_deref(),
-                agent: agent.as_deref(),
-                mission: resolved_mission.as_deref(),
-                skills: &skill,
-                force,
-                dry_run
-            };
+            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
             manager.update(&options)
         }
         | Commands::Update { from, dry_run } =>

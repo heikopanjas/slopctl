@@ -294,18 +294,14 @@ impl<'a> TemplateEngine<'a>
             }
         };
 
-        if let Some(principles_entries) = &config.principles
+        for entry in &config.principles
         {
-            for entry in principles_entries
-            {
-                process_entry(&entry.source, &entry.target, "principles");
-            }
+            process_entry(&entry.source, &entry.target, "principles");
         }
 
-        if options.mission.is_none() == true &&
-            let Some(mission_entries) = &config.mission
+        if options.mission.is_none() == true
         {
-            for entry in mission_entries
+            for entry in &config.mission
             {
                 process_entry(&entry.source, &entry.target, "mission");
             }
@@ -320,42 +316,34 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
-        if let Some(integration_map) = &config.integration
+        for integration_config in config.integration.values()
         {
-            for integration_config in integration_map.values()
+            for file_entry in &integration_config.files
             {
-                for file_entry in &integration_config.files
-                {
-                    process_entry(&file_entry.source, &file_entry.target, "integration");
-                }
+                process_entry(&file_entry.source, &file_entry.target, "integration");
             }
         }
 
-        if let Some(agent_name) = options.agent &&
-            let Some(agents) = config.agents.as_ref()
+        if let Some(agent_name) = options.agent
         {
-            if let Some(agent_config) = agents.get(agent_name)
+            if let Some(agent_config) = config.agents.get(agent_name)
             {
-                let all_mappings = [&agent_config.instructions, &agent_config.prompts, &agent_config.skills];
-                for entries in all_mappings.iter().copied().flatten()
+                for entry in agent_config.instructions.iter().chain(&agent_config.prompts).chain(&agent_config.skills)
                 {
-                    for entry in entries
+                    let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
                     {
-                        let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
+                        | Ok(p) => p,
+                        | Err(e) =>
                         {
-                            | Ok(p) => p,
-                            | Err(e) =>
-                            {
-                                println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
-                                continue;
-                            }
-                        };
-
-                        if source_path.exists()
-                        {
-                            let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                            files_to_copy.push((source_path, target_path));
+                            println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
+                            continue;
                         }
+                    };
+
+                    if source_path.exists()
+                    {
+                        let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                        files_to_copy.push((source_path, target_path));
                     }
                 }
             }
@@ -373,11 +361,10 @@ impl<'a> TemplateEngine<'a>
         let skill_agent = options.agent.map(|a| a.to_string()).or_else(|| agent_defaults::detect_installed_agent(&workspace));
 
         if let Some(ref agent_name) = skill_agent &&
-            let Some(template_skills) = &config.skills &&
-            template_skills.is_empty() == false
+            config.skills.is_empty() == false
         {
             self.install_skills(
-                template_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
+                config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
                 agent_name,
                 &workspace,
                 &userprofile,
@@ -604,13 +591,7 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(
-            &ctx.target,
-            sha,
-            ctx.template_version,
-            options.lang.map(|l| l.to_string()),
-            "main".to_string()
-        );
+        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string());
 
         Ok(())
     }
@@ -735,13 +716,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(
-                    target,
-                    new_template_sha,
-                    ctx.template_version,
-                    options.lang.map(|l| l.to_string()),
-                    category.to_string()
-                );
+                file_tracker.record_installation(target, new_template_sha, ctx.template_version, options.lang.map(|l| l.to_string()), category.to_string());
             }
         }
 
@@ -875,56 +850,61 @@ impl<'a> TemplateEngine<'a>
 #[cfg(test)]
 mod tests
 {
-    use std::{fs, path::PathBuf};
+    use std::{error::Error, fs, path::PathBuf, result::Result};
 
     use super::*;
 
     // -- load_template_config --
 
     #[test]
-    fn test_load_template_config_valid()
+    fn test_load_template_config_valid() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        fs::write(dir.path().join("templates.yml"), "version: 3\nlanguages: {}").unwrap();
+        let dir = tempfile::TempDir::new()?;
+        fs::write(dir.path().join("templates.yml"), "version: 3\nlanguages: {}")?;
 
-        let config = load_template_config(dir.path()).unwrap();
+        let config = load_template_config(dir.path())?;
         assert_eq!(config.version, 3);
+        Ok(())
     }
 
     #[test]
-    fn test_load_template_config_missing()
+    fn test_load_template_config_missing() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let err = load_template_config(dir.path()).unwrap_err();
         assert!(err.to_string().contains("not found") == true);
+        Ok(())
     }
 
     // -- is_file_customized --
 
     #[test]
-    fn test_is_file_customized_with_marker()
+    fn test_is_file_customized_with_marker() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let path = dir.path().join("test.md");
-        fs::write(&path, format!("{}\n# Content", TEMPLATE_MARKER)).unwrap();
+        fs::write(&path, format!("{}\n# Content", TEMPLATE_MARKER))?;
 
-        assert!(is_file_customized(&path).unwrap() == false);
+        assert!(is_file_customized(&path)? == false);
+        Ok(())
     }
 
     #[test]
-    fn test_is_file_customized_without_marker()
+    fn test_is_file_customized_without_marker() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let path = dir.path().join("test.md");
-        fs::write(&path, "# Custom content with no marker").unwrap();
+        fs::write(&path, "# Custom content with no marker")?;
 
-        assert!(is_file_customized(&path).unwrap() == true);
+        assert!(is_file_customized(&path)? == true);
+        Ok(())
     }
 
     #[test]
-    fn test_is_file_customized_nonexistent()
+    fn test_is_file_customized_nonexistent() -> Result<(), Box<dyn Error>>
     {
-        assert!(is_file_customized(Path::new("/nonexistent/file.md")).unwrap() == false);
+        assert!(is_file_customized(Path::new("/nonexistent/file.md"))? == false);
+        Ok(())
     }
 
     // -- resolve_placeholder --
@@ -965,15 +945,17 @@ mod tests
     // -- skill_name_from_url --
 
     #[test]
-    fn test_skill_name_from_url_simple()
+    fn test_skill_name_from_url_simple() -> Result<(), Box<dyn Error>>
     {
-        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").unwrap(), "my-skill");
+        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").ok_or("expected skill name")?, "my-skill");
+        Ok(())
     }
 
     #[test]
-    fn test_skill_name_from_url_trailing_slash()
+    fn test_skill_name_from_url_trailing_slash() -> Result<(), Box<dyn Error>>
     {
-        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").unwrap(), "skill");
+        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").ok_or("expected skill name")?, "skill");
+        Ok(())
     }
 
     #[test]
@@ -984,18 +966,18 @@ mod tests
 
     // -- merge_fragments --
 
-    fn write_template(dir: &Path, content: &str) -> PathBuf
+    fn write_template(dir: &Path, content: &str) -> Result<PathBuf, Box<dyn Error>>
     {
         let path = dir.join("AGENTS.md");
-        fs::write(&path, content).unwrap();
-        path
+        fs::write(&path, content)?;
+        Ok(path)
     }
 
-    fn write_fragment(dir: &Path, name: &str, content: &str) -> PathBuf
+    fn write_fragment(dir: &Path, name: &str, content: &str) -> Result<PathBuf, Box<dyn Error>>
     {
         let path = dir.join(name);
-        fs::write(&path, content).unwrap();
-        path
+        fs::write(&path, content)?;
+        Ok(path)
     }
 
     static TEMPLATE_BASE: &str = "\
@@ -1011,128 +993,109 @@ mod tests
 ";
 
     #[test]
-    fn test_merge_fragments_single_category()
+    fn test_merge_fragments_single_category() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let dir = tempfile::TempDir::new()?;
+        let source = write_template(dir.path(), TEMPLATE_BASE)?;
         let target = dir.path().join("output/AGENTS.md");
-        let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.");
+        let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.")?;
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext {
-            source,
-            target: target.clone(),
-            fragments: vec![(frag, "languages".to_string())],
-            template_version: 3
-        };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 3 };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
-        engine.merge_fragments(&ctx, &options).unwrap();
+        engine.merge_fragments(&ctx, &options)?;
 
-        let output = fs::read_to_string(&target).unwrap();
+        let output = fs::read_to_string(&target)?;
         assert!(output.contains("## Rust Conventions") == true);
         assert!(output.contains("<!-- {languages} -->") == true);
+        Ok(())
     }
 
     #[test]
-    fn test_merge_fragments_multiple_categories()
+    fn test_merge_fragments_multiple_categories() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let dir = tempfile::TempDir::new()?;
+        let source = write_template(dir.path(), TEMPLATE_BASE)?;
         let target = dir.path().join("output/AGENTS.md");
 
-        let mission_frag = write_fragment(dir.path(), "mission.md", "## Mission\n\nBuild great software.");
-        let principles_frag = write_fragment(dir.path(), "principles.md", "## Principles\n\nKeep it simple.");
-        let lang_frag = write_fragment(dir.path(), "lang.md", "## Rust\n\nUse clippy.");
+        let mission_frag = write_fragment(dir.path(), "mission.md", "## Mission\n\nBuild great software.")?;
+        let principles_frag = write_fragment(dir.path(), "principles.md", "## Principles\n\nKeep it simple.")?;
+        let lang_frag = write_fragment(dir.path(), "lang.md", "## Rust\n\nUse clippy.")?;
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext {
             source,
             target: target.clone(),
-            fragments: vec![
-                (mission_frag, "mission".to_string()),
-                (principles_frag, "principles".to_string()),
-                (lang_frag, "languages".to_string())
-            ],
+            fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
             template_version: 3
         };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
-        engine.merge_fragments(&ctx, &options).unwrap();
+        engine.merge_fragments(&ctx, &options)?;
 
-        let output = fs::read_to_string(&target).unwrap();
+        let output = fs::read_to_string(&target)?;
         assert!(output.contains("Build great software") == true);
         assert!(output.contains("Keep it simple") == true);
         assert!(output.contains("Use clippy") == true);
+        Ok(())
     }
 
     #[test]
-    fn test_merge_fragments_no_lang()
+    fn test_merge_fragments_no_lang() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let dir = tempfile::TempDir::new()?;
+        let source = write_template(dir.path(), TEMPLATE_BASE)?;
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext {
-            source,
-            target: target.clone(),
-            fragments: vec![],
-            template_version: 3
-        };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
-        engine.merge_fragments(&ctx, &options).unwrap();
+        engine.merge_fragments(&ctx, &options)?;
 
-        let output = fs::read_to_string(&target).unwrap();
+        let output = fs::read_to_string(&target)?;
         assert!(output.contains("<!-- {languages} -->") == true);
         // Languages insertion point should be followed by empty content (just newlines)
         assert!(output.contains("<!-- {languages} -->\n\n") == true);
+        Ok(())
     }
 
     #[test]
-    fn test_merge_fragments_custom_mission()
+    fn test_merge_fragments_custom_mission() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        let source = write_template(dir.path(), TEMPLATE_BASE);
+        let dir = tempfile::TempDir::new()?;
+        let source = write_template(dir.path(), TEMPLATE_BASE)?;
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext {
-            source,
-            target: target.clone(),
-            fragments: vec![],
-            template_version: 3
-        };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
         let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
 
-        engine.merge_fragments(&ctx, &options).unwrap();
+        engine.merge_fragments(&ctx, &options)?;
 
-        let output = fs::read_to_string(&target).unwrap();
+        let output = fs::read_to_string(&target)?;
         assert!(output.contains("## Mission Statement") == true);
         assert!(output.contains("We build CLI tools.") == true);
+        Ok(())
     }
 
     #[test]
-    fn test_merge_fragments_removes_template_marker()
+    fn test_merge_fragments_removes_template_marker() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let content_with_marker = format!("{}\n{}", TEMPLATE_MARKER, TEMPLATE_BASE);
-        let source = write_template(dir.path(), &content_with_marker);
+        let source = write_template(dir.path(), &content_with_marker)?;
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext {
-            source,
-            target: target.clone(),
-            fragments: vec![],
-            template_version: 3
-        };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
-        engine.merge_fragments(&ctx, &options).unwrap();
+        engine.merge_fragments(&ctx, &options)?;
 
-        let output = fs::read_to_string(&target).unwrap();
+        let output = fs::read_to_string(&target)?;
         assert!(output.contains(TEMPLATE_MARKER) == false);
+        Ok(())
     }
 }

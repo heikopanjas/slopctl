@@ -35,27 +35,22 @@ impl TemplateManager
         let config_path = self.config_dir.join("templates.yml");
         let bom = BillOfMaterials::from_config(&config_path)?;
 
-        // List agents (if agents section exists)
-        if let Some(agents_map) = &config.agents
+        println!("{}", "Available Agents:".bold());
+        if config.agents.is_empty() == true
         {
-            println!("{}", "Available Agents:".bold());
-            let mut agents: Vec<&String> = agents_map.keys().collect();
+            println!("  {} agents.md standard - no agent-specific files", "→".blue());
+            println!("  {} Single AGENTS.md works with all agents", "→".blue());
+        }
+        else
+        {
+            let mut agents: Vec<&String> = config.agents.keys().collect();
             agents.sort();
 
             for agent_name in agents
             {
-                // Check if agent is installed (has files in current directory)
-                let is_installed = if let Some(files) = bom.get_agent_files(agent_name)
-                {
-                    files.iter().any(|f| f.exists())
-                }
-                else
-                {
-                    false
-                };
+                let is_installed = bom.get_agent_files(agent_name).is_some_and(|files| files.iter().any(|f| f.exists()));
 
-                // Count available skills for this agent
-                let skill_count = agents_map.get(agent_name).and_then(|c| c.skills.as_ref()).map_or(0, |s| s.len());
+                let skill_count = config.agents.get(agent_name).map_or(0, |c| c.skills.len());
 
                 let skill_info = if skill_count > 0
                 {
@@ -82,16 +77,8 @@ impl TemplateManager
                     }
                 }
             }
-
-            println!();
         }
-        else
-        {
-            println!("{}", "Available Agents:".bold());
-            println!("  {} agents.md standard - no agent-specific files", "→".blue());
-            println!("  {} Single AGENTS.md works with all agents", "→".blue());
-            println!();
-        }
+        println!();
 
         // List languages (no installation status - language content is merged into AGENTS.md)
         println!("{}", "Available Languages:".bold());
@@ -101,8 +88,7 @@ impl TemplateManager
         for lang_name in languages
         {
             let lang_config = config.languages.get(lang_name.as_str());
-            let includes_annotation =
-                lang_config.and_then(|lc| lc.includes.as_ref()).filter(|inc| inc.is_empty() == false).map(|inc| format!(" (includes: {})", inc.join(", ")));
+            let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!(" (includes: {})", inc.join(", ")));
 
             if let Some(annotation) = includes_annotation
             {
@@ -115,12 +101,11 @@ impl TemplateManager
         }
 
         // List top-level skills (agent-agnostic)
-        if let Some(template_skills) = &config.skills &&
-            template_skills.is_empty() == false
+        if config.skills.is_empty() == false
         {
             println!();
             println!("{}", "Available Skills:".bold());
-            for skill in template_skills
+            for skill in &config.skills
             {
                 let source_info = if crate::github::is_url(&skill.source) == true
                 {

@@ -123,17 +123,20 @@ pub fn detect_installed_agent(workspace: &Path) -> Option<String>
 #[cfg(test)]
 mod tests
 {
+    use std::error::Error;
+
     use super::*;
 
     #[test]
-    fn test_get_defaults_known_agent()
+    fn test_get_defaults_known_agent() -> Result<(), Box<dyn Error>>
     {
         let defaults = get_defaults("cursor");
         assert!(defaults.is_some());
-        let defaults = defaults.unwrap();
+        let defaults = defaults.ok_or("expected defaults")?;
         assert_eq!(defaults.name, "cursor");
         assert_eq!(defaults.skill_dir, "$workspace/.cursor/skills");
         assert_eq!(defaults.prompt_dir, "$workspace/.cursor/commands");
+        Ok(())
     }
 
     #[test]
@@ -162,26 +165,28 @@ mod tests
     }
 
     #[test]
-    fn test_detect_installed_agent()
+    fn test_detect_installed_agent() -> Result<(), Box<dyn Error>>
     {
-        let temp_dir = tempfile::TempDir::new().unwrap();
+        let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
         // No agent files -> None
         assert!(detect_installed_agent(workspace).is_none());
 
         // Create .cursorrules -> detects cursor
-        std::fs::write(workspace.join(".cursorrules"), b"test").unwrap();
+        std::fs::write(workspace.join(".cursorrules"), b"test")?;
         assert_eq!(detect_installed_agent(workspace), Some("cursor".to_string()));
+        Ok(())
     }
 
     #[test]
-    fn test_detect_installed_agent_claude()
+    fn test_detect_installed_agent_claude() -> Result<(), Box<dyn Error>>
     {
-        let temp_dir = tempfile::TempDir::new().unwrap();
+        let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join("CLAUDE.md"), b"test").unwrap();
+        std::fs::write(workspace.join("CLAUDE.md"), b"test")?;
         assert_eq!(detect_installed_agent(workspace), Some("claude".to_string()));
+        Ok(())
     }
 }

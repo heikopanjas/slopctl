@@ -39,13 +39,10 @@ impl TemplateManager
                 println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
 
                 // List agent-specific files (if agents section exists)
-                if let Some(agents_map) = &config.agents
+                if config.agents.is_empty() == false
                 {
-                    let agents: Vec<&String> = agents_map.keys().collect();
-                    if agents.is_empty() == false
-                    {
-                        println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
-                    }
+                    let agents: Vec<&String> = config.agents.keys().collect();
+                    println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
                 }
 
                 let languages: Vec<&String> = config.languages.keys().collect();

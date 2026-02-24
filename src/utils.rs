@@ -298,105 +298,119 @@ fn show_simple_diff(file_a: &Path, file_b: &Path) -> Result<()>
 #[cfg(test)]
 mod tests
 {
-    use std::fs;
+    use std::{error::Error, fs, result::Result};
 
     use super::*;
 
     #[test]
-    fn test_copy_dir_all_flat()
+    fn test_copy_dir_all_flat() -> Result<(), Box<dyn Error>>
     {
-        let src = tempfile::TempDir::new().unwrap();
-        let dst = tempfile::TempDir::new().unwrap();
+        let src = tempfile::TempDir::new()?;
+        let dst = tempfile::TempDir::new()?;
 
-        fs::write(src.path().join("a.txt"), "hello").unwrap();
-        fs::write(src.path().join("b.txt"), "world").unwrap();
+        fs::write(src.path().join("a.txt"), "hello")?;
+        fs::write(src.path().join("b.txt"), "world")?;
 
-        copy_dir_all(src.path(), &dst.path().join("out")).unwrap();
+        copy_dir_all(src.path(), &dst.path().join("out"))?;
 
-        assert_eq!(fs::read_to_string(dst.path().join("out/a.txt")).unwrap(), "hello");
-        assert_eq!(fs::read_to_string(dst.path().join("out/b.txt")).unwrap(), "world");
+        assert_eq!(fs::read_to_string(dst.path().join("out/a.txt"))?, "hello");
+        assert_eq!(fs::read_to_string(dst.path().join("out/b.txt"))?, "world");
+
+        Ok(())
     }
 
     #[test]
-    fn test_copy_dir_all_nested()
+    fn test_copy_dir_all_nested() -> Result<(), Box<dyn Error>>
     {
-        let src = tempfile::TempDir::new().unwrap();
-        let dst = tempfile::TempDir::new().unwrap();
+        let src = tempfile::TempDir::new()?;
+        let dst = tempfile::TempDir::new()?;
 
-        fs::create_dir_all(src.path().join("sub/deep")).unwrap();
-        fs::write(src.path().join("top.txt"), "top").unwrap();
-        fs::write(src.path().join("sub/mid.txt"), "mid").unwrap();
-        fs::write(src.path().join("sub/deep/leaf.txt"), "leaf").unwrap();
+        fs::create_dir_all(src.path().join("sub/deep"))?;
+        fs::write(src.path().join("top.txt"), "top")?;
+        fs::write(src.path().join("sub/mid.txt"), "mid")?;
+        fs::write(src.path().join("sub/deep/leaf.txt"), "leaf")?;
 
-        copy_dir_all(src.path(), &dst.path().join("out")).unwrap();
+        copy_dir_all(src.path(), &dst.path().join("out"))?;
 
-        assert_eq!(fs::read_to_string(dst.path().join("out/top.txt")).unwrap(), "top");
-        assert_eq!(fs::read_to_string(dst.path().join("out/sub/mid.txt")).unwrap(), "mid");
-        assert_eq!(fs::read_to_string(dst.path().join("out/sub/deep/leaf.txt")).unwrap(), "leaf");
+        assert_eq!(fs::read_to_string(dst.path().join("out/top.txt"))?, "top");
+        assert_eq!(fs::read_to_string(dst.path().join("out/sub/mid.txt"))?, "mid");
+        assert_eq!(fs::read_to_string(dst.path().join("out/sub/deep/leaf.txt"))?, "leaf");
+
+        Ok(())
     }
 
     #[test]
-    fn test_copy_file_with_mkdir_creates_parents()
+    fn test_copy_file_with_mkdir_creates_parents() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let src = dir.path().join("source.txt");
         let dst = dir.path().join("a/b/c/dest.txt");
 
-        fs::write(&src, "content").unwrap();
-        copy_file_with_mkdir(&src, &dst).unwrap();
+        fs::write(&src, "content")?;
+        copy_file_with_mkdir(&src, &dst)?;
 
-        assert_eq!(fs::read_to_string(&dst).unwrap(), "content");
+        assert_eq!(fs::read_to_string(&dst)?, "content");
+
+        Ok(())
     }
 
     #[test]
-    fn test_copy_file_with_mkdir_existing_dir()
+    fn test_copy_file_with_mkdir_existing_dir() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let src = dir.path().join("source.txt");
         let dst = dir.path().join("dest.txt");
 
-        fs::write(&src, "data").unwrap();
-        copy_file_with_mkdir(&src, &dst).unwrap();
+        fs::write(&src, "data")?;
+        copy_file_with_mkdir(&src, &dst)?;
 
-        assert_eq!(fs::read_to_string(&dst).unwrap(), "data");
+        assert_eq!(fs::read_to_string(&dst)?, "data");
+
+        Ok(())
     }
 
     #[test]
-    fn test_remove_file_and_cleanup_empty_parents()
+    fn test_remove_file_and_cleanup_empty_parents() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let nested = dir.path().join("a/b/file.txt");
 
-        fs::create_dir_all(dir.path().join("a/b")).unwrap();
-        fs::write(&nested, "temp").unwrap();
+        fs::create_dir_all(dir.path().join("a/b"))?;
+        fs::write(&nested, "temp")?;
 
-        remove_file_and_cleanup_parents(&nested).unwrap();
+        remove_file_and_cleanup_parents(&nested)?;
 
         assert!(nested.exists() == false);
         assert!(dir.path().join("a/b").exists() == false);
         assert!(dir.path().join("a").exists() == false);
+
+        Ok(())
     }
 
     #[test]
-    fn test_remove_file_and_cleanup_nonempty_parent()
+    fn test_remove_file_and_cleanup_nonempty_parent() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join("parent")).unwrap();
-        fs::write(dir.path().join("parent/keep.txt"), "keep").unwrap();
-        fs::write(dir.path().join("parent/remove.txt"), "remove").unwrap();
+        let dir = tempfile::TempDir::new()?;
+        fs::create_dir_all(dir.path().join("parent"))?;
+        fs::write(dir.path().join("parent/keep.txt"), "keep")?;
+        fs::write(dir.path().join("parent/remove.txt"), "remove")?;
 
-        remove_file_and_cleanup_parents(&dir.path().join("parent/remove.txt")).unwrap();
+        remove_file_and_cleanup_parents(&dir.path().join("parent/remove.txt"))?;
 
         assert!(dir.path().join("parent/remove.txt").exists() == false);
         assert!(dir.path().join("parent").exists() == true);
         assert!(dir.path().join("parent/keep.txt").exists() == true);
+
+        Ok(())
     }
 
     #[test]
-    fn test_remove_file_nonexistent()
+    fn test_remove_file_nonexistent() -> Result<(), Box<dyn Error>>
     {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new()?;
         let result = remove_file_and_cleanup_parents(&dir.path().join("nonexistent.txt"));
         assert!(result.is_err() == true);
+
+        Ok(())
     }
 }

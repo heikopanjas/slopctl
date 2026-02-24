@@ -58,7 +58,7 @@ impl TemplateManager
                 return Err(format!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent_name, available_agents.join(", ")).into());
             }
 
-            let agent_files = bom.get_agent_files(agent_name).unwrap();
+            let agent_files = bom.get_agent_files(agent_name).ok_or_else(|| format!("Agent '{}' files missing from Bill of Materials", agent_name))?;
             let existing: Vec<PathBuf> = agent_files.iter().filter(|f| f.exists()).cloned().collect();
             (existing, format!("agent '{}'", agent_name.yellow()))
         }
