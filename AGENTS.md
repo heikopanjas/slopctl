@@ -118,6 +118,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Write self-documenting code with clear naming and structure
 - Leverage the type system for compile-time safety
 - Keep functions focused and modular
+- **DRY (Don't Repeat Yourself)**: Extract shared logic into functions, traits, or structs. When the same pattern appears in 2+ places, factor it out. Use parameter structs (e.g. `UpdateOptions`) to aggregate related arguments rather than passing many individual parameters. Prefer a single source of truth for data (e.g. `agent_defaults.rs` for agent path conventions rather than duplicating paths in config and code).
 
 **Error Handling:**
 
@@ -713,6 +714,12 @@ After making ANY code changes:
 - Automatic agent detection via `detect_installed_agent()` when `--agent` not specified
 - Moved `tempfile` from dev-dependencies to runtime dependency
 - Updated all user-facing messages from `init` to `install`
+- DRY refactoring: eliminated duplicate `download_file` and `parse_github_url` from `download_manager.rs` (now uses `github.rs`)
+- DRY refactoring: collapsed repeated agent instructions/prompts/skills resolve-and-copy pattern into single loop
+- Removed dead code: `github::download_directory()` (install_skills handles it directly)
+- Added `skills` field to `UpdateOptions` and refactored all `update()` methods to accept `&UpdateOptions` instead of 7-8 individual parameters
+- Removed `#[allow(clippy::too_many_arguments)]` suppressions
+- Added DRY principle to Rust coding conventions in AGENTS.md
 
 ### 2026-02-17 (evening, v7.0.0)
 
