@@ -134,6 +134,18 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use `.ok_or_else()` or `.ok_or()` to convert `Option` to `Result` with meaningful error messages
 - Provide context when returning errors: `Err(format!("Failed to download {}: {}", url, e).into())`
 - Never panic in library code unless documenting preconditions with `#[panic]` doc comments
+- Use the `require!` macro for precondition checks with early return:
+
+  ```rust
+  require!(config_file.exists() == true, Err("Config not found".into()));
+  require!(name.is_empty() == false, None);
+  require!(count > 0, Ok(()));
+  ```
+
+  - Syntax: `require!(condition, return_expression)`
+  - Returns the expression when the condition is **false**
+  - Works with any return type: `Result`, `Option`, or bare values
+  - Prefer `require!` over multi-line `if condition { return ... }` blocks for simple precondition guards
 
 **Comparison and Conditional Expressions:**
 
