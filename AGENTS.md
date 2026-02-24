@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-24T2
+**Last updated:** 2026-02-25
 
 <!-- {mission} -->
 
@@ -123,21 +123,27 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 **Error Handling:**
 
 - Use `Result<T, E>` for all fallible operations
-- Define a project-wide `Result<T>` type alias with unified error type:
+- Use `anyhow` crate for error handling; re-export from `lib.rs`:
 
   ```rust
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+  pub use anyhow::Result;
+  ```
+
+- Use `anyhow!()` macro for constructing errors:
+
+  ```rust
+  Err(anyhow!("Config file not found"))
+  Err(anyhow!("Failed to download {}: {}", url, e))
   ```
 
 - Use `?` operator for error propagation
 - Avoid `.unwrap()` in library code; only use in application entry points after proper error handling
 - Use `.ok_or_else()` or `.ok_or()` to convert `Option` to `Result` with meaningful error messages
-- Provide context when returning errors: `Err(format!("Failed to download {}: {}", url, e).into())`
 - Never panic in library code unless documenting preconditions with `#[panic]` doc comments
 - Use the `require!` macro for precondition checks with early return:
 
   ```rust
-  require!(config_file.exists() == true, Err("Config not found".into()));
+  require!(config_file.exists() == true, Err(anyhow!("Config not found")));
   require!(name.is_empty() == false, None);
   require!(count > 0, Ok(()));
   ```
@@ -212,10 +218,9 @@ When initializing a session or analyzing the workspace, refer to instruction fil
   mod template_manager;
   mod utils;
 
+  pub use anyhow::Result;
   pub use template_manager::TemplateManager;
   pub use utils::copy_dir_all;
-
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
   ```
 
 **Functions and Methods:**
@@ -754,6 +759,26 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-25 (anyhow migration)
+
+- Migrated error handling from custom `Result<T>` type alias (`Box<dyn Error>`) to `anyhow` crate
+- `lib.rs` now re-exports `pub use anyhow::Result;` instead of defining type alias
+- Replaced all `Err(format!(...).into())` with `Err(anyhow!(...))`
+- Replaced all `Err("literal".into())` with `Err(anyhow!(...))`
+- Updated `.ok_or()` patterns for anyhow compatibility
+- Updated `file_tracker.rs` signatures from `Box<dyn Error>` to anyhow
+- Updated all test return types to `anyhow::Result`
+- Fixed config test race condition with static Mutex
+- Retrofitted `require!` macro at function-top preconditions across codebase
+- Updated AGENTS.md error handling section to reflect anyhow patterns
+
+### 2026-02-24 (require! macro)
+
+- Added `require!(condition, return_expr)` precondition macro in `lib.rs`
+- Returns expression when condition is false; works with `Result`, `Option`, and bare values
+- Added unit tests for all three return type variants
+- Documented convention in AGENTS.md error handling section
 
 ### 2026-02-24 (v9.0.2, coding conventions)
 
