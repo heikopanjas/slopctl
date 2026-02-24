@@ -127,11 +127,8 @@ pub fn resolve_language_files(lang: &str, config: &TemplateConfig) -> Result<Vec
     let mut seen_targets: HashMap<&str, &str> = HashMap::new();
     for entry in &files
     {
-        if entry.target.starts_with("$instructions") == true
-        {
-            continue;
-        }
-        if let Some(previous_source) = seen_targets.insert(&entry.target, &entry.source)
+        if entry.target.starts_with("$instructions") == false &&
+            let Some(previous_source) = seen_targets.insert(&entry.target, &entry.source)
         {
             return Err(format!(
                 "Duplicate target '{}' in language '{}': '{}' and '{}' both write to the same file",
@@ -159,15 +156,11 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
 
     for include_name in &lang_config.includes
     {
-        // Check shared groups first
         if let Some(shared_files) = config.shared.get(include_name.as_str())
         {
             files.extend(shared_files.iter().cloned());
-            continue;
         }
-
-        // Then check languages (recursive)
-        if config.languages.contains_key(include_name.as_str()) == true
+        else if config.languages.contains_key(include_name.as_str()) == true
         {
             let included = resolve_language_files_inner(include_name, config, visited)?;
             files.extend(included);

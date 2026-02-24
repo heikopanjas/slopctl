@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-24
+**Last updated:** 2026-02-24T2
 
 <!-- {mission} -->
 
@@ -147,6 +147,43 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use explicit comparisons with `None`: `if option_value.is_none() == true` or `if option_value == None`
 - Allow clippy warnings for explicit boolean comparisons with project-level configuration
 
+**Loop Flow Control:**
+
+- Avoid `if condition { continue; }` guards at the top of loop bodies; they add visual noise especially with `AlwaysNextLine` brace style
+- Instead, combine guard conditions with the subsequent logic using `&&`, `if/else if/else` chains, or let-chains
+- Examples:
+  - ❌ Incorrect:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == true
+        {
+            continue;
+        }
+        if let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+  - ✅ Correct:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == false &&
+            let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+- For multi-branch dispatch, use `if/else if/else` instead of `continue` to skip to the next branch
+- Exception: `continue` inside `match` error arms (log-and-skip) is acceptable since it serves as early return from an error handler, not a guard
+
 **Module Organization:**
 
 - Use module structure to organize code by functionality
@@ -221,6 +258,12 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use `#[derive]` for common traits when appropriate
 - Implement `Default` for structs with sensible defaults
 - Group related structs together in the same file when tightly coupled
+- Never wrap collection types in `Option`; use empty collections instead:
+  - ❌ `Option<Vec<T>>`, `Option<HashMap<K,V>>` — creates redundant states (`None` vs empty)
+  - ✅ `Vec<T>`, `HashMap<K,V>` — empty collection represents absence
+  - For serde: use `#[serde(default, skip_serializing_if = "Vec::is_empty")]` or `"HashMap::is_empty"`
+  - `Option` is appropriate for non-collection types where the default/zero value differs from absence (e.g., `Option<Config>`)
+- When exposing an internal `Vec<T>` via a getter, return `&[T]` (slice) not `&Vec<T>`
 
 **Naming Conventions:**
 
@@ -698,6 +741,19 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-24 (v9.0.2, coding conventions)
+
+- Added "Loop Flow Control" coding convention: avoid `continue` guards, prefer combined conditions
+- Added "No Option-wrapped collections" convention: use `Vec<T>` / `HashMap<K,V>` with `serde(default)` instead of `Option<Vec<T>>` / `Option<HashMap<K,V>>`
+- Added convention: expose internal `Vec<T>` as `&[T]` slice, not `&Vec<T>`
+- Replaced all `.unwrap()` with `?` operator across tests and library code
+- Converted all `Option<Vec<T>>` and `Option<HashMap<K,V>>` struct fields to plain collections
+- Changed `get_agent_files` return type from `Option<&Vec<PathBuf>>` to `Option<&[PathBuf]>`
+- Eliminated all `continue` guard patterns in loop bodies
+- Simplified consumers: removed `if let Some(...)` wrappers, used `.chain()` and `if/else if/else`
+- Applied `cargo fmt` formatting fixes
+- Version bump: 9.0.1 to 9.0.2 (PATCH - conventions and internal refactor)
 
 ### 2026-02-24 (v9.0.1)
 

@@ -186,12 +186,7 @@ impl FileTracker
 
         for (path_str, meta) in &self.metadata
         {
-            if meta.lang.is_some() == false
-            {
-                continue;
-            }
-            let meta_path = Path::new(path_str);
-            if meta_path.starts_with(&workspace_canon) == true
+            if meta.lang.is_some() == true && Path::new(path_str).starts_with(&workspace_canon) == true
             {
                 return meta.lang.clone();
             }

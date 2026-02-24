@@ -769,11 +769,8 @@ impl<'a> TemplateEngine<'a>
                     {
                         for entry in &entries
                         {
-                            if entry.entry_type != "file"
-                            {
-                                continue;
-                            }
-                            if let Some(ref dl_url) = entry.download_url
+                            if entry.entry_type == "file" &&
+                                let Some(ref dl_url) = entry.download_url
                             {
                                 let temp_path = temp_dir.join(format!("skill_{}_{}", skill_name, entry.name));
 
