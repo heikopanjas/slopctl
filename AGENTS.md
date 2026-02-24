@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-17T3
+**Last updated:** 2026-02-25
 
 <!-- {mission} -->
 
@@ -118,21 +118,41 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Write self-documenting code with clear naming and structure
 - Leverage the type system for compile-time safety
 - Keep functions focused and modular
+- **DRY (Don't Repeat Yourself)**: Extract shared logic into functions, traits, or structs. When the same pattern appears in 2+ places, factor it out. Use parameter structs (e.g. `UpdateOptions`) to aggregate related arguments rather than passing many individual parameters. Prefer a single source of truth for data (e.g. `agent_defaults.rs` for agent path conventions rather than duplicating paths in config and code).
 
 **Error Handling:**
 
 - Use `Result<T, E>` for all fallible operations
-- Define a project-wide `Result<T>` type alias with unified error type:
+- Use `anyhow` crate for error handling; re-export from `lib.rs`:
 
   ```rust
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+  pub use anyhow::Result;
+  ```
+
+- Use `anyhow!()` macro for constructing errors:
+
+  ```rust
+  Err(anyhow!("Config file not found"))
+  Err(anyhow!("Failed to download {}: {}", url, e))
   ```
 
 - Use `?` operator for error propagation
 - Avoid `.unwrap()` in library code; only use in application entry points after proper error handling
 - Use `.ok_or_else()` or `.ok_or()` to convert `Option` to `Result` with meaningful error messages
-- Provide context when returning errors: `Err(format!("Failed to download {}: {}", url, e).into())`
 - Never panic in library code unless documenting preconditions with `#[panic]` doc comments
+- Use the `require!` macro for precondition checks with early return:
+
+  ```rust
+  require!(config_file.exists() == true, Err(anyhow!("Config not found")));
+  require!(name.is_empty() == false, None);
+  require!(count > 0, Ok(()));
+  ```
+
+  - Syntax: `require!(condition, return_expression)`
+  - Returns the expression when the condition is **false**
+  - Works with any return type: `Result`, `Option`, or bare values
+  - Use `require!` only for precondition checks at the **top of a function** (before any real work), mimicking design-by-contract
+  - Do NOT use `require!` for conditional logic deep inside function bodies; those should remain as regular `if` blocks
 
 **Comparison and Conditional Expressions:**
 
@@ -145,6 +165,43 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Apply to all boolean comparisons including `Option` and `Result` checks
 - Use explicit comparisons with `None`: `if option_value.is_none() == true` or `if option_value == None`
 - Allow clippy warnings for explicit boolean comparisons with project-level configuration
+
+**Loop Flow Control:**
+
+- Avoid `if condition { continue; }` guards at the top of loop bodies; they add visual noise especially with `AlwaysNextLine` brace style
+- Instead, combine guard conditions with the subsequent logic using `&&`, `if/else if/else` chains, or let-chains
+- Examples:
+  - ❌ Incorrect:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == true
+        {
+            continue;
+        }
+        if let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+  - ✅ Correct:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == false &&
+            let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+- For multi-branch dispatch, use `if/else if/else` instead of `continue` to skip to the next branch
+- Exception: `continue` inside `match` error arms (log-and-skip) is acceptable since it serves as early return from an error handler, not a guard
 
 **Module Organization:**
 
@@ -161,10 +218,9 @@ When initializing a session or analyzing the workspace, refer to instruction fil
   mod template_manager;
   mod utils;
 
+  pub use anyhow::Result;
   pub use template_manager::TemplateManager;
   pub use utils::copy_dir_all;
-
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
   ```
 
 **Functions and Methods:**
@@ -220,6 +276,12 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use `#[derive]` for common traits when appropriate
 - Implement `Default` for structs with sensible defaults
 - Group related structs together in the same file when tightly coupled
+- Never wrap collection types in `Option`; use empty collections instead:
+  - ❌ `Option<Vec<T>>`, `Option<HashMap<K,V>>` — creates redundant states (`None` vs empty)
+  - ✅ `Vec<T>`, `HashMap<K,V>` — empty collection represents absence
+  - For serde: use `#[serde(default, skip_serializing_if = "Vec::is_empty")]` or `"HashMap::is_empty"`
+  - `Option` is appropriate for non-collection types where the default/zero value differs from absence (e.g., `Option<Config>`)
+- When exposing an internal `Vec<T>` via a getter, return `&[T]` (slice) not `&Vec<T>`
 
 **Naming Conventions:**
 
@@ -697,6 +759,94 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-02-25 (anyhow migration)
+
+- Migrated error handling from custom `Result<T>` type alias (`Box<dyn Error>`) to `anyhow` crate
+- `lib.rs` now re-exports `pub use anyhow::Result;` instead of defining type alias
+- Replaced all `Err(format!(...).into())` with `Err(anyhow!(...))`
+- Replaced all `Err("literal".into())` with `Err(anyhow!(...))`
+- Updated `.ok_or()` patterns for anyhow compatibility
+- Updated `file_tracker.rs` signatures from `Box<dyn Error>` to anyhow
+- Updated all test return types to `anyhow::Result`
+- Fixed config test race condition with static Mutex
+- Retrofitted `require!` macro at function-top preconditions across codebase
+- Updated AGENTS.md error handling section to reflect anyhow patterns
+
+### 2026-02-24 (require! macro)
+
+- Added `require!(condition, return_expr)` precondition macro in `lib.rs`
+- Returns expression when condition is false; works with `Result`, `Option`, and bare values
+- Added unit tests for all three return type variants
+- Documented convention in AGENTS.md error handling section
+
+### 2026-02-24 (v9.0.2, coding conventions)
+
+- Added "Loop Flow Control" coding convention: avoid `continue` guards, prefer combined conditions
+- Added "No Option-wrapped collections" convention: use `Vec<T>` / `HashMap<K,V>` with `serde(default)` instead of `Option<Vec<T>>` / `Option<HashMap<K,V>>`
+- Added convention: expose internal `Vec<T>` as `&[T]` slice, not `&Vec<T>`
+- Replaced all `.unwrap()` with `?` operator across tests and library code
+- Converted all `Option<Vec<T>>` and `Option<HashMap<K,V>>` struct fields to plain collections
+- Changed `get_agent_files` return type from `Option<&Vec<PathBuf>>` to `Option<&[PathBuf]>`
+- Eliminated all `continue` guard patterns in loop bodies
+- Simplified consumers: removed `if let Some(...)` wrappers, used `.chain()` and `if/else if/else`
+- Applied `cargo fmt` formatting fixes
+- Version bump: 9.0.1 to 9.0.2 (PATCH - conventions and internal refactor)
+
+### 2026-02-24 (v9.0.1)
+
+- Decoupled `--lang` and `--agent` CLI flags: each now operates independently
+- Removed `--no-lang` flag (redundant: omitting `--lang` has the same effect)
+- Changed `UpdateOptions.lang` from `&str` to `Option<&str>`; removed `no_lang: bool` field
+- Removed auto-resolution of language when only `--agent` is specified
+- `--agent cursor` alone now installs only agent files; `--lang rust` alone installs only language files
+- Simplified `template_manager/update.rs`: removed lang resolution block, pass options through
+- Simplified CLI message branching in `main.rs`
+- Version bump: 9.0.0 to 9.0.1 (PATCH - behavioral refinement)
+
+### 2026-02-24 (v9.0.0, post-release)
+
+- Added duplicate disk-file target validation in `resolve_language_files()`
+- Two entries targeting the same workspace file now produce a clear error
+- Entries targeting `$instructions` (AGENTS.md fragments) are exempt since multiple fragments are expected
+
+### 2026-02-24 (v9.0.0)
+
+- MAJOR version bump: 8.0.0 to 9.0.0 (V1 removed, V3 template format)
+- Removed V1 template engine and all V1 templates (deprecated since v7.0.0)
+- Deleted `src/template_engine_v1.rs` and entire `templates/v1/` directory (39 files)
+- Introduced V3 template format: `shared` file groups and `includes` directive on languages
+- New `shared` section in templates.yml for reusable file groups (e.g. cmake files shared by C and C++)
+- New `includes` field on `LanguageConfig`: compose shared groups or extend other languages
+- Recursive include resolution with cycle detection via `resolve_language_files()` in `bom.rs`
+- Merged `template_engine_v2.rs` into `template_engine.rs`: dissolved `TemplateEngine` trait into struct
+- Single `TemplateEngine` struct replaces the old trait + `TemplateEngineV2` struct
+- Default template version changed from 2 to 3
+- V2 templates remain backward-compatible (V3 is a superset)
+- Updated `list` command to show includes annotations on composed languages
+- DRY: cmake-build-commands.md and cmake-git-ignore.txt now defined once in shared section
+
+### 2026-02-24 (v8.0.0)
+
+- MAJOR version bump: 7.0.0 to 8.0.0 (breaking CLI change)
+- Renamed `init` command to `install` for clearer semantics
+- Added `--skill` repeatable CLI flag for ad-hoc GitHub skill installation
+- Supports `user/repo` shorthand and full GitHub URLs
+- Added GitHub URL support in templates.yml `source` fields (full URLs only, no shorthand)
+- New `src/agent_defaults.rs`: single source of truth for agent paths (instructions, prompts, skills)
+- New `src/github.rs`: GitHub API integration (Contents API, URL parsing, shorthand expansion)
+- New top-level `skills` section in templates.yml for agent-agnostic skills
+- Added `SkillDefinition` struct to `bom.rs` and `skills` field to `TemplateConfig`
+- Skills downloaded on-the-fly during `install` (no local cache)
+- Automatic agent detection via `detect_installed_agent()` when `--agent` not specified
+- Moved `tempfile` from dev-dependencies to runtime dependency
+- Updated all user-facing messages from `init` to `install`
+- DRY refactoring: eliminated duplicate `download_file` and `parse_github_url` from `download_manager.rs` (now uses `github.rs`)
+- DRY refactoring: collapsed repeated agent instructions/prompts/skills resolve-and-copy pattern into single loop
+- Removed dead code: `github::download_directory()` (install_skills handles it directly)
+- Added `skills` field to `UpdateOptions` and refactored all `update()` methods to accept `&UpdateOptions` instead of 7-8 individual parameters
+- Removed `#[allow(clippy::too_many_arguments)]` suppressions
+- Added DRY principle to Rust coding conventions in AGENTS.md
 
 ### 2026-02-17 (evening, v7.0.0)
 
