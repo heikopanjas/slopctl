@@ -739,8 +739,9 @@ impl<'a> TemplateEngine<'a>
     /// Install skills into the agent's skill directory
     ///
     /// For each skill, resolves the source (local or GitHub) and adds file entries
-    /// to the files_to_copy list. GitHub directory skills are downloaded via the
-    /// Contents API; local skills are copied from the global template cache.
+    /// to the files_to_copy list. GitHub skills are discovered via SKILL.md scanning
+    /// and downloaded recursively (including subdirectories). Local skills are copied
+    /// recursively from the global template cache.
     fn install_skills<'b, I>(
         &self, skills: I, agent_name: &str, workspace: &Path, userprofile: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>
     ) -> Result<()>
@@ -749,48 +750,50 @@ impl<'a> TemplateEngine<'a>
         let skill_dir_template =
             agent_defaults::get_skill_dir(agent_name).ok_or_else(|| anyhow::anyhow!("Unknown agent '{}': no skill directory defined", agent_name))?;
 
+        let skill_base_dir = self.resolve_placeholder(skill_dir_template, workspace, userprofile);
+
         for (skill_name, source) in skills
         {
-            let target_base = self.resolve_placeholder(skill_dir_template, workspace, userprofile).join(skill_name);
-
             if github::is_url(source) == true
             {
                 let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL for skill '{}': {}", skill_name, source))?;
 
-                println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill_name.green());
+                println!("{} Discovering skills at {}...", "→".blue(), source.yellow());
 
-                match github::list_directory_contents(&parsed)
+                match github::discover_skills(&parsed)
                 {
-                    | Ok(entries) =>
+                    | Ok(discovered) if discovered.is_empty() == true =>
                     {
-                        for entry in &entries
+                        println!("{} No skills found (no SKILL.md) at {}", "!".yellow(), source.yellow());
+                    }
+                    | Ok(discovered) =>
+                    {
+                        for skill in &discovered
                         {
-                            if entry.entry_type == "file" &&
-                                let Some(ref dl_url) = entry.download_url
+                            let target_base = skill_base_dir.join(&skill.name);
+                            let prefix = format!("skill_{}", skill.name);
+
+                            println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill.name.green());
+
+                            match github::download_directory_recursive(&skill.url, temp_dir, &prefix, "")
                             {
-                                let temp_path = temp_dir.join(format!("skill_{}_{}", skill_name, entry.name));
-
-                                print!("  {} Downloading {}... ", "→".blue(), entry.name.yellow());
-                                io::stdout().flush()?;
-
-                                match github::download_file(dl_url, &temp_path)
+                                | Ok(downloaded) =>
                                 {
-                                    | Ok(_) =>
+                                    for (temp_path, rel_path) in downloaded
                                     {
-                                        println!("{}", "✓".green());
-                                        files_to_copy.push((temp_path, target_base.join(&entry.name)));
+                                        files_to_copy.push((temp_path, target_base.join(rel_path)));
                                     }
-                                    | Err(e) =>
-                                    {
-                                        println!("{} ({})", "✗".red(), e);
-                                    }
+                                }
+                                | Err(e) =>
+                                {
+                                    println!("{} Failed to download skill '{}': {}", "!".yellow(), skill.name, e);
                                 }
                             }
                         }
                     }
                     | Err(e) =>
                     {
-                        println!("{} Failed to list skill directory '{}': {}", "!".yellow(), skill_name, e);
+                        println!("{} Failed to discover skills at '{}': {}", "!".yellow(), skill_name, e);
                     }
                 }
             }
@@ -799,27 +802,17 @@ impl<'a> TemplateEngine<'a>
                 let source_dir = self.config_dir.join(source);
                 if source_dir.is_dir() == true
                 {
+                    let target_base = skill_base_dir.join(skill_name);
                     println!("{} Installing skill '{}' from local templates...", "→".blue(), skill_name.green());
-
-                    if let Ok(entries) = std::fs::read_dir(&source_dir)
-                    {
-                        for entry in entries.flatten()
-                        {
-                            let path = entry.path();
-                            if path.is_file() == true &&
-                                let Some(filename) = path.file_name()
-                            {
-                                files_to_copy.push((path.clone(), target_base.join(filename)));
-                            }
-                        }
-                    }
+                    Self::collect_local_skill_files(&source_dir, &target_base, files_to_copy)?;
                 }
                 else if source_dir.is_file() == true
                 {
-                    let filename = source_dir.file_name().map(|f| f.to_os_string());
-                    if let Some(fname) = filename
+                    let target_base = skill_base_dir.join(skill_name);
+                    let target_path = source_dir.file_name().map(|f| target_base.join(f));
+                    if let Some(target) = target_path
                     {
-                        files_to_copy.push((source_dir, target_base.join(fname)));
+                        files_to_copy.push((source_dir, target));
                     }
                 }
                 else
@@ -832,9 +825,47 @@ impl<'a> TemplateEngine<'a>
         Ok(())
     }
 
+    /// Recursively collect all files from a local skill directory
+    fn collect_local_skill_files(source_dir: &Path, target_base: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
+    {
+        for entry in fs::read_dir(source_dir)?
+        {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir() == true
+            {
+                if let Some(dir_name) = path.file_name()
+                {
+                    Self::collect_local_skill_files(&path, &target_base.join(dir_name), files_to_copy)?;
+                }
+            }
+            else if path.is_file() == true &&
+                let Some(filename) = path.file_name()
+            {
+                files_to_copy.push((path.clone(), target_base.join(filename)));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Extract a skill name from a GitHub URL or expanded shorthand
+    ///
+    /// Parses as a GitHubUrl to derive the name from the path (last segment)
+    /// or repo name when the path is empty (bare `user/repo` shorthand).
+    /// Falls back to the last URL segment for non-GitHub URLs.
     fn skill_name_from_url(url: &str) -> Option<String>
     {
+        if let Some(parsed) = github::parse_github_url(url)
+        {
+            let name = parsed.skill_name();
+            if name.is_empty() == false
+            {
+                return Some(name);
+            }
+        }
+
         let trimmed = url.trim_end_matches('/');
         trimmed.rsplit('/').next().map(|s| s.to_string()).filter(|s| s.is_empty() == false)
     }
@@ -961,6 +992,23 @@ mod tests
     fn test_skill_name_from_url_empty()
     {
         assert!(TemplateEngine::skill_name_from_url("").is_none() == true);
+    }
+
+    #[test]
+    fn test_skill_name_from_url_bare_repo() -> anyhow::Result<()>
+    {
+        assert_eq!(
+            TemplateEngine::skill_name_from_url("https://github.com/twostraws/swiftui-agent-skill/tree/main").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
+            "swiftui-agent-skill"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_skill_name_from_url_bare_repo_no_tree() -> anyhow::Result<()>
+    {
+        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/my-skill").ok_or_else(|| anyhow::anyhow!("expected skill name"))?, "my-skill");
+        Ok(())
     }
 
     // -- merge_fragments --

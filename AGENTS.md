@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-02-25
+**Last updated:** 2026-03-07
 
 <!-- {mission} -->
 
@@ -759,6 +759,19 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-03-07 (v9.0.3, fix GitHub skill installation)
+
+- Fixed GitHub skill installation failing for repos without standardized directory structure
+- Added `discover_skills()` to `github.rs`: recursively scans for SKILL.md to find skills in repos
+- Added `download_directory_recursive()` to `github.rs`: downloads all files including subdirectories
+- Added `GitHubUrl::child()` and `GitHubUrl::skill_name()` helper methods
+- Fixed `skill_name_from_url` bug: bare `user/repo` shorthand returned branch name instead of repo name
+- Reworked `install_skills` in `template_engine.rs` to use discovery + recursive download
+- Local skill sources now also copied recursively (supports `scripts/`, `references/`, `assets/` subdirs)
+- Added `collect_local_skill_files()` helper for recursive local skill collection
+- Added tests for `skill_name`, `child`, and `skill_name_from_url` bare-repo cases
+- Version bump: 9.0.2 to 9.0.3 (PATCH - bug fix)
 
 ### 2026-02-25 (anyhow migration)
 
