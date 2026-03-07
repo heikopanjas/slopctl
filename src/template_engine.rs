@@ -768,14 +768,14 @@ impl<'a> TemplateEngine<'a>
                     }
                     | Ok(discovered) =>
                     {
-                        for skill in &discovered
+                        for skill in discovered
                         {
                             let target_base = skill_base_dir.join(&skill.name);
                             let prefix = format!("skill_{}", skill.name);
 
                             println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill.name.green());
 
-                            match github::download_directory_recursive(&skill.url, temp_dir, &prefix, "")
+                            match github::download_directory_from_entries(skill.entries, &skill.url, temp_dir, &prefix, "")
                             {
                                 | Ok(downloaded) =>
                                 {
