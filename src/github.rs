@@ -309,6 +309,38 @@ pub fn download_github_file(github_url: &GitHubUrl, dest_path: &Path) -> Result<
 pub fn download_directory_recursive(github_url: &GitHubUrl, temp_dir: &Path, prefix: &str, rel_base: &str) -> Result<Vec<(PathBuf, String)>>
 {
     let entries = list_directory_contents(github_url)?;
+    download_entries(entries, github_url, temp_dir, prefix, rel_base)
+}
+
+/// Download files from pre-fetched GitHub directory entries
+///
+/// Same as [`download_directory_recursive`] but accepts already-fetched entries
+/// for the top-level directory, avoiding a redundant API call when the listing
+/// was obtained during a prior discovery phase.
+///
+/// Subdirectories are still fetched recursively via the Contents API.
+///
+/// # Arguments
+///
+/// * `entries` - Pre-fetched directory entries from a prior `list_directory_contents` call
+/// * `github_url` - Parsed GitHub URL for the directory (used for subdirectory recursion)
+/// * `temp_dir` - Local temp directory for downloaded files
+/// * `prefix` - Flat prefix for temp file names (avoids collisions)
+/// * `rel_base` - Relative path prefix for preserving directory structure
+///
+/// # Errors
+///
+/// Returns an error if a subdirectory listing fails (individual file errors are logged and skipped)
+pub fn download_directory_from_entries(
+    entries: Vec<GitHubContentEntry>, github_url: &GitHubUrl, temp_dir: &Path, prefix: &str, rel_base: &str
+) -> Result<Vec<(PathBuf, String)>>
+{
+    download_entries(entries, github_url, temp_dir, prefix, rel_base)
+}
+
+/// Process directory entries: download files and recurse into subdirectories
+fn download_entries(entries: Vec<GitHubContentEntry>, github_url: &GitHubUrl, temp_dir: &Path, prefix: &str, rel_base: &str) -> Result<Vec<(PathBuf, String)>>
+{
     let mut downloaded = Vec::new();
 
     for entry in &entries
@@ -361,11 +393,16 @@ pub fn download_directory_recursive(github_url: &GitHubUrl, temp_dir: &Path, pre
     Ok(downloaded)
 }
 
-/// A discovered skill: its name and the GitHub URL pointing to its directory
+/// A discovered skill: its name, GitHub URL, and pre-fetched directory entries
+///
+/// Carries the directory listing obtained during discovery so that the
+/// subsequent download phase can reuse it instead of making a redundant
+/// GitHub API call.
 pub struct DiscoveredSkill
 {
-    pub name: String,
-    pub url:  GitHubUrl
+    pub name:    String,
+    pub url:     GitHubUrl,
+    pub entries: Vec<GitHubContentEntry>
 }
 
 /// Discover skills by recursively scanning a GitHub directory for SKILL.md
@@ -388,7 +425,7 @@ pub fn discover_skills(github_url: &GitHubUrl) -> Result<Vec<DiscoveredSkill>>
 
     if has_skill_md == true
     {
-        return Ok(vec![DiscoveredSkill { name: github_url.skill_name(), url: github_url.clone() }]);
+        return Ok(vec![DiscoveredSkill { name: github_url.skill_name(), url: github_url.clone(), entries }]);
     }
 
     let mut found = Vec::new();
