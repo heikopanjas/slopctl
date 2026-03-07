@@ -5,8 +5,13 @@
 //! downloading individual files. Used during the `install` flow to fetch
 //! remote sources on-the-fly.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf}
+};
 
+use owo_colors::OwoColorize;
 use serde::Deserialize;
 
 use crate::Result;
@@ -58,6 +63,39 @@ impl GitHubUrl
         {
             format!("https://api.github.com/repos/{}/{}/contents/{}?ref={}", self.owner, self.repo, self.path, self.branch)
         }
+    }
+
+    /// Build a child URL by appending a subdirectory name to this path
+    pub fn child(&self, name: &str) -> Self
+    {
+        let child_path = if self.path.is_empty() == true
+        {
+            name.to_string()
+        }
+        else
+        {
+            format!("{}/{}", self.path, name)
+        };
+
+        Self { owner: self.owner.clone(), repo: self.repo.clone(), branch: self.branch.clone(), path: child_path }
+    }
+
+    /// Derive a human-readable skill name from this URL
+    ///
+    /// Uses the last segment of `path` if non-empty, otherwise the repo name.
+    pub fn skill_name(&self) -> String
+    {
+        if self.path.is_empty() == false
+        {
+            let trimmed = self.path.trim_end_matches('/');
+            if let Some(last) = trimmed.rsplit('/').next() &&
+                last.is_empty() == false
+            {
+                return last.to_string();
+            }
+        }
+
+        self.repo.clone()
     }
 }
 
@@ -252,6 +290,127 @@ pub fn download_github_file(github_url: &GitHubUrl, dest_path: &Path) -> Result<
     download_file(&raw_url, dest_path)
 }
 
+/// Recursively download all files from a GitHub directory
+///
+/// Lists directory contents via the Contents API, downloads files, and
+/// recurses into subdirectories. Returns `(temp_path, relative_path)` pairs
+/// where `relative_path` preserves the directory structure under the root.
+///
+/// # Arguments
+///
+/// * `github_url` - Parsed GitHub URL pointing to a directory
+/// * `temp_dir` - Local temp directory for downloaded files
+/// * `prefix` - Flat prefix for temp file names (avoids collisions)
+/// * `rel_base` - Relative path prefix for preserving directory structure
+///
+/// # Errors
+///
+/// Returns an error if directory listing fails (individual file errors are logged and skipped)
+pub fn download_directory_recursive(github_url: &GitHubUrl, temp_dir: &Path, prefix: &str, rel_base: &str) -> Result<Vec<(PathBuf, String)>>
+{
+    let entries = list_directory_contents(github_url)?;
+    let mut downloaded = Vec::new();
+
+    for entry in &entries
+    {
+        let rel_path = if rel_base.is_empty() == true
+        {
+            entry.name.clone()
+        }
+        else
+        {
+            format!("{}/{}", rel_base, entry.name)
+        };
+
+        if entry.entry_type == "file" &&
+            let Some(ref dl_url) = entry.download_url
+        {
+            let safe_name = rel_path.replace('/', "_");
+            let temp_path = temp_dir.join(format!("{}_{}", prefix, safe_name));
+
+            print!("  {} Downloading {}... ", "→".blue(), rel_path.yellow());
+            io::stdout().flush()?;
+
+            match download_file(dl_url, &temp_path)
+            {
+                | Ok(_) =>
+                {
+                    println!("{}", "✓".green());
+                    downloaded.push((temp_path, rel_path));
+                }
+                | Err(e) =>
+                {
+                    println!("{} ({})", "✗".red(), e);
+                }
+            }
+        }
+        else if entry.entry_type == "dir"
+        {
+            let child_url = github_url.child(&entry.name);
+            match download_directory_recursive(&child_url, temp_dir, prefix, &rel_path)
+            {
+                | Ok(sub_files) => downloaded.extend(sub_files),
+                | Err(e) =>
+                {
+                    println!("  {} Skipping subdirectory {}: {}", "!".yellow(), entry.name.yellow(), e);
+                }
+            }
+        }
+    }
+
+    Ok(downloaded)
+}
+
+/// A discovered skill: its name and the GitHub URL pointing to its directory
+pub struct DiscoveredSkill
+{
+    pub name: String,
+    pub url:  GitHubUrl
+}
+
+/// Discover skills by recursively scanning a GitHub directory for SKILL.md
+///
+/// If the directory itself contains a SKILL.md, it is treated as a single skill.
+/// Otherwise, subdirectories are scanned recursively for SKILL.md files.
+///
+/// # Arguments
+///
+/// * `github_url` - Parsed GitHub URL pointing to a directory
+///
+/// # Errors
+///
+/// Returns an error if the top-level directory listing fails
+pub fn discover_skills(github_url: &GitHubUrl) -> Result<Vec<DiscoveredSkill>>
+{
+    let entries = list_directory_contents(github_url)?;
+
+    let has_skill_md = entries.iter().any(|e| e.entry_type == "file" && e.name == "SKILL.md");
+
+    if has_skill_md == true
+    {
+        return Ok(vec![DiscoveredSkill { name: github_url.skill_name(), url: github_url.clone() }]);
+    }
+
+    let mut found = Vec::new();
+    for entry in &entries
+    {
+        if entry.entry_type == "dir"
+        {
+            let child_url = github_url.child(&entry.name);
+            match discover_skills(&child_url)
+            {
+                | Ok(sub_skills) => found.extend(sub_skills),
+                | Err(e) =>
+                {
+                    println!("  {} Skipping {}: {}", "!".yellow(), entry.name.yellow(), e);
+                }
+            }
+        }
+    }
+
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests
 {
@@ -360,5 +519,56 @@ mod tests
     {
         let url = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: String::new() };
         assert_eq!(url.contents_api_url(), "https://api.github.com/repos/user/repo/contents?ref=main");
+    }
+
+    // -- skill_name --
+
+    #[test]
+    fn test_skill_name_with_path()
+    {
+        let url = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: "skills/my-skill".into() };
+        assert_eq!(url.skill_name(), "my-skill");
+    }
+
+    #[test]
+    fn test_skill_name_empty_path_uses_repo()
+    {
+        let url = GitHubUrl { owner: "twostraws".into(), repo: "swiftui-agent-skill".into(), branch: "main".into(), path: String::new() };
+        assert_eq!(url.skill_name(), "swiftui-agent-skill");
+    }
+
+    #[test]
+    fn test_skill_name_single_path_segment()
+    {
+        let url = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: "swiftui-pro".into() };
+        assert_eq!(url.skill_name(), "swiftui-pro");
+    }
+
+    #[test]
+    fn test_skill_name_trailing_slash()
+    {
+        let url = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: "skills/my-skill/".into() };
+        assert_eq!(url.skill_name(), "my-skill");
+    }
+
+    // -- child --
+
+    #[test]
+    fn test_child_empty_path()
+    {
+        let parent = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: String::new() };
+        let child = parent.child("subdir");
+        assert_eq!(child.owner, "user");
+        assert_eq!(child.repo, "repo");
+        assert_eq!(child.branch, "main");
+        assert_eq!(child.path, "subdir");
+    }
+
+    #[test]
+    fn test_child_with_existing_path()
+    {
+        let parent = GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: "skills".into() };
+        let child = parent.child("my-skill");
+        assert_eq!(child.path, "skills/my-skill");
     }
 }
