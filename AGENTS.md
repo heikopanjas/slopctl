@@ -760,6 +760,16 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-07 (v9.0.4, reduce GitHub API calls in skill install)
+
+- Eliminated redundant `list_directory_contents` API calls during GitHub skill installation
+- `discover_skills()` now carries pre-fetched directory entries in `DiscoveredSkill.entries`
+- Added `download_directory_from_entries()` to accept pre-fetched entries, skipping re-listing
+- Extracted shared `download_entries()` helper used by both download functions (DRY)
+- `install_skills()` passes discovery entries to download phase instead of re-fetching
+- Saves N GitHub API calls per install (one per discovered skill), reducing rate-limit pressure
+- Version bump: 9.0.3 to 9.0.4 (PATCH - performance fix)
+
 ### 2026-03-07 (v9.0.3, fix GitHub skill installation)
 
 - Fixed GitHub skill installation failing for repos without standardized directory structure
