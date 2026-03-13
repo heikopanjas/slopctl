@@ -1,4 +1,4 @@
-//! Download management functionality for vibe-check
+//! Download management functionality for regulator
 //!
 //! Handles downloading templates from GitHub repositories.
 

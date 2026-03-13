@@ -20,13 +20,13 @@ impl TemplateManager
     /// Returns an error if templates.yml cannot be loaded
     pub fn list(&self) -> Result<()>
     {
-        println!("{}", "vibe-check list".bold());
+        println!("{}", "regulator list".bold());
         println!();
 
         if self.has_global_templates() == false
         {
             println!("{} Global templates not installed", "✗".red());
-            println!("{} Run 'vibe-check update' to download templates", "→".blue());
+            println!("{} Run 'regulator update' to download templates", "→".blue());
             return Ok(());
         }
 
@@ -150,7 +150,7 @@ impl TemplateManager
         }
 
         println!();
-        println!("{} Use 'vibe-check install --lang <lang> --agent <agent>' to install", "→".blue());
+        println!("{} Use 'regulator install --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
     }

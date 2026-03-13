@@ -45,7 +45,7 @@ impl TemplateManager
         // Collect agent files from BoM when agent or --all is requested
         if has_agent_target == true || remove_all == true
         {
-            require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'vibe-check install' first to set up templates.")));
+            require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'regulator install' first to set up templates.")));
 
             let bom = BillOfMaterials::from_config(&config_file)?;
 

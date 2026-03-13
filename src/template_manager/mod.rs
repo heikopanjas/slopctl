@@ -1,4 +1,4 @@
-//! Template management functionality for vibe-check
+//! Template management functionality for regulator
 
 mod list;
 mod purge;
@@ -20,8 +20,8 @@ use crate::{Result, download_manager::DownloadManager, utils::copy_dir_all};
 ///
 /// The `TemplateManager` handles all operations related to template storage,
 /// verification, and synchronization. Templates are stored in the
-/// local data directory (e.g., `$HOME/.local/share/vibe-check/templates` on Linux,
-/// `$HOME/Library/Application Support/vibe-check/templates` on macOS).
+/// local data directory (e.g., `$HOME/.local/share/regulator/templates` on Linux,
+/// `$HOME/Library/Application Support/regulator/templates` on macOS).
 pub struct TemplateManager
 {
     pub(crate) config_dir: PathBuf
@@ -41,7 +41,7 @@ impl TemplateManager
     {
         let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
 
-        let config_dir = data_dir.join("vibe-check/templates");
+        let config_dir = data_dir.join("regulator/templates");
 
         Ok(Self { config_dir })
     }

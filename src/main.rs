@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use vibe_check::{Config, Result, TemplateManager, UpdateOptions};
+use regulator::{Config, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -30,7 +30,7 @@ impl From<ShellType> for clap_complete::Shell
 }
 
 #[derive(Parser)]
-#[command(name = "vibe-check")]
+#[command(name = "regulator")]
 #[command(about = "A manager for coding agent instruction files", long_about = None)]
 #[command(version)]
 struct Cli
@@ -80,7 +80,7 @@ enum Commands
         #[arg(long, default_value = "false")]
         dry_run: bool
     },
-    /// Purge all vibe-check files from project
+    /// Purge all regulator files from project
     Purge
     {
         /// Force purge without confirmation
@@ -145,7 +145,7 @@ enum Commands
 }
 
 /// Default template source URL (V3 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3";
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/regulator/tree/develop/templates/v3";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -250,7 +250,7 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         if values.is_empty() == true
         {
             println!("{} No configuration values set", "→".blue());
-            println!("{} Use 'vibe-check config <key> <value>' to set a value", "→".blue());
+            println!("{} Use 'regulator config <key> <value>' to set a value", "→".blue());
             println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
         }
         else
@@ -305,13 +305,13 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         | (None, None) =>
         {
             // Show help
-            println!("{}", "vibe-check config".bold());
+            println!("{}", "regulator config".bold());
             println!();
             println!("Usage:");
-            println!("  vibe-check config <key> <value>  Set a configuration value");
-            println!("  vibe-check config <key>          Get a configuration value");
-            println!("  vibe-check config --list         List all configuration values");
-            println!("  vibe-check config --unset <key>  Remove a configuration value");
+            println!("  regulator config <key> <value>  Set a configuration value");
+            println!("  regulator config <key>          Get a configuration value");
+            println!("  regulator config --list         List all configuration values");
+            println!("  regulator config --unset <key>  Remove a configuration value");
             println!();
             println!("Valid keys:");
             for key in Config::valid_keys()
@@ -344,10 +344,10 @@ fn main()
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
                 eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
-                eprintln!("{} Examples: vibe-check install --lang rust", "→".blue());
-                eprintln!("{}          vibe-check install --agent cursor", "→".blue());
-                eprintln!("{}          vibe-check install --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          vibe-check install --skill user/my-skill", "→".blue());
+                eprintln!("{} Examples: regulator install --lang rust", "→".blue());
+                eprintln!("{}          regulator install --agent cursor", "→".blue());
+                eprintln!("{}          regulator install --lang rust --agent cursor", "→".blue());
+                eprintln!("{}          regulator install --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
@@ -459,7 +459,7 @@ fn main()
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();
-            generate(shell, &mut Cli::command(), "vibe-check", &mut io::stdout());
+            generate(shell, &mut Cli::command(), "regulator", &mut io::stdout());
             Ok(())
         }
         | Commands::Status => manager.status(),

@@ -1,6 +1,6 @@
 [package]
-name = "vibe-check"
-version = "9.1.0"
+name = "regulator"
+version = "10.0.0"
 edition = "2024"
 
 [dependencies]
