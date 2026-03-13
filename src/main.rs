@@ -91,16 +91,20 @@ enum Commands
         #[arg(long, default_value = "false")]
         dry_run: bool
     },
-    /// Remove agent-specific files from current directory
+    /// Remove agent-specific files or skills from current directory
     Remove
     {
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(long)]
         agent: Option<String>,
 
-        /// Remove all agent-specific files (cannot be used with --agent)
+        /// Remove all agent-specific files and skills
         #[arg(long, default_value = "false")]
         all: bool,
+
+        /// Remove skill(s) by name (repeatable)
+        #[arg(long)]
+        skill: Vec<String>,
 
         /// Force removal without confirmation
         #[arg(long, default_value = "false")]
@@ -437,21 +441,19 @@ fn main()
             }
         }
         | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
-        | Commands::Remove { agent, all, force, dry_run } =>
+        | Commands::Remove { agent, all, skill, force, dry_run } =>
         {
-            // Validate mutually exclusive options
             if all == true && agent.is_some() == true
             {
                 Err(anyhow::anyhow!("Cannot specify both --agent and --all options"))
             }
-            else if all == false && agent.is_none() == true
+            else if all == false && agent.is_none() == true && skill.is_empty() == true
             {
-                Err(anyhow::anyhow!("Must specify either --agent <name> or --all"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --all, or --skill"))
             }
             else
             {
-                // Pass None for --all, or Some(&agent) for specific agent
-                manager.remove(agent.as_deref(), force, dry_run)
+                manager.remove(agent.as_deref(), &skill, force, dry_run)
             }
         }
         | Commands::Completions { shell } =>

@@ -760,6 +760,22 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-07 (v9.1.0, skill-aware subcommands)
+
+- Upgraded status, purge, remove, and list commands to handle all skill sources correctly
+- Previously only BoM-defined agent skills (templates.yml) were visible; top-level and ad-hoc skills were missed
+- Added `FileTracker::get_workspace_entries()` and `get_workspace_entries_by_category()` query methods
+- **status**: uses FileTracker to show all installed skills grouped by name (replaces SKILL.md path heuristic)
+- **purge**: merges FileTracker entries into file collection so ad-hoc and top-level skills are also purged
+- **remove**: added `--skill <name>` repeatable flag for targeted skill removal
+- **remove**: `--agent` now also removes ad-hoc skill files under that agent's skill directory
+- **remove**: `--all` now removes all tracked skill files in the workspace
+- **list**: shows ad-hoc installed skills from FileTracker marked as "(ad-hoc)"
+- Extracted shared `extract_skill_name_from_path()` helper in `template_manager/mod.rs` (DRY)
+- Added `path_belongs_to_agent()` helper in `remove.rs` for agent-specific skill matching
+- Added 13 new tests covering FileTracker queries, skill name extraction, and agent path matching
+- Version bump: 9.0.4 to 9.1.0 (MINOR - new CLI flag, new FileTracker API)
+
 ### 2026-03-07 (v9.0.4, reduce GitHub API calls in skill install)
 
 - Eliminated redundant `list_directory_contents` API calls during GitHub skill installation

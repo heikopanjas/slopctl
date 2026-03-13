@@ -194,6 +194,47 @@ impl FileTracker
         None
     }
 
+    /// Returns all tracked files whose path falls under the given workspace
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace` - Root directory of the workspace to query
+    pub fn get_workspace_entries(&self, workspace: &Path) -> Vec<(PathBuf, &FileMetadata)>
+    {
+        let Some(workspace_canon) = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())
+        else
+        {
+            return Vec::new();
+        };
+
+        self.metadata
+            .iter()
+            .filter(|(path_str, _)| Path::new(path_str).starts_with(&workspace_canon) == true)
+            .map(|(path_str, meta)| (PathBuf::from(path_str), meta))
+            .collect()
+    }
+
+    /// Returns tracked files under a workspace filtered by category
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace` - Root directory of the workspace to query
+    /// * `category` - Category to filter by (e.g. "skill", "agent", "language")
+    pub fn get_workspace_entries_by_category(&self, workspace: &Path, category: &str) -> Vec<(PathBuf, &FileMetadata)>
+    {
+        let Some(workspace_canon) = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())
+        else
+        {
+            return Vec::new();
+        };
+
+        self.metadata
+            .iter()
+            .filter(|(path_str, meta)| Path::new(path_str).starts_with(&workspace_canon) == true && meta.category == category)
+            .map(|(path_str, meta)| (PathBuf::from(path_str), meta))
+            .collect()
+    }
+
     /// Save metadata to disk
     pub fn save(&self) -> anyhow::Result<()>
     {
@@ -313,5 +354,115 @@ mod tests
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_entries_returns_all_categories() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let data_dir = temp_dir.path().join("data");
+        let workspace = temp_dir.path().join("project");
+        fs::create_dir_all(&data_dir)?;
+        fs::create_dir_all(workspace.join(".cursor/skills/my-skill"))?;
+
+        let mut tracker = FileTracker::new(&data_dir)?;
+
+        let agent_file = workspace.join(".cursorrules");
+        fs::write(&agent_file, b"agent")?;
+        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
+
+        let skill_file = workspace.join(".cursor/skills/my-skill/SKILL.md");
+        fs::write(&skill_file, b"skill")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
+
+        let lang_file = workspace.join("AGENTS.md");
+        fs::write(&lang_file, b"main")?;
+        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "main".into());
+
+        let entries = tracker.get_workspace_entries(&workspace);
+        assert_eq!(entries.len(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_entries_excludes_other_workspaces() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let data_dir = temp_dir.path().join("data");
+        let project_a = temp_dir.path().join("project_a");
+        let project_b = temp_dir.path().join("project_b");
+        fs::create_dir_all(&data_dir)?;
+        fs::create_dir_all(&project_a)?;
+        fs::create_dir_all(&project_b)?;
+
+        let mut tracker = FileTracker::new(&data_dir)?;
+
+        let file_a = project_a.join("AGENTS.md");
+        fs::write(&file_a, b"a")?;
+        tracker.record_installation(&file_a, "sha_a".into(), 3, None, "main".into());
+
+        let file_b = project_b.join("AGENTS.md");
+        fs::write(&file_b, b"b")?;
+        tracker.record_installation(&file_b, "sha_b".into(), 3, None, "main".into());
+
+        let entries_a = tracker.get_workspace_entries(&project_a);
+        assert_eq!(entries_a.len(), 1);
+
+        let entries_b = tracker.get_workspace_entries(&project_b);
+        assert_eq!(entries_b.len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_entries_by_category_filters_correctly() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let data_dir = temp_dir.path().join("data");
+        let workspace = temp_dir.path().join("project");
+        fs::create_dir_all(&data_dir)?;
+        fs::create_dir_all(workspace.join(".cursor/skills/foo"))?;
+
+        let mut tracker = FileTracker::new(&data_dir)?;
+
+        let agent_file = workspace.join(".cursorrules");
+        fs::write(&agent_file, b"agent")?;
+        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
+
+        let skill_file = workspace.join(".cursor/skills/foo/SKILL.md");
+        fs::write(&skill_file, b"skill")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
+
+        let lang_file = workspace.join("AGENTS.md");
+        fs::write(&lang_file, b"main")?;
+        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "language".into());
+
+        let skills = tracker.get_workspace_entries_by_category(&workspace, "skill");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].1.category, "skill");
+
+        let agents = tracker.get_workspace_entries_by_category(&workspace, "agent");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].1.category, "agent");
+
+        let none = tracker.get_workspace_entries_by_category(&workspace, "nonexistent");
+        assert_eq!(none.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_entries_nonexistent_workspace()
+    {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let data_dir = temp_dir.path().join("data");
+        fs::create_dir_all(&data_dir).expect("create data dir");
+
+        let tracker = FileTracker::new(&data_dir).expect("tracker");
+
+        let bogus = temp_dir.path().join("does_not_exist");
+        let entries = tracker.get_workspace_entries(&bogus);
+        assert!(entries.is_empty() == true);
     }
 }

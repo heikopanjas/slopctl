@@ -7,6 +7,7 @@ mod status;
 mod update;
 
 use std::{
+    ffi::OsStr,
     fs, io,
     path::{Path, PathBuf}
 };
@@ -95,5 +96,64 @@ impl TemplateManager
         }
 
         Ok(())
+    }
+
+    /// Extract a skill name from an installed skill file path
+    ///
+    /// Looks for a `/skills/<name>/` segment in the path and returns the name.
+    pub(crate) fn extract_skill_name_from_path(path: &Path) -> Option<String>
+    {
+        let components: Vec<&OsStr> = path.components().map(|c| c.as_os_str()).collect();
+
+        for (i, component) in components.iter().enumerate()
+        {
+            if *component == "skills" && i + 1 < components.len()
+            {
+                return Some(components[i + 1].to_string_lossy().to_string());
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn test_extract_skill_name_from_cursor_path()
+    {
+        let path = PathBuf::from("/home/user/project/.cursor/skills/my-skill/SKILL.md");
+        assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("my-skill".to_string()));
+    }
+
+    #[test]
+    fn test_extract_skill_name_from_claude_path()
+    {
+        let path = PathBuf::from("/home/user/project/.claude/skills/code-review/SKILL.md");
+        assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("code-review".to_string()));
+    }
+
+    #[test]
+    fn test_extract_skill_name_nested_file()
+    {
+        let path = PathBuf::from("/project/.cursor/skills/my-skill/scripts/setup.sh");
+        assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("my-skill".to_string()));
+    }
+
+    #[test]
+    fn test_extract_skill_name_no_skills_segment()
+    {
+        let path = PathBuf::from("/project/.cursor/commands/my-prompt.md");
+        assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
+    }
+
+    #[test]
+    fn test_extract_skill_name_skills_as_last_component()
+    {
+        let path = PathBuf::from("/project/.cursor/skills");
+        assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
     }
 }

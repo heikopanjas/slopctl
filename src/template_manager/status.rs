@@ -1,11 +1,11 @@
 //! Template status command
 
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{Result, bom::BillOfMaterials, template_engine};
+use crate::{Result, bom::BillOfMaterials, file_tracker::FileTracker, template_engine};
 
 impl TemplateManager
 {
@@ -15,6 +15,7 @@ impl TemplateManager
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
+    /// - Installed skills (from FileTracker, covers all sources)
     /// - All vibe-check managed files in current directory
     ///
     /// # Errors
@@ -38,7 +39,6 @@ impl TemplateManager
             {
                 println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
 
-                // List agent-specific files (if agents section exists)
                 if config.agents.is_empty() == false
                 {
                     let agents: Vec<&String> = config.agents.keys().collect();
@@ -80,7 +80,7 @@ impl TemplateManager
             println!("  {} AGENTS.md: {}", "○".yellow(), "not found".yellow());
         }
 
-        // Detect installed agents by checking for their files
+        // Detect installed agents via BoM
         let mut installed_agents: Vec<String> = Vec::new();
         let mut managed_files: Vec<PathBuf> = Vec::new();
 
@@ -111,19 +111,36 @@ impl TemplateManager
             println!("  {} No agents installed", "○".yellow());
         }
 
-        // Detect installed skills from managed files
-        let installed_skills: Vec<&PathBuf> = managed_files.iter().filter(|f| f.to_string_lossy().contains("SKILL.md")).collect();
-        if installed_skills.is_empty() == false
+        // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc)
+        let file_tracker = FileTracker::new(&self.config_dir)?;
+        let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+
+        if skill_entries.is_empty() == false
         {
-            println!("  {} Installed skills: {}", "✓".green(), installed_skills.len().to_string().green());
-            for skill_file in &installed_skills
+            let mut skill_names: BTreeSet<String> = BTreeSet::new();
+            for (path, _) in &skill_entries
             {
-                let display_path = skill_file.strip_prefix(&current_dir).unwrap_or(skill_file);
-                println!("    • {}", display_path.display().to_string().yellow());
+                if let Some(name) = Self::extract_skill_name_from_path(path)
+                {
+                    skill_names.insert(name);
+                }
+            }
+
+            let count = skill_names.len();
+            println!("  {} Installed skills: {}", "✓".green(), count.to_string().green());
+            for name in &skill_names
+            {
+                println!("    {} {}", "•".blue(), name.yellow());
             }
         }
 
-        // Add AGENTS.md to managed files if it exists
+        // Merge FileTracker entries into managed files for the complete list
+        let all_tracked = file_tracker.get_workspace_entries(&current_dir);
+        for (path, _) in all_tracked
+        {
+            managed_files.push(path);
+        }
+
         if agents_md_path.exists() == true
         {
             managed_files.push(agents_md_path);
@@ -132,15 +149,14 @@ impl TemplateManager
         println!();
 
         // List all managed files
+        managed_files.sort();
+        managed_files.dedup();
+
         if managed_files.is_empty() == false
         {
-            managed_files.sort();
-            managed_files.dedup();
-
             println!("{}", "Managed Files:".bold());
             for file in &managed_files
             {
-                // Show relative path if possible
                 let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
                 println!("  • {}", display_path.display().to_string().yellow());
             }
