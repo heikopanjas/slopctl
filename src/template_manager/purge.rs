@@ -15,7 +15,7 @@ use crate::{
 
 impl TemplateManager
 {
-    /// Purges all vibe-check files from the current directory
+    /// Purges all regulator files from the current directory
     ///
     /// Removes all agent-specific files and AGENTS.md from the current directory.
     /// Global templates in the local data directory are never affected.
@@ -32,18 +32,15 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
 
-        // Collect all files to be purged
         let mut files_to_purge: Vec<PathBuf> = Vec::new();
         let mut agents_md_skipped = false;
 
-        // Load templates.yml and build Bill of Materials to get agent files
+        // Collect agent files from BoM (template-defined)
         let config_file = self.config_dir.join("templates.yml");
         if config_file.exists() == true &&
             let Ok(bom) = BillOfMaterials::from_config(&config_file)
         {
-            let agent_names = bom.get_agent_names();
-
-            for agent in &agent_names
+            for agent in &bom.get_agent_names()
             {
                 if let Some(files) = bom.get_agent_files(agent)
                 {
@@ -58,7 +55,16 @@ impl TemplateManager
             }
         }
 
-        // Remove duplicates
+        // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
+        let file_tracker = FileTracker::new(&self.config_dir)?;
+        for (path, _) in file_tracker.get_workspace_entries(&current_dir)
+        {
+            if path.exists() == true
+            {
+                files_to_purge.push(path);
+            }
+        }
+
         files_to_purge.sort();
         files_to_purge.dedup();
 
@@ -72,19 +78,19 @@ impl TemplateManager
             {
                 agents_md_skipped = true;
             }
-            else
+            else if files_to_purge.iter().any(|f| f.ends_with("AGENTS.md")) == false
             {
                 files_to_purge.push(agents_md_path.clone());
             }
         }
 
-        if files_to_purge.is_empty() && agents_md_skipped == false
+        if files_to_purge.is_empty() == true && agents_md_skipped == false
         {
-            println!("{} No vibe-check files found to purge", "→".blue());
+            println!("{} No regulator files found to purge", "→".blue());
             return Ok(());
         }
 
-        // Dry run mode: just show what would happen
+        // Dry run mode
         if dry_run == true
         {
             println!("\n{} Files that would be deleted:", "→".blue());
@@ -104,16 +110,15 @@ impl TemplateManager
         }
 
         // Ask for confirmation unless force is true
-        if force == false && confirm_action(&format!("{} Are you sure you want to purge all vibe-check files? (y/N): ", "?".yellow()))? == false
+        if force == false && confirm_action(&format!("{} Are you sure you want to purge all regulator files? (y/N): ", "?".yellow()))? == false
         {
             println!("{} Operation cancelled", "→".blue());
             return Ok(());
         }
 
-        // Initialize file tracker for cleanup
+        // Re-load as mutable for cleanup
         let mut file_tracker = FileTracker::new(&self.config_dir)?;
 
-        // Remove files
         let mut purged_count = 0;
         for file in &files_to_purge
         {
@@ -125,12 +130,10 @@ impl TemplateManager
             else
             {
                 purged_count += 1;
-                // Remove from file tracker
                 file_tracker.remove_entry(file);
             }
         }
 
-        // Save file tracker metadata
         file_tracker.save()?;
 
         if agents_md_skipped == true
@@ -141,7 +144,7 @@ impl TemplateManager
 
         if purged_count == 0
         {
-            println!("{} No vibe-check files found to purge", "→".blue());
+            println!("{} No regulator files found to purge", "→".blue());
         }
         else
         {

@@ -1,37 +1,37 @@
 //! Template list command
 
+use std::collections::BTreeSet;
+
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{Result, bom::BillOfMaterials, template_engine};
+use crate::{Result, bom::BillOfMaterials, file_tracker::FileTracker, template_engine};
 
 impl TemplateManager
 {
-    /// List available agents and languages
+    /// List available agents, languages, and skills
     ///
     /// Displays all available agents and languages from the global templates,
-    /// along with their installation status in the current project.
+    /// along with their installation status. Shows template-defined skills
+    /// and any ad-hoc installed skills from the FileTracker.
     ///
     /// # Errors
     ///
     /// Returns an error if templates.yml cannot be loaded
     pub fn list(&self) -> Result<()>
     {
-        println!("{}", "vibe-check list".bold());
+        println!("{}", "regulator list".bold());
         println!();
 
-        // Check if global templates exist
         if self.has_global_templates() == false
         {
             println!("{} Global templates not installed", "✗".red());
-            println!("{} Run 'vibe-check update' to download templates", "→".blue());
+            println!("{} Run 'regulator update' to download templates", "→".blue());
             return Ok(());
         }
 
-        // Load template configuration
         let config = template_engine::load_template_config(&self.config_dir)?;
 
-        // Build BoM for checking installed status
         let config_path = self.config_dir.join("templates.yml");
         let bom = BillOfMaterials::from_config(&config_path)?;
 
@@ -65,22 +65,18 @@ impl TemplateManager
                 {
                     println!("  {} {} (installed{})", "✓".green(), agent_name.green(), skill_info);
                 }
+                else if skill_count > 0
+                {
+                    println!("  {} {} ({} skill(s))", "○".blue(), agent_name, skill_count);
+                }
                 else
                 {
-                    if skill_count > 0
-                    {
-                        println!("  {} {} ({} skill(s))", "○".blue(), agent_name, skill_count);
-                    }
-                    else
-                    {
-                        println!("  {} {}", "○".blue(), agent_name);
-                    }
+                    println!("  {} {}", "○".blue(), agent_name);
                 }
             }
         }
         println!();
 
-        // List languages (no installation status - language content is merged into AGENTS.md)
         println!("{}", "Available Languages:".bold());
         let mut languages: Vec<&String> = config.languages.keys().collect();
         languages.sort();
@@ -100,13 +96,16 @@ impl TemplateManager
             }
         }
 
-        // List top-level skills (agent-agnostic)
+        // Collect template-defined skill names for deduplication
+        let mut template_skill_names: BTreeSet<String> = BTreeSet::new();
+
         if config.skills.is_empty() == false
         {
             println!();
             println!("{}", "Available Skills:".bold());
             for skill in &config.skills
             {
+                template_skill_names.insert(skill.name.clone());
                 let source_info = if crate::github::is_url(&skill.source) == true
                 {
                     "(GitHub)"
@@ -119,8 +118,39 @@ impl TemplateManager
             }
         }
 
+        // Show ad-hoc installed skills not in template config
+        let current_dir = std::env::current_dir().ok();
+        if let Some(ref cwd) = current_dir
+        {
+            let file_tracker = FileTracker::new(&self.config_dir)?;
+            let skill_entries = file_tracker.get_workspace_entries_by_category(cwd, "skill");
+
+            let mut adhoc_names: BTreeSet<String> = BTreeSet::new();
+            for (path, _) in &skill_entries
+            {
+                if let Some(name) = Self::extract_skill_name_from_path(path) &&
+                    template_skill_names.contains(&name) == false
+                {
+                    adhoc_names.insert(name);
+                }
+            }
+
+            if adhoc_names.is_empty() == false
+            {
+                if template_skill_names.is_empty() == true
+                {
+                    println!();
+                    println!("{}", "Installed Skills:".bold());
+                }
+                for name in &adhoc_names
+                {
+                    println!("  • {} {}", name, "(ad-hoc)".dimmed());
+                }
+            }
+        }
+
         println!();
-        println!("{} Use 'vibe-check install --lang <lang> --agent <agent>' to install", "→".blue());
+        println!("{} Use 'regulator install --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
     }

@@ -1,8 +1,8 @@
-//! Configuration management for vibe-check
+//! Configuration management for regulator
 //!
 //! Handles persistent configuration stored in:
-//! - `$XDG_CONFIG_HOME/vibe-check/config.yml` (if XDG_CONFIG_HOME is set)
-//! - `$HOME/.config/vibe-check/config.yml` (fallback)
+//! - `$XDG_CONFIG_HOME/regulator/config.yml` (if XDG_CONFIG_HOME is set)
+//! - `$HOME/.config/regulator/config.yml` (fallback)
 
 use std::{collections::HashMap, env, fs, path::PathBuf};
 
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Result;
 
-/// Configuration structure for vibe-check
+/// Configuration structure for regulator
 ///
 /// Uses a nested HashMap to support dotted key access (e.g., "source.url")
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -34,8 +34,8 @@ impl Config
 {
     /// Returns the path to the config file
     ///
-    /// Uses `$XDG_CONFIG_HOME/vibe-check/config.yml` if XDG_CONFIG_HOME is set,
-    /// otherwise falls back to `$HOME/.config/vibe-check/config.yml`
+    /// Uses `$XDG_CONFIG_HOME/regulator/config.yml` if XDG_CONFIG_HOME is set,
+    /// otherwise falls back to `$HOME/.config/regulator/config.yml`
     pub fn get_config_path() -> Result<PathBuf>
     {
         let config_dir = if let Ok(xdg_config) = env::var("XDG_CONFIG_HOME")
@@ -51,7 +51,7 @@ impl Config
             return Err(anyhow::anyhow!("Could not determine config directory"));
         };
 
-        Ok(config_dir.join("vibe-check").join("config.yml"))
+        Ok(config_dir.join("regulator").join("config.yml"))
     }
 
     /// Load configuration from file
@@ -324,7 +324,7 @@ mod tests
         let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
         unsafe { env::set_var("XDG_CONFIG_HOME", "/tmp/test-xdg") };
         let path = Config::get_config_path()?;
-        assert_eq!(path, PathBuf::from("/tmp/test-xdg/vibe-check/config.yml"));
+        assert_eq!(path, PathBuf::from("/tmp/test-xdg/regulator/config.yml"));
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
         Ok(())
     }

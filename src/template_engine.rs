@@ -1,4 +1,4 @@
-//! Template engine for vibe-check
+//! Template engine for regulator
 //!
 //! This module provides the `TemplateEngine` struct and supporting types for
 //! template generation, fragment merging, and placeholder resolution.
@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Template marker comment used to detect unmerged template files
-pub const TEMPLATE_MARKER: &str = "<!-- VIBE-CHECK-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
+pub const TEMPLATE_MARKER: &str = "<!-- REGULATOR-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
 
 /// Options for the template update operation
 ///
@@ -112,7 +112,7 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
     Ok(content.contains(TEMPLATE_MARKER) == false)
 }
 
-/// Template engine for vibe-check (agents.md standard)
+/// Template engine for regulator (agents.md standard)
 ///
 /// Handles template generation, fragment merging, placeholder resolution,
 /// and skill installation. Supports V2 and V3 template formats.
@@ -229,7 +229,7 @@ impl<'a> TemplateEngine<'a>
 
         require!(
             self.config_dir.exists() == true && templates_yml_path.exists() == true,
-            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-check update' first to download templates."))
+            Err(anyhow::anyhow!("Global templates not found. Please run 'regulator update' first to download templates."))
         );
 
         let config = load_template_config(self.config_dir)?;
