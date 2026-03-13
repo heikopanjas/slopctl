@@ -1,4 +1,4 @@
-# vibe-check
+# regulator
 
 **A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude, Cursor, Copilot, Aider, Jules, Factory, and others) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
@@ -12,9 +12,9 @@
 
 ## Overview
 
-vibe-check is a command-line tool that helps you:
+regulator is a command-line tool that helps you:
 
-- **Manage templates globally** – Store templates in platform-specific directories (e.g., `~/Library/Application Support/vibe-check/templates` on macOS)
+- **Manage templates globally** – Store templates in platform-specific directories (e.g., `~/Library/Application Support/regulator/templates` on macOS)
 - **Configure via YAML** – Define template structure and file mappings in `templates.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – V2 templates follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
@@ -29,7 +29,7 @@ vibe-check is a command-line tool that helps you:
 ## Repository Structure
 
 ```text
-vibe-check/
+regulator/
 ├── Cargo.toml                  # Rust project manifest
 ├── Cargo.lock                  # Dependency lock file
 ├── build.rs                    # Build script for man page generation
@@ -47,7 +47,7 @@ vibe-check/
 │   ├── template_manager/       # TemplateManager implementation (directory module)
 │   │   ├── mod.rs              # Struct, constructor, and helpers
 │   │   ├── update.rs           # install/update command logic
-│   │   ├── purge.rs            # Purge all vibe-check files
+│   │   ├── purge.rs            # Purge all regulator files
 │   │   ├── remove.rs           # Remove agent-specific files
 │   │   ├── status.rs           # Show project status
 │   │   └── list.rs             # List available agents/languages
@@ -79,7 +79,7 @@ vibe-check/
 
 ## Template Versions
 
-vibe-check uses the V3 template format (agents.md standard):
+regulator uses the V3 template format (agents.md standard):
 
 ### Version 3 (Default) - agents.md Standard
 
@@ -89,21 +89,22 @@ vibe-check uses the V3 template format (agents.md standard):
 - Single AGENTS.md file compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md when needed
 - [Agent Skills](https://agentskills.io) support: define SKILL.md files per agent for specialized capabilities
-- Simpler initialization: `vibe-check install --lang rust` or `vibe-check install --no-lang` for language-independent setup
+- Simpler initialization: `regulator install --lang rust` or `regulator install --no-lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Ad-hoc skill loading: `--skill user/repo` shorthand or full GitHub URLs
-- URL: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3`
+- URL: `https://github.com/heikopanjas/regulator/tree/develop/templates/v3`
 
 **V3 additions:** Shared file groups (`shared` section in templates.yml) and composable languages (`includes` on language configs) let you reuse files (e.g. cmake) across C and C++ without duplication.
 
 **Usage:**
+
 ```bash
-vibe-check update                    # Downloads V3 templates
-vibe-check install --lang rust          # With language conventions
-vibe-check install --no-lang            # Language-independent (AGENTS.md only)
-vibe-check install --agent cursor       # Switch agent, keep existing language
-vibe-check install --skill user/repo    # Install a skill from GitHub
+regulator update                    # Downloads V3 templates
+regulator install --lang rust          # With language conventions
+regulator install --no-lang            # Language-independent (AGENTS.md only)
+regulator install --agent cursor       # Switch agent, keep existing language
+regulator install --skill user/repo    # Install a skill from GitHub
 ```
 
 ### Migration from v8 to v9
@@ -111,8 +112,8 @@ vibe-check install --skill user/repo    # Install a skill from GitHub
 **Upgrading from v8.x to v9.0.0:** Only V2/V3 templates are supported. Use V3 templates (default source: `templates/v3`).
 
 ```bash
-vibe-check update                    # Gets V3 templates
-vibe-check install --lang rust       # Initialize with V3
+regulator update                    # Gets V3 templates
+regulator install --lang rust       # Initialize with V3
 ```
 
 ### Migration from v7 to v8
@@ -122,8 +123,8 @@ vibe-check install --lang rust       # Initialize with V3
 v8.0.0 is a major version bump with one breaking change: **the `init` command has been renamed to `install`**. Update any scripts or aliases accordingly.
 
 ```bash
-# Before (v7):  vibe-check init --lang rust --agent cursor
-# After  (v8):  vibe-check install --lang rust --agent cursor
+# Before (v7):  regulator init --lang rust --agent cursor
+# After  (v8):  regulator install --lang rust --agent cursor
 ```
 
 **New features in v8.0.0:**
@@ -141,10 +142,10 @@ v8.0.0 is a major version bump with one breaking change: **the `init` command ha
 ### From Source
 
 ```bash
-git clone https://github.com/heikopanjas/vibe-check.git
-cd vibe-check
+git clone https://github.com/heikopanjas/regulator.git
+cd regulator
 cargo build --release
-sudo cp target/release/vibe-check /usr/local/bin/
+sudo cp target/release/regulator /usr/local/bin/
 ```
 
 ### Using Cargo
@@ -159,13 +160,13 @@ cargo install --path .
 
 ```bash
 # 1. Download global templates (v2 by default)
-vibe-check update
+regulator update
 
 # 2. Initialize your project (choose one style)
 cd your-project
-vibe-check install --lang rust         # With Rust conventions and config files
-vibe-check install --no-lang          # Language-independent (AGENTS.md + integration only)
-vibe-check install --agent cursor     # Agent prompts + skills (preserves existing language)
+regulator install --lang rust         # With Rust conventions and config files
+regulator install --no-lang          # Language-independent (AGENTS.md + integration only)
+regulator install --agent cursor     # Agent prompts + skills (preserves existing language)
 ```
 
 With `--lang rust` this will:
@@ -181,20 +182,20 @@ With `--no-lang` you get AGENTS.md with mission, principles, and integration (e.
 
 ```bash
 # From a local path
-vibe-check update --from /path/to/templates
+regulator update --from /path/to/templates
 
 # From a GitHub URL
-vibe-check update --from https://github.com/user/repo/tree/branch/templates
+regulator update --from https://github.com/user/repo/tree/branch/templates
 
 # Then initialize the project
-vibe-check install --lang c++ --agent claude
+regulator install --lang c++ --agent claude
 ```
 
 **Note:** The custom source must include a `templates.yml` file that defines the template structure.
 
 ## Complete Walkthrough: Rust Project (V2 Templates)
 
-This walkthrough demonstrates setting up a new Rust project using vibe-check with v2 templates (agents.md standard).
+This walkthrough demonstrates setting up a new Rust project using regulator with v2 templates (agents.md standard).
 
 ### Step 1: Create Your Project Directory
 
@@ -203,17 +204,17 @@ mkdir my-rust-project
 cd my-rust-project
 ```
 
-### Step 2: Initialize with vibe-check
+### Step 2: Initialize with regulator
 
 ```bash
-vibe-check install --lang rust
+regulator install --lang rust
 ```
 
 **What happens:**
 
 1. **Downloads templates** (first run only):
    - Fetches `templates.yml` from GitHub (v2 format)
-   - Downloads all template files to platform-specific directory (e.g., `~/Library/Application Support/vibe-check/templates/` on macOS)
+   - Downloads all template files to platform-specific directory (e.g., `~/Library/Application Support/regulator/templates/` on macOS)
 
 2. **Processes configuration**:
    - Detects template version 2 (agents.md standard)
@@ -303,13 +304,13 @@ If templates are updated upstream:
 
 ```bash
 # Update global templates
-vibe-check update
+regulator update
 
 # Then reinitialize the project (will skip customized AGENTS.md unless --force)
-vibe-check install --lang rust
+regulator install --lang rust
 ```
 
-vibe-check will:
+regulator will:
 
 - Check if AGENTS.md has been customized (template marker removed)
 - Skip customized AGENTS.md unless `--force` is used
@@ -319,7 +320,7 @@ vibe-check will:
 **Scenario: Modified AGENTS.md locally**
 
 ```bash
-$ vibe-check install --lang rust
+$ regulator install --lang rust
 ! Local AGENTS.md has been customized and will be skipped
 → Other files will still be updated
 → Use --force to overwrite AGENTS.md
@@ -331,14 +332,14 @@ $ vibe-check install --lang rust
 git diff AGENTS.md              # Review changes
 git add AGENTS.md
 git commit -m "docs: customize project instructions"
-vibe-check install --lang rust --force
+regulator install --lang rust --force
 ```
 
 **Scenario: Clean up project templates**
 
 ```bash
-# Remove all vibe-check files including AGENTS.md
-vibe-check purge
+# Remove all regulator files including AGENTS.md
+regulator purge
 
 # Removes AGENTS.md, agent files (e.g. CLAUDE.md), and language config files
 # Preserves customized AGENTS.md unless --force is used
@@ -348,10 +349,10 @@ vibe-check purge
 
 ```bash
 # Remove all agent files but keep AGENTS.md
-vibe-check remove --all
+regulator remove --all
 
 # Remove only one agent's files
-vibe-check remove --agent claude
+regulator remove --agent claude
 
 # Removes CLAUDE.md, .cursor/commands/, .github/prompts/, etc.
 ```
@@ -360,14 +361,14 @@ vibe-check remove --agent claude
 
 ```bash
 # You have Rust + Cursor; want to add Claude prompts
-vibe-check install --agent claude
+regulator install --agent claude
 # Uses existing Rust language; adds Claude prompts only
 ```
 
 **Scenario: Language-independent project (e.g. docs-only repo)**
 
 ```bash
-vibe-check install --no-lang
+regulator install --no-lang
 # AGENTS.md with mission, principles, integration only—no .rustfmt.toml, no coding-conventions
 ```
 
@@ -375,15 +376,15 @@ vibe-check install --no-lang
 
 ```bash
 # Your team maintains custom v2 templates
-vibe-check update --from https://github.com/yourteam/templates/tree/main/templates
+regulator update --from https://github.com/yourteam/templates/tree/main/templates
 
 # Then initialize (v2 style)
-vibe-check install --lang rust
+regulator install --lang rust
 ```
 
 ### Tips for Success
 
-1. **Initialize early**: Run `vibe-check install` at project start before adding code
+1. **Initialize early**: Run `regulator install` at project start before adding code
 2. **Commit instructions**: Add AGENTS.md and agent files to version control
 3. **Team consistency**: All team members should use same template source
 4. **Customize carefully**: Modify AGENTS.md as needed, but track changes in git
@@ -401,7 +402,7 @@ Download and update global templates from a source repository.
 **Usage:**
 
 ```bash
-vibe-check update [--from <PATH or URL>] [--dry-run]
+regulator update [--from <PATH or URL>] [--dry-run]
 ```
 
 **Options:**
@@ -413,27 +414,27 @@ vibe-check update [--from <PATH or URL>] [--dry-run]
 
 ```bash
 # Update global templates from default repository
-vibe-check update
+regulator update
 
 # Update from custom URL
-vibe-check update --from https://github.com/user/repo/tree/branch/templates
+regulator update --from https://github.com/user/repo/tree/branch/templates
 
 # Update from local path
-vibe-check update --from /path/to/templates
+regulator update --from /path/to/templates
 
 # Preview what would be downloaded
-vibe-check update --dry-run
+regulator update --dry-run
 ```
 
 **Behavior:**
 
 - Downloads templates from specified source or default GitHub repository
 - If `--from` is not specified, downloads from:
-  - **Default**: `https://github.com/heikopanjas/vibe-check/tree/develop/templates/v3` (agents.md standard)
+  - **Default**: `https://github.com/heikopanjas/regulator/tree/develop/templates/v3` (agents.md standard)
 - Downloads `templates.yml` configuration file and all template files
 - Stores templates in local data directory:
-  - Linux: `$HOME/.local/share/vibe-check/templates`
-  - macOS: `$HOME/Library/Application Support/vibe-check/templates`
+  - Linux: `$HOME/.local/share/regulator/templates`
+  - macOS: `$HOME/Library/Application Support/regulator/templates`
 - If `--dry-run` is specified, shows the source URL and target directory without downloading
 - Overwrites existing global templates with new versions
 - Does NOT modify any files in the current project directory
@@ -450,16 +451,16 @@ Install instruction files and skills for AI coding agents in your project.
 # Specify at least one of --lang, --agent, --no-lang, or --skill
 
 # V2: With language conventions
-vibe-check install --lang <language> [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+regulator install --lang <language> [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
 
 # V2: Language-independent (no coding-conventions fragments)
-vibe-check install --no-lang [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+regulator install --no-lang [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
 
 # V2: Switch agent only (preserves existing language)
-vibe-check install --agent <agent> [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+regulator install --agent <agent> [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
 
 # V2: Install skills only (auto-detects agent from workspace)
-vibe-check install --skill <url> [--skill <url>]...
+regulator install --skill <url> [--skill <url>]...
 ```
 
 **Options:**
@@ -476,43 +477,43 @@ vibe-check install --skill <url> [--skill <url>]...
 
 ```bash
 # Initialize Rust project (works with all agents)
-vibe-check install --lang rust
+regulator install --lang rust
 
 # Initialize C++ project
-vibe-check install --lang c++
+regulator install --lang c++
 
 # Language-independent setup (AGENTS.md + integration only, no .rustfmt.toml etc.)
-vibe-check install --no-lang
+regulator install --no-lang
 
 # Language-independent + agent prompts (e.g. init-session command for Cursor)
-vibe-check install --no-lang --agent cursor
+regulator install --no-lang --agent cursor
 
 # Switch from Cursor to Claude (keeps existing language e.g. Rust)
-vibe-check install --agent claude
+regulator install --agent claude
 
 # Initialize with custom mission statement (inline)
-vibe-check install --lang rust --mission "A CLI tool for managing AI agent instructions"
+regulator install --lang rust --mission "A CLI tool for managing AI agent instructions"
 
 # Initialize with mission statement from file (multi-line support)
-vibe-check install --lang rust --mission @mission.md
+regulator install --lang rust --mission @mission.md
 
 # Force overwrite existing local files
-vibe-check install --lang swift --force
+regulator install --lang swift --force
 
 # Install a skill from GitHub (user/repo shorthand)
-vibe-check install --agent cursor --skill user/my-skill
+regulator install --agent cursor --skill user/my-skill
 
 # Install a skill from a full GitHub URL
-vibe-check install --agent cursor --skill https://github.com/user/skills/tree/main/create-rule
+regulator install --agent cursor --skill https://github.com/user/skills/tree/main/create-rule
 
 # Install multiple skills at once
-vibe-check install --agent cursor --skill user/skill-a --skill user/skill-b
+regulator install --agent cursor --skill user/skill-a --skill user/skill-b
 
 # Install skills only (auto-detects agent from workspace)
-vibe-check install --skill user/my-skill
+regulator install --skill user/my-skill
 
 # Preview what would be created/modified
-vibe-check install --lang rust --dry-run
+regulator install --lang rust --dry-run
 ```
 
 **Behavior:**
@@ -537,12 +538,12 @@ vibe-check install --lang rust --dry-run
 
 ### `purge` - Purge All Vibe-Check Files
 
-Purge all vibe-check files from the current project directory.
+Purge all regulator files from the current project directory.
 
 **Usage:**
 
 ```bash
-vibe-check purge [--force] [--dry-run]
+regulator purge [--force] [--dry-run]
 ```
 
 **Options:**
@@ -553,14 +554,14 @@ vibe-check purge [--force] [--dry-run]
 **Examples:**
 
 ```bash
-# Purge all vibe-check files with confirmation prompt
-vibe-check purge
+# Purge all regulator files with confirmation prompt
+regulator purge
 
 # Force purge without confirmation
-vibe-check purge --force
+regulator purge --force
 
 # Preview what would be deleted
-vibe-check purge --dry-run
+regulator purge --dry-run
 ```
 
 **Behavior:**
@@ -588,10 +589,10 @@ Remove agent-specific files from the current directory based on the Bill of Mate
 
 ```bash
 # Remove specific agent's files
-vibe-check remove --agent <agent> [--force] [--dry-run]
+regulator remove --agent <agent> [--force] [--dry-run]
 
 # Remove all agent-specific files (keeps AGENTS.md)
-vibe-check remove --all [--force] [--dry-run]
+regulator remove --all [--force] [--dry-run]
 ```
 
 **Options:**
@@ -605,19 +606,19 @@ vibe-check remove --all [--force] [--dry-run]
 
 ```bash
 # Remove Claude-specific files with confirmation
-vibe-check remove --agent claude
+regulator remove --agent claude
 
 # Remove Copilot files without confirmation
-vibe-check remove --agent copilot --force
+regulator remove --agent copilot --force
 
 # Remove all agent-specific files (keeps AGENTS.md)
-vibe-check remove --all
+regulator remove --all
 
 # Remove all agents with force
-vibe-check remove --all --force
+regulator remove --all --force
 
 # Preview what would be deleted
-vibe-check remove --all --dry-run
+regulator remove --all --dry-run
 ```
 
 **Behavior:**
@@ -638,12 +639,12 @@ vibe-check remove --all --dry-run
 
 ### `status` - Show Project Status
 
-Display the current status of vibe-check in the project.
+Display the current status of regulator in the project.
 
 **Usage:**
 
 ```bash
-vibe-check status
+regulator status
 ```
 
 **Output includes:**
@@ -655,15 +656,15 @@ vibe-check status
 - **Project Status:**
   - AGENTS.md existence and customization status
   - Which agents are currently installed
-- **Managed Files:** List of all vibe-check managed files in current directory
+- **Managed Files:** List of all regulator managed files in current directory
 
 **Example output:**
 
 ```
-vibe-check status
+regulator status
 
 Global Templates:
-  ✓ Installed at: /Users/.../vibe-check/templates
+  ✓ Installed at: /Users/.../regulator/templates
   → Template version: 2
   → Available agents: claude, copilot, codex, cursor
   → Available languages: c, c++, rust, swift
@@ -690,7 +691,7 @@ List all available agents and languages from global templates.
 **Usage:**
 
 ```bash
-vibe-check list
+regulator list
 ```
 
 **Output includes:**
@@ -701,7 +702,7 @@ vibe-check list
 **Example output:**
 
 ```
-vibe-check list
+regulator list
 
 Available Agents:
   ✓ claude (installed)
@@ -715,7 +716,7 @@ Available Languages:
   • rust
   • swift
 
-→ Use 'vibe-check install --lang <lang> --agent <agent>' to install
+→ Use 'regulator install --lang <lang> --agent <agent>' to install
 ```
 
 ### `completions` - Generate Shell Completions
@@ -725,7 +726,7 @@ Generate shell completion scripts for various shells.
 **Usage:**
 
 ```bash
-vibe-check completions <shell>
+regulator completions <shell>
 ```
 
 **Arguments:**
@@ -736,16 +737,16 @@ vibe-check completions <shell>
 
 ```bash
 # Generate zsh completions
-vibe-check completions zsh > ~/.zsh/completions/_vibe-check
+regulator completions zsh > ~/.zsh/completions/_regulator
 
 # Generate bash completions
-vibe-check completions bash > ~/.bash_completion.d/vibe-check
+regulator completions bash > ~/.bash_completion.d/regulator
 
 # Generate fish completions
-vibe-check completions fish > ~/.config/fish/completions/vibe-check.fish
+regulator completions fish > ~/.config/fish/completions/regulator.fish
 
 # Generate PowerShell completions
-vibe-check completions powershell > vibe-check.ps1
+regulator completions powershell > regulator.ps1
 ```
 
 ### `config` - Manage Configuration
@@ -755,10 +756,10 @@ Manage persistent configuration settings using Git-style dotted keys.
 **Usage:**
 
 ```bash
-vibe-check config <key> <value>    # Set a configuration value
-vibe-check config <key>            # Get a configuration value
-vibe-check config --list           # List all configuration values
-vibe-check config --unset <key>    # Remove a configuration value
+regulator config <key> <value>    # Set a configuration value
+regulator config <key>            # Get a configuration value
+regulator config --list           # List all configuration values
+regulator config --unset <key>    # Remove a configuration value
 ```
 
 **Options:**
@@ -772,19 +773,19 @@ vibe-check config --unset <key>    # Remove a configuration value
 
 ```bash
 # Set custom template source
-vibe-check config source.url https://github.com/myteam/templates/tree/main/templates
+regulator config source.url https://github.com/myteam/templates/tree/main/templates
 
 # Get current source URL
-vibe-check config source.url
+regulator config source.url
 
 # List all configuration
-vibe-check config --list
+regulator config --list
 
 # Remove custom source (revert to default)
-vibe-check config --unset source.url
+regulator config --unset source.url
 
 # Set fallback source for resilience
-vibe-check config source.fallback https://github.com/heikopanjas/vibe-check/tree/develop/templates
+regulator config source.fallback https://github.com/heikopanjas/regulator/tree/develop/templates
 ```
 
 **Valid Configuration Keys:**
@@ -794,8 +795,8 @@ vibe-check config source.fallback https://github.com/heikopanjas/vibe-check/tree
 
 **Configuration File Location:**
 
-- Linux: `$XDG_CONFIG_HOME/vibe-check/config.yml` or `~/.config/vibe-check/config.yml`
-- macOS: `~/.config/vibe-check/config.yml`
+- Linux: `$XDG_CONFIG_HOME/regulator/config.yml` or `~/.config/regulator/config.yml`
+- macOS: `~/.config/regulator/config.yml`
 
 **Behavior:**
 
@@ -850,9 +851,9 @@ Additional language templates can be added to `templates.yml` configuration. Lan
 
 Templates are stored in platform-specific directories:
 
-- **macOS**: `~/Library/Application Support/vibe-check/templates/`
-- **Linux**: `~/.local/share/vibe-check/templates/`
-- **Windows**: `%LOCALAPPDATA%\vibe-check\templates\`
+- **macOS**: `~/Library/Application Support/regulator/templates/`
+- **Linux**: `~/.local/share/regulator/templates/`
+- **Windows**: `%LOCALAPPDATA%\regulator\templates\`
 
 Templates include:
 
@@ -867,7 +868,7 @@ Templates include:
 
 ### Agent Skills
 
-vibe-check supports [Agent Skills](https://agentskills.io) – an open format for extending AI agent capabilities with specialized knowledge and workflows.
+regulator supports [Agent Skills](https://agentskills.io) – an open format for extending AI agent capabilities with specialized knowledge and workflows.
 
 A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name, description) and Markdown instructions. Skills can optionally include `scripts/`, `references/`, and `assets/` subdirectories.
 
@@ -885,7 +886,7 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 - GitHub skills are downloaded on-the-fly via the GitHub Contents API (no local cache)
 - Skills are tracked with the `"skill"` category in the file tracker for modification detection
 - The `list` command shows available skills; the `status` command shows installed skills
-- Removing an agent (`vibe-check remove --agent <name>`) also removes its skills
+- Removing an agent (`regulator remove --agent <name>`) also removes its skills
 - When `--skill` is used without `--agent`, the active agent is auto-detected from workspace files
 
 **Example per-agent skills in templates.yml:**
@@ -911,8 +912,8 @@ skills:
 **Example ad-hoc skill installation:**
 
 ```bash
-vibe-check install --agent cursor --skill user/my-skill
-vibe-check install --skill https://github.com/user/skills/tree/main/create-rule
+regulator install --agent cursor --skill user/my-skill
+regulator install --skill https://github.com/user/skills/tree/main/create-rule
 ```
 
 ### Template Configuration (templates.yml)
@@ -920,6 +921,7 @@ vibe-check install --skill https://github.com/user/skills/tree/main/create-rule
 The `templates.yml` file defines the template structure with a version field and multiple sections:
 
 **Version Field:**
+
 - `version: 2` - V2 templates following agents.md standard
 - `version: 3` - V3 templates (superset of V2: shared file groups, composable languages via `includes`)
 - Missing version defaults to 3
@@ -1018,7 +1020,7 @@ Templates include a version field to support different format approaches:
 The `status` command shows the template version currently installed.
 
 **Version Detection:**
-vibe-check automatically detects the template version from `templates.yml` and uses the appropriate template engine.
+regulator automatically detects the template version from `templates.yml` and uses the appropriate template engine.
 
 ### Template Management
 
@@ -1030,7 +1032,7 @@ vibe-check automatically detects the template version from `templates.yml` and u
 
 ### Project Initialization
 
-**V2 Templates** (when you run `vibe-check install --lang rust`):
+**V2 Templates** (when you run `regulator install --lang rust`):
 
 1. Checks if global templates exist (downloads v2 by default if needed)
 2. Loads `templates.yml` configuration and detects version 2
@@ -1058,10 +1060,10 @@ The resulting AGENTS.md contains the complete merged content with all relevant s
 
 ### Modification Detection
 
-vibe-check detects if you've customized AGENTS.md by checking for the template marker:
+regulator detects if you've customized AGENTS.md by checking for the template marker:
 
 ```bash
-$ vibe-check install --lang c++ --agent claude
+$ regulator install --lang c++ --agent claude
 ! Local AGENTS.md has been customized and will be skipped
 → Other files will still be updated
 → Use --force to overwrite AGENTS.md
@@ -1077,13 +1079,13 @@ You can use your own template repository:
 
 ```bash
 # From a local path
-vibe-check update --from /path/to/your/templates
+regulator update --from /path/to/your/templates
 
 # From a GitHub repository
-vibe-check update --from https://github.com/yourname/your-templates/tree/main/templates
+regulator update --from https://github.com/yourname/your-templates/tree/main/templates
 
 # Then initialize your project
-vibe-check install --lang c++ --agent claude
+regulator install --lang c++ --agent claude
 ```
 
 **Note:** Your custom template repository must include a `templates.yml` file that defines the template structure and file mappings.
@@ -1091,11 +1093,11 @@ vibe-check install --lang c++ --agent claude
 ### Modifying Global Templates
 
 1. Navigate to platform-specific template directory:
-   - macOS: `~/Library/Application Support/vibe-check/templates/`
-   - Linux: `~/.local/share/vibe-check/templates/`
-   - Windows: `%LOCALAPPDATA%\vibe-check\templates\`
+   - macOS: `~/Library/Application Support/regulator/templates/`
+   - Linux: `~/.local/share/regulator/templates/`
+   - Windows: `%LOCALAPPDATA%\regulator\templates\`
 2. Edit the templates as needed
-3. Run `vibe-check install` to apply changes to your projects
+3. Run `regulator install` to apply changes to your projects
 
 ### Creating New Templates
 
@@ -1124,12 +1126,12 @@ To add a new language or agent template:
 
 **Where are templates stored?**
 
-- Global templates (macOS): `~/Library/Application Support/vibe-check/templates/`
-- Global templates (Linux): `~/.local/share/vibe-check/templates/`
-- Global templates (Windows): `%LOCALAPPDATA%\vibe-check\templates\`
+- Global templates (macOS): `~/Library/Application Support/regulator/templates/`
+- Global templates (Linux): `~/.local/share/regulator/templates/`
+- Global templates (Windows): `%LOCALAPPDATA%\regulator\templates\`
 
 **What happens if I modify AGENTS.md?**
-vibe-check detects customization via template marker removal and skips AGENTS.md when updating. Use `--force` to override.
+regulator detects customization via template marker removal and skips AGENTS.md when updating. Use `--force` to override.
 
 **Can I use my own template repository?**
 Yes! Use the `--from` option with the `update` command to specify a local path or GitHub URL.
@@ -1141,33 +1143,34 @@ Centralized updates prevent drift and make it easier to maintain consistency acr
 Yes! MIT license allows commercial use. Attribution appreciated but not required.
 
 **How do I update templates?**
-Run `vibe-check update` to download the latest global templates, then `vibe-check install` to apply to your project.
+Run `regulator update` to download the latest global templates, then `regulator install` to apply to your project.
 
 **How do I remove local templates?**
-Run `vibe-check purge` to remove all agent files and AGENTS.md, or `vibe-check remove --all` to keep AGENTS.md.
+Run `regulator purge` to remove all agent files and AGENTS.md, or `regulator remove --all` to keep AGENTS.md.
 
 **How do I preview changes before applying?**
-Use the `--dry-run` flag on any command: `vibe-check install --lang rust --dry-run` or `vibe-check install --no-lang --dry-run`
+Use the `--dry-run` flag on any command: `regulator install --lang rust --dry-run` or `regulator install --no-lang --dry-run`
 
 **How do I customize the mission statement?**
 Use the `--mission` option with `install`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
 
 **What template version should I use?**
+
 - **V3** (default): agents.md standard with shared file groups and composable languages. Single AGENTS.md for all agents, Agent Skills support.
 - **V2**: Same as V3 but without shared groups and includes.
-Run `vibe-check status` to see the installed template version.
+Run `regulator status` to see the installed template version.
 
 **When should I use --no-lang?**
 Use `--no-lang` when you want AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific coding conventions or config files (.rustfmt.toml, .editorconfig, etc.). Good for documentation repositories, multi-language projects, or when you prefer a minimal setup.
 
 **How do I switch agents without changing the language?**
-Run `vibe-check install --agent <new-agent>`. vibe-check detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
+Run `regulator install --agent <new-agent>`. regulator detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
 
 **What are Agent Skills?**
 [Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills can be defined in `templates.yml` (per-agent or top-level) or installed ad-hoc from GitHub using `--skill user/repo`. Skills are downloaded on-the-fly and tracked like other template files.
 
 **How do I install a skill from GitHub?**
-Use the `--skill` flag: `vibe-check install --agent cursor --skill user/my-skill`. The shorthand `user/repo` is expanded to a GitHub URL. You can also use full URLs: `--skill https://github.com/user/repo/tree/main/path`. If `--agent` is not specified, the active agent is auto-detected from workspace files.
+Use the `--skill` flag: `regulator install --agent cursor --skill user/my-skill`. The shorthand `user/repo` is expanded to a GitHub URL. You can also use full URLs: `--skill https://github.com/user/repo/tree/main/path`. If `--agent` is not specified, the active agent is auto-detected from workspace files.
 
 ## License
 
@@ -1177,8 +1180,8 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ```bash
 # Clone the repository
-git clone https://github.com/heikopanjas/vibe-check.git
-cd vibe-check
+git clone https://github.com/heikopanjas/regulator.git
+cd regulator
 
 # Build in debug mode (for development)
 cargo build
@@ -1203,4 +1206,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: February 24, 2026 (v9.0.0)
+Last updated: March 13, 2026 (v10.0.0)

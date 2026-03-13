@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-07
+**Last updated:** 2026-03-13
 
 <!-- {mission} -->
 
@@ -319,7 +319,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 
   ```rust
   #[derive(Parser)]
-  #[command(name = "vibe-check")]
+  #[command(name = "my-app")]
   #[command(about = "A manager for coding agent instruction files", long_about = None)]
   struct Cli
   {
@@ -417,7 +417,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Example:
 
   ```rust
-  //! Template management functionality for vibe-check
+  //! Template management functionality for my-app
 
   /// Creates a timestamped backup of a directory
   ///
@@ -760,6 +760,38 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-13 (v10.0.0, rebrand to regulator)
+
+- MAJOR version bump: 9.1.0 to 10.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from vibe-check to regulator across entire codebase
+- Binary name: `vibe-check` to `regulator`
+- Config path: `~/.config/vibe-check/` to `~/.config/regulator/`
+- Data path: `~/.local/share/vibe-check/` to `~/.local/share/regulator/`
+- Template marker: `VIBE-CHECK-TEMPLATE` to `REGULATOR-TEMPLATE`
+- User-Agent header: `vibe-check` to `regulator`
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md with new tool name
+- GitHub repo URL unchanged (rename pending); TODO markers left at URL references
+- Template examples in rust-coding-conventions.md made generic (my-app)
+- Man page renamed to regulator.1
+
+### 2026-03-07 (v9.1.0, skill-aware subcommands)
+
+- Upgraded status, purge, remove, and list commands to handle all skill sources correctly
+- Previously only BoM-defined agent skills (templates.yml) were visible; top-level and ad-hoc skills were missed
+- Added `FileTracker::get_workspace_entries()` and `get_workspace_entries_by_category()` query methods
+- **status**: uses FileTracker to show all installed skills grouped by name (replaces SKILL.md path heuristic)
+- **purge**: merges FileTracker entries into file collection so ad-hoc and top-level skills are also purged
+- **remove**: added `--skill <name>` repeatable flag for targeted skill removal
+- **remove**: `--agent` now also removes ad-hoc skill files under that agent's skill directory
+- **remove**: `--all` now removes all tracked skill files in the workspace
+- **list**: shows ad-hoc installed skills from FileTracker marked as "(ad-hoc)"
+- Extracted shared `extract_skill_name_from_path()` helper in `template_manager/mod.rs` (DRY)
+- Added `path_belongs_to_agent()` helper in `remove.rs` for agent-specific skill matching
+- Added 13 new tests covering FileTracker queries, skill name extraction, and agent path matching
+- Version bump: 9.0.4 to 9.1.0 (MINOR - new CLI flag, new FileTracker API)
+
 ### 2026-03-07 (v9.0.4, reduce GitHub API calls in skill install)
 
 - Eliminated redundant `list_directory_contents` API calls during GitHub skill installation
@@ -940,7 +972,7 @@ After making ANY code changes:
 ### 2026-02-15
 
 - Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
-- Use for language-independent setup: `vibe-check init --no-lang` or `--no-lang --agent cursor`
+- Use for language-independent setup: `regulator install --no-lang` or `--no-lang --agent cursor`
 - Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
 - Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
 - When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)

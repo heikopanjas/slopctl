@@ -150,7 +150,7 @@
 
   ```rust
   #[derive(Parser)]
-  #[command(name = "vibe-check")]
+  #[command(name = "my-app")]
   #[command(about = "A manager for coding agent instruction files", long_about = None)]
   struct Cli
   {
@@ -248,7 +248,7 @@
 - Example:
 
   ```rust
-  //! Template management functionality for vibe-check
+  //! Template management functionality for my-app
 
   /// Creates a timestamped backup of a directory
   ///
