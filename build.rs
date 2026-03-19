@@ -13,7 +13,7 @@ enum ShellType
 }
 
 #[derive(Parser)]
-#[command(name = "regulator")]
+#[command(name = "vibe-cop")]
 #[command(about = "A manager for coding agent instruction files", long_about = None)]
 #[command(version)]
 struct Cli
@@ -55,7 +55,7 @@ enum Commands
         #[arg(long, default_value = "false")]
         dry_run: bool
     },
-    /// Purge all regulator files from project
+    /// Purge all vibe-cop files from project
     Purge
     {
         /// Force purge without confirmation
@@ -116,7 +116,7 @@ fn main()
     let mut buffer: Vec<u8> = Vec::new();
     man.render(&mut buffer).unwrap();
 
-    let man_path = man_dir.join("regulator.1");
+    let man_path = man_dir.join("vibe-cop.1");
     fs::write(&man_path, buffer).unwrap();
 
     println!("cargo:warning=Man page generated at: {}", man_path.display());
