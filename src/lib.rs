@@ -1,4 +1,4 @@
-//! regulator - A manager for coding agent instruction files
+//! vibe-cop - A manager for coding agent instruction files
 //!
 //! This library provides functionality to manage, organize, and maintain
 //! initialization prompts and instruction files for AI coding assistants.

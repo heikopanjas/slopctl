@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-13
+**Last updated:** 2026-03-19
 
 <!-- {mission} -->
 
@@ -760,6 +760,20 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-19 (v11.0.0, rebrand to vibe-cop)
+
+- MAJOR version bump: 10.0.0 to 11.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from regulator to vibe-cop across entire codebase
+- Binary name: `regulator` to `vibe-cop`
+- Config path: `~/.config/regulator/` to `~/.config/vibe-cop/`
+- Data path: `~/.local/share/regulator/` to `~/.local/share/vibe-cop/`
+- Template marker: `REGULATOR-TEMPLATE` to `VIBE-COP-TEMPLATE`
+- User-Agent header: `regulator` to `vibe-cop`
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md with new tool name
+- Man page renamed to vibe-cop.1
+
 ### 2026-03-13 (v10.0.0, rebrand to regulator)
 
 - MAJOR version bump: 9.1.0 to 10.0.0 (breaking: binary, config paths, data paths all renamed)
@@ -972,7 +986,7 @@ After making ANY code changes:
 ### 2026-02-15
 
 - Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
-- Use for language-independent setup: `regulator install --no-lang` or `--no-lang --agent cursor`
+- Use for language-independent setup: `vibe-cop install --no-lang` or `--no-lang --agent cursor`
 - Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
 - Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
 - When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)
