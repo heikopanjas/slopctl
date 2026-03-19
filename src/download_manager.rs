@@ -1,4 +1,4 @@
-//! Download management functionality for regulator
+//! Download management functionality for vibe-cop
 //!
 //! Handles downloading templates from GitHub repositories.
 

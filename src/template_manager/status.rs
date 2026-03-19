@@ -16,7 +16,7 @@ impl TemplateManager
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
     /// - Installed skills (from FileTracker, covers all sources)
-    /// - All regulator managed files in current directory
+    /// - All vibe-cop managed files in current directory
     ///
     /// # Errors
     ///
@@ -25,7 +25,7 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
 
-        println!("{}", "regulator status".bold());
+        println!("{}", "vibe-cop status".bold());
         println!();
 
         // Global templates status
@@ -55,7 +55,7 @@ impl TemplateManager
         else
         {
             println!("  {} Not installed", "✗".red());
-            println!("  {} Run 'regulator update' to download templates", "→".blue());
+            println!("  {} Run 'vibe-cop update' to download templates", "→".blue());
         }
 
         println!();
@@ -164,8 +164,8 @@ impl TemplateManager
         else
         {
             println!("{}", "Managed Files:".bold());
-            println!("  {} No regulator files found in current directory", "○".yellow());
-            println!("  {} Run 'regulator install --lang <lang> --agent <agent>' to set up", "→".blue());
+            println!("  {} No vibe-cop files found in current directory", "○".yellow());
+            println!("  {} Run 'vibe-cop install --lang <lang> --agent <agent>' to set up", "→".blue());
         }
 
         Ok(())
