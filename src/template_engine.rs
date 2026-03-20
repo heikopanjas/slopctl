@@ -112,6 +112,36 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
     Ok(content.contains(TEMPLATE_MARKER) == false)
 }
 
+/// Validates that no two file entries target the same destination path
+///
+/// Prevents silent overwrites when multiple template sections (language, integration,
+/// agents, skills) produce files targeting the same workspace path.
+///
+/// # Arguments
+///
+/// * `files` - List of (source, target) file pairs to validate
+///
+/// # Errors
+///
+/// Returns an error if two entries share the same target path
+pub fn validate_no_duplicate_targets(files: &[(PathBuf, PathBuf)]) -> Result<()>
+{
+    let mut seen_targets: HashMap<&Path, &Path> = HashMap::new();
+    for (source, target) in files
+    {
+        if let Some(previous_source) = seen_targets.insert(target.as_path(), source.as_path())
+        {
+            return Err(anyhow::anyhow!(
+                "Duplicate target '{}': '{}' and '{}' both write to the same file",
+                target.display(),
+                previous_source.display(),
+                source.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Template engine for vibe-cop (agents.md standard)
 ///
 /// Handles template generation, fragment merging, placeholder resolution,
@@ -384,6 +414,8 @@ impl<'a> TemplateEngine<'a>
 
             self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), resolved_agent, &workspace, &userprofile, temp_path, &mut files_to_copy)?;
         }
+
+        validate_no_duplicate_targets(&files_to_copy)?;
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
 
@@ -1144,5 +1176,44 @@ mod tests
         let output = fs::read_to_string(&target)?;
         assert!(output.contains(TEMPLATE_MARKER) == false);
         Ok(())
+    }
+
+    // -- validate_no_duplicate_targets --
+
+    #[test]
+    fn test_validate_no_duplicates_empty()
+    {
+        assert!(validate_no_duplicate_targets(&[]).is_ok() == true);
+    }
+
+    #[test]
+    fn test_validate_no_duplicates_unique_targets()
+    {
+        let files = vec![(PathBuf::from("a.txt"), PathBuf::from("/workspace/.gitignore")), (PathBuf::from("b.txt"), PathBuf::from("/workspace/.editorconfig"))];
+        assert!(validate_no_duplicate_targets(&files).is_ok() == true);
+    }
+
+    #[test]
+    fn test_validate_duplicate_targets_rejected()
+    {
+        let files = vec![
+            (PathBuf::from("lang-gitignore.txt"), PathBuf::from("/workspace/.gitignore")),
+            (PathBuf::from("shared-gitignore.txt"), PathBuf::from("/workspace/.gitignore")),
+        ];
+        let err = validate_no_duplicate_targets(&files).unwrap_err();
+        assert!(err.to_string().contains("Duplicate target") == true);
+        assert!(err.to_string().contains(".gitignore") == true);
+        assert!(err.to_string().contains("lang-gitignore.txt") == true);
+        assert!(err.to_string().contains("shared-gitignore.txt") == true);
+    }
+
+    #[test]
+    fn test_validate_same_source_different_targets()
+    {
+        let files = vec![
+            (PathBuf::from("template.ini"), PathBuf::from("/workspace/.editorconfig")),
+            (PathBuf::from("template.ini"), PathBuf::from("/workspace/.other-config")),
+        ];
+        assert!(validate_no_duplicate_targets(&files).is_ok() == true);
     }
 }

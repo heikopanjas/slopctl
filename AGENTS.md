@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-19
+**Last updated:** 2026-03-20
 
 <!-- {mission} -->
 
@@ -759,6 +759,23 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-03-20 (v11.0.2, cross-section duplicate target detection)
+
+- Added `validate_no_duplicate_targets()` in `template_engine.rs` to catch cross-section conflicts
+- Previously, if two sections (e.g. language + integration) targeted the same workspace file, the last one silently overwrote the first
+- Now returns a clear error naming both sources and the conflicting target path
+- Extracted as standalone public function for testability
+- Added 4 unit tests covering empty, unique, duplicate, and same-source-different-target cases
+- Version bump: 11.0.1 to 11.0.2 (PATCH - defensive validation)
+
+### 2026-03-20 (v11.0.1, fix shared template download)
+
+- Fixed `download_templates_from_url` in `download_manager.rs` skipping `shared` section of templates.yml
+- Shared file groups (e.g. cmake files used by C and C++ via `includes`) were never downloaded from remote
+- This caused `resolve_language_files` to silently skip shared files during install (source not found on disk)
+- Added download loop for `config.shared` values before the language download loop
+- Version bump: 11.0.0 to 11.0.1 (PATCH - bug fix)
 
 ### 2026-03-19 (v11.0.0, rebrand to vibe-cop)
 

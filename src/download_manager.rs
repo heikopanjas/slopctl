@@ -99,6 +99,15 @@ impl DownloadManager
             download_entry(&entry.source)?;
         }
 
+        // Download shared file groups (used by language includes)
+        for shared_files in config.shared.values()
+        {
+            for file_entry in shared_files
+            {
+                download_entry(&file_entry.source)?;
+            }
+        }
+
         // Download language templates
         for lang_config in config.languages.values()
         {
