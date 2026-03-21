@@ -760,6 +760,13 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-21 (v11.1.1, fix Windows CI test failure)
+
+- Fixed `test_resolve_local_skill_path_absolute` failing on Windows CI
+- Unix-style `/opt/skills/my-skill` is not absolute on Windows (no drive letter), causing path resolution to prepend cwd
+- Test now uses `#[cfg(windows)]` / `#[cfg(not(windows))]` with platform-appropriate absolute paths
+- Version bump: 11.1.0 to 11.1.1 (PATCH - test fix)
+
 ### 2026-03-21 (v11.1.0, local ad-hoc skill installation)
 
 - Added support for installing skills from local filesystem paths via `--skill`

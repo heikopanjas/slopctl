@@ -1218,8 +1218,16 @@ mod tests
     #[test]
     fn test_resolve_local_skill_path_absolute()
     {
-        let result = TemplateEngine::resolve_local_skill_path("/opt/skills/my-skill");
-        assert_eq!(result, PathBuf::from("/opt/skills/my-skill"));
+        #[cfg(windows)]
+        {
+            let result = TemplateEngine::resolve_local_skill_path("C:\\opt\\skills\\my-skill");
+            assert_eq!(result, PathBuf::from("C:\\opt\\skills\\my-skill"));
+        }
+        #[cfg(not(windows))]
+        {
+            let result = TemplateEngine::resolve_local_skill_path("/opt/skills/my-skill");
+            assert_eq!(result, PathBuf::from("/opt/skills/my-skill"));
+        }
     }
 
     #[test]
