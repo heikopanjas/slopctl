@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Create templates archive
         run: zip -r vibe-cop-templates.zip templates/
 
       - name: Upload templates as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vibe-cop-templates-temp
           path: vibe-cop-templates.zip
@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -70,7 +70,7 @@ jobs:
         run: cargo test --verbose
 
       - name: Download templates archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: vibe-cop-templates-temp
           path: .
@@ -87,7 +87,7 @@ jobs:
           zip -j vibe-cop-${{ matrix.os }}.zip target/release/vibe-cop vibe-cop-templates.zip
 
       - name: Upload bundled artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vibe-cop-${{ matrix.os }}
           path: vibe-cop-${{ matrix.os }}.zip
@@ -103,10 +103,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
