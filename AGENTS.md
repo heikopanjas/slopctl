@@ -715,6 +715,43 @@ Bad (special characters):
 fix: update `KString` with "nested 'quotes'" & $special chars!
 ```
 
+## Windows / PowerShell Guidelines
+
+The development environment uses **PowerShell on Windows**. All shell commands executed by AI agents must use PowerShell-compatible syntax.
+
+**Shell Syntax:**
+
+- **Never use bash-specific constructs**: heredocs (`<<'EOF'`), `$(command)` substitution, `&&` chaining (PowerShell 7+ supports `&&` but avoid for safety)
+- **Use PowerShell here-strings** for multi-line text:
+
+  ```powershell
+  @"
+  multi-line
+  string
+  "@
+  ```
+
+- **Use multiple `-m` flags** for multi-line git commit messages:
+
+  ```powershell
+  git commit -m "subject line" -m "- body point one" -m "- body point two"
+  ```
+
+- **Use semicolons** (`;`) to chain commands, not `&&`
+- **Escape rules differ**: PowerShell uses backtick (`` ` ``) as escape character, not backslash
+
+**Path Handling:**
+
+- Windows uses backslash (`\`) as path separator; forward slash (`/`) works in most contexts but not all
+- Absolute paths require a drive letter (`C:\path`); a bare `/path` is relative to the current drive root, not an absolute path
+- Use `Path::join()` and `Path::is_absolute()` in Rust code; never assume `/` prefixed paths are absolute
+- In tests, use `#[cfg(windows)]` / `#[cfg(not(windows))]` when asserting platform-specific path behavior
+
+**Line Endings:**
+
+- Repository uses `.gitattributes` to enforce LF for Rust source files (`*.rs`)
+- Be aware of CRLF vs LF differences when comparing file content or hashes
+
 ## Semantic Versioning Protocol
 
 **AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
@@ -759,6 +796,14 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-03-21 (Windows/PowerShell guidelines)
+
+- Added "Windows / PowerShell Guidelines" section to AGENTS.md
+- Covers shell syntax (no bash heredocs, use PowerShell here-strings or multi -m flags)
+- Covers path handling (drive letters required for absolute, cfg-gated test assertions)
+- Covers line ending awareness (CRLF vs LF, .gitattributes)
+- Prevents agents from attempting bash-only syntax in PowerShell terminals
 
 ### 2026-03-21 (v11.1.1, fix Windows CI test failure)
 
