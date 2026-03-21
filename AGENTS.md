@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-20
+**Last updated:** 2026-03-21
 
 <!-- {mission} -->
 
@@ -759,6 +759,18 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-03-21 (v11.1.0, local ad-hoc skill installation)
+
+- Added support for installing skills from local filesystem paths via `--skill`
+- Previously `--skill` only accepted GitHub URLs and `user/repo` shorthand
+- Now also accepts absolute paths (`/path/to/skill`), relative paths (`./skill`, `../skill`), and home-relative paths (`~/skills/my-skill`)
+- Added `is_local_path()` to detect filesystem path syntax before GitHub shorthand expansion
+- Added `resolve_local_skill_path()` to expand `~`, resolve relative paths against cwd
+- In `install_skills()`, absolute source paths are used directly instead of joining with config_dir
+- Updated CLI help text and `UpdateOptions` doc comment
+- Added 10 unit tests covering path detection, resolution, and edge cases
+- Version bump: 11.0.2 to 11.1.0 (MINOR - new feature)
 
 ### 2026-03-20 (v11.0.2, cross-section duplicate target detection)
 

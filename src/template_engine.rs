@@ -36,7 +36,7 @@ pub struct UpdateOptions<'a>
     pub agent:   Option<&'a str>,
     /// Custom mission statement to override template default
     pub mission: Option<&'a str>,
-    /// Ad-hoc skill URLs from CLI `--skill` flags
+    /// Ad-hoc skill sources from CLI `--skill` flags (GitHub URLs, shorthand, or local paths)
     pub skills:  &'a [String],
     /// Force overwrite of local modifications without warning
     pub force:   bool,
@@ -406,9 +406,18 @@ impl<'a> TemplateEngine<'a>
                 .skills
                 .iter()
                 .map(|s| {
-                    let url = github::expand_shorthand(s);
-                    let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
-                    (name, url)
+                    if Self::is_local_path(s) == true
+                    {
+                        let resolved = Self::resolve_local_skill_path(s);
+                        let name = resolved.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| s.clone());
+                        (name, resolved.to_string_lossy().to_string())
+                    }
+                    else
+                    {
+                        let url = github::expand_shorthand(s);
+                        let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
+                        (name, url)
+                    }
                 })
                 .collect();
 
@@ -768,12 +777,63 @@ impl<'a> TemplateEngine<'a>
         }
     }
 
+    /// Check whether a `--skill` value looks like a local filesystem path
+    ///
+    /// Returns true for absolute paths (Unix `/` or Windows drive letter `C:\`),
+    /// explicit relative paths (`./`, `../`), and home-relative paths (`~/`).
+    /// Recognizes both `/` and `\` separators for cross-platform support.
+    /// Everything else is treated as GitHub shorthand.
+    fn is_local_path(input: &str) -> bool
+    {
+        input.starts_with('/') ||
+            input.starts_with("./") ||
+            input.starts_with(".\\") ||
+            input.starts_with("../") ||
+            input.starts_with("..\\") ||
+            input.starts_with("~/") ||
+            input.starts_with("~\\") ||
+            Self::starts_with_drive_letter(input)
+    }
+
+    /// Check for a Windows drive letter prefix (e.g. `C:\`, `D:\`)
+    fn starts_with_drive_letter(input: &str) -> bool
+    {
+        let bytes = input.as_bytes();
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+    }
+
+    /// Resolve a local skill path to an absolute `PathBuf`
+    ///
+    /// Expands `~` to the user's home directory via the `dirs` crate.
+    /// Relative paths (`./`, `../`) are resolved against `std::env::current_dir()`.
+    /// Handles both `/` and `\` separators for cross-platform support.
+    fn resolve_local_skill_path(input: &str) -> PathBuf
+    {
+        let home_suffix = input.strip_prefix("~/").or_else(|| input.strip_prefix("~\\"));
+        if let Some(suffix) = home_suffix &&
+            let Some(home) = dirs::home_dir()
+        {
+            return home.join(suffix);
+        }
+
+        let path = PathBuf::from(input);
+        if path.is_absolute() == true
+        {
+            path
+        }
+        else
+        {
+            std::env::current_dir().unwrap_or_default().join(path)
+        }
+    }
+
     /// Install skills into the agent's skill directory
     ///
     /// For each skill, resolves the source (local or GitHub) and adds file entries
     /// to the files_to_copy list. GitHub skills are discovered via SKILL.md scanning
     /// and downloaded recursively (including subdirectories). Local skills are copied
-    /// recursively from the global template cache.
+    /// recursively; absolute paths are used directly (ad-hoc local installs) while
+    /// relative paths are resolved against the global template cache.
     fn install_skills<'b, I>(
         &self, skills: I, agent_name: &str, workspace: &Path, userprofile: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>
     ) -> Result<()>
@@ -831,11 +891,28 @@ impl<'a> TemplateEngine<'a>
             }
             else
             {
-                let source_dir = self.config_dir.join(source);
+                let source_path = Path::new(source);
+                let source_dir = if source_path.is_absolute() == true
+                {
+                    source_path.to_path_buf()
+                }
+                else
+                {
+                    self.config_dir.join(source)
+                };
+                let label = if source_path.is_absolute() == true
+                {
+                    source
+                }
+                else
+                {
+                    "local templates"
+                };
+
                 if source_dir.is_dir() == true
                 {
                     let target_base = skill_base_dir.join(skill_name);
-                    println!("{} Installing skill '{}' from local templates...", "→".blue(), skill_name.green());
+                    println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
                     Self::collect_local_skill_files(&source_dir, &target_base, files_to_copy)?;
                 }
                 else if source_dir.is_file() == true
@@ -844,6 +921,7 @@ impl<'a> TemplateEngine<'a>
                     let target_path = source_dir.file_name().map(|f| target_base.join(f));
                     if let Some(target) = target_path
                     {
+                        println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
                         files_to_copy.push((source_dir, target));
                     }
                 }
@@ -1041,6 +1119,135 @@ mod tests
     {
         assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/my-skill").ok_or_else(|| anyhow::anyhow!("expected skill name"))?, "my-skill");
         Ok(())
+    }
+
+    // -- is_local_path --
+
+    #[test]
+    fn test_is_local_path_absolute()
+    {
+        assert!(TemplateEngine::is_local_path("/Users/heiko/skills/my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_relative_dot()
+    {
+        assert!(TemplateEngine::is_local_path("./my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_relative_dotdot()
+    {
+        assert!(TemplateEngine::is_local_path("../shared/my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_home()
+    {
+        assert!(TemplateEngine::is_local_path("~/skills/my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_github_shorthand()
+    {
+        assert!(TemplateEngine::is_local_path("user/repo") == false);
+    }
+
+    #[test]
+    fn test_is_local_path_url()
+    {
+        assert!(TemplateEngine::is_local_path("https://github.com/user/repo") == false);
+    }
+
+    #[test]
+    fn test_is_local_path_bare_name()
+    {
+        assert!(TemplateEngine::is_local_path("my-skill") == false);
+    }
+
+    #[test]
+    fn test_is_local_path_windows_drive_letter()
+    {
+        assert!(TemplateEngine::is_local_path("C:\\Users\\heiko\\skills") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_windows_drive_letter_forward_slash()
+    {
+        assert!(TemplateEngine::is_local_path("D:/skills/my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_windows_relative_dot()
+    {
+        assert!(TemplateEngine::is_local_path(".\\my-skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_windows_relative_dotdot()
+    {
+        assert!(TemplateEngine::is_local_path("..\\shared\\skill") == true);
+    }
+
+    #[test]
+    fn test_is_local_path_windows_home()
+    {
+        assert!(TemplateEngine::is_local_path("~\\skills\\my-skill") == true);
+    }
+
+    #[test]
+    fn test_starts_with_drive_letter_lowercase()
+    {
+        assert!(TemplateEngine::starts_with_drive_letter("c:\\projects") == true);
+    }
+
+    #[test]
+    fn test_starts_with_drive_letter_too_short()
+    {
+        assert!(TemplateEngine::starts_with_drive_letter("C:") == false);
+    }
+
+    #[test]
+    fn test_starts_with_drive_letter_no_separator()
+    {
+        assert!(TemplateEngine::starts_with_drive_letter("C:foo") == false);
+    }
+
+    // -- resolve_local_skill_path --
+
+    #[test]
+    fn test_resolve_local_skill_path_absolute()
+    {
+        let result = TemplateEngine::resolve_local_skill_path("/opt/skills/my-skill");
+        assert_eq!(result, PathBuf::from("/opt/skills/my-skill"));
+    }
+
+    #[test]
+    fn test_resolve_local_skill_path_home()
+    {
+        let result = TemplateEngine::resolve_local_skill_path("~/skills/my-skill");
+        if let Some(home) = dirs::home_dir()
+        {
+            assert_eq!(result, home.join("skills/my-skill"));
+        }
+    }
+
+    #[test]
+    fn test_resolve_local_skill_path_relative()
+    {
+        let result = TemplateEngine::resolve_local_skill_path("./my-skill");
+        let expected = std::env::current_dir().unwrap().join("./my-skill");
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_resolve_local_skill_path_home_backslash()
+    {
+        let result = TemplateEngine::resolve_local_skill_path("~\\skills\\my-skill");
+        if let Some(home) = dirs::home_dir()
+        {
+            assert_eq!(result, home.join("skills\\my-skill"));
+        }
     }
 
     // -- merge_fragments --

@@ -57,7 +57,7 @@ enum Commands
         #[arg(long)]
         mission: Option<String>,
 
-        /// Install skill(s) from GitHub (repeatable, supports user/repo shorthand)
+        /// Install skill(s) from GitHub or local path (repeatable)
         #[arg(long)]
         skill: Vec<String>,
 
