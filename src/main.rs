@@ -351,6 +351,8 @@ fn main()
                 std::process::exit(1);
             }
 
+            let skill_only = lang.is_none() == true && agent.is_none() == true;
+
             let resolved_mission = if let Some(ref mission_value) = mission
             {
                 match resolve_mission_content(mission_value)
@@ -368,47 +370,64 @@ fn main()
                 None
             };
 
-            if manager.has_global_templates() == false
+            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
+
+            if skill_only == true
             {
-                if dry_run == true
+                let prefix = if dry_run == true
                 {
-                    println!("{} Global templates not found (would download in non-dry-run mode)", "→".yellow());
-                    return;
+                    "Dry run: previewing"
                 }
-
-                let (source, is_configured, fallback) = resolve_source(None);
-
-                if is_configured == true
+                else
                 {
-                    println!("{} Using configured source", "→".blue());
-                }
-                println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
-
-                if let Err(e) = download_with_fallback(&manager, &source, fallback)
-                {
-                    eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
-                    std::process::exit(1);
-                }
-            }
-
-            let prefix = if dry_run == true
-            {
-                "Dry run: previewing"
+                    "Installing"
+                };
+                println!("{} {} skills to cross-client directory", "→".blue(), prefix);
+                manager.install_skills(&options)
             }
             else
             {
-                "Installing"
-            };
-            match (lang.as_ref(), agent.as_ref())
-            {
-                | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
-                | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
-                | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
-                | (None, None) => println!("{} {} skills", "→".blue(), prefix)
-            }
+                if manager.has_global_templates() == false
+                {
+                    if dry_run == true
+                    {
+                        println!("{} Global templates not found (would download in non-dry-run mode)", "→".yellow());
+                        return;
+                    }
 
-            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
-            manager.update(&options)
+                    let (source, is_configured, fallback) = resolve_source(None);
+
+                    if is_configured == true
+                    {
+                        println!("{} Using configured source", "→".blue());
+                    }
+                    println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
+
+                    if let Err(e) = download_with_fallback(&manager, &source, fallback)
+                    {
+                        eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
+                        std::process::exit(1);
+                    }
+                }
+
+                let prefix = if dry_run == true
+                {
+                    "Dry run: previewing"
+                }
+                else
+                {
+                    "Installing"
+                };
+                match (lang.as_ref(), agent.as_ref())
+                {
+                    | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
+                    | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
+                    | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
+                    | (None, None) => println!("{} {} skills", "→".blue(), prefix)
+                }
+
+                manager.update(&options)
+            }
         }
         | Commands::Update { from, dry_run } =>
         {

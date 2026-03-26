@@ -1,12 +1,9 @@
 # https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
 
-array_width = 167
-attr_fn_like_width = 167
 binop_separator = "Back"
 blank_lines_lower_bound = 0
 blank_lines_upper_bound = 1
 brace_style = "AlwaysNextLine"
-chain_width = 167
 color = "Auto"
 combine_control_expr = true
 comment_width = 167
@@ -19,7 +16,6 @@ empty_item_single_line = false
 enum_discrim_align_threshold = 133
 error_on_line_overflow = false
 error_on_unformatted = false
-fn_call_width = 167
 fn_params_layout = "Compressed"
 fn_single_line = false
 force_explicit_abi = true
