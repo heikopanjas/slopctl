@@ -1,6 +1,6 @@
-version: 3
+version: 4
 
-# Template Configuration - Version 3 (agents.md standard)
+# Template Configuration - Version 4 (agents.md standard)
 #
 # Philosophy: One AGENTS.md file that works across all agents
 # - Follows https://agents.md community standard
@@ -12,6 +12,10 @@ version: 3
 # V3 additions:
 # - `shared` section for reusable file groups
 # - `includes` field on languages to compose shared groups or other languages
+#
+# V4 additions:
+# - `skills` on agents: skills associated with a specific agent (installed to agent skill dir)
+# - `skills` on languages: skills associated with a language (installed to cross-client .agents/skills/)
 #
 # Placeholders:
 #   $workspace     - Project root directory
@@ -141,11 +145,13 @@ mission:
     target: '$instructions'
   - source: technology-stack.md
     target: '$instructions'
-# Agent-agnostic skills (installed to the active agent's skill directory)
+# Agent-agnostic skills (installed based on --agent or to cross-client .agents/skills/)
 #
 # Skills are directories containing SKILL.md + optional supporting files.
-# The install target is resolved from agent_defaults based on --agent.
 # Source can be a local path or a full GitHub URL (no user/repo shorthand).
+#
+# Agent/language-specific skills use the same format under agents.<name>.skills
+# or languages.<name>.skills respectively (see V4 additions above).
 #
 # Example:
 #   skills:

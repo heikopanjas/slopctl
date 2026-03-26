@@ -797,6 +797,24 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-26 (v11.3.0, V4 template format with agent/language skills)
+
+- Bumped template version from 3 to 4 (V4 format)
+- Renamed `templates/v3` directory to `templates/v4`; updated default source URL
+- Added `skills: Vec<SkillDefinition>` to `LanguageConfig` for language-associated skills
+- Changed `AgentConfig.skills` from `Vec<FileMapping>` to `Vec<SkillDefinition>` (name+source instead of source+target)
+- Agent skills install to agent-specific directory (e.g. `.cursor/skills/`)
+- Language skills install to cross-client `.agents/skills/` directory; NOT inherited via `includes`
+- Top-level and ad-hoc skills continue using existing logic (agent dir if agent specified, cross-client otherwise)
+- Removed agent skills from `BillOfMaterials` file chain (skills tracked via `FileTracker` instead)
+- Removed agent skills from `download_templates_from_url` (skills resolved at install time, not during update)
+- Updated `list` command to show language skill counts alongside agent skill counts
+- Updated version match in `update.rs` to accept `2..=4`
+- Added `make_lang()` test helper in `bom.rs` for concise `LanguageConfig` construction
+- Added tests for `LanguageConfig` skills serde, `AgentConfig` skills as `SkillDefinition`, and full V4 round-trip
+- Updated all version references from 3 to 4 across tests and source
+- Version bump: 11.2.0 to 11.3.0 (MINOR - V4 template format)
+
 ### 2026-03-26 (v11.2.0, independent skill installation)
 
 - Made `--skill` independent from `--lang` and `--agent` in the `install` command
