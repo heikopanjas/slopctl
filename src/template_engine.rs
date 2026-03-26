@@ -394,12 +394,14 @@ impl<'a> TemplateEngine<'a>
             self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, &mut files_to_copy)?;
         }
 
-        // Language-specific skills from templates.yml → cross-client dir
-        if let Some(lang) = options.lang &&
-            let Some(lang_config) = config.languages.get(lang) &&
-            lang_config.skills.is_empty() == false
+        // Language-specific skills (own + inherited from shared groups) → cross-client dir
+        if let Some(lang) = options.lang
         {
-            self.install_skills(lang_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), &cross_client_skill_dir, temp_path, &mut files_to_copy)?;
+            let lang_skills = bom::resolve_language_skills(lang, &config)?;
+            if lang_skills.is_empty() == false
+            {
+                self.install_skills(lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), &cross_client_skill_dir, temp_path, &mut files_to_copy)?;
+            }
         }
 
         // Top-level skills from templates.yml → agent dir if agent specified, else cross-client

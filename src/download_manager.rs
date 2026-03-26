@@ -100,9 +100,9 @@ impl DownloadManager
         }
 
         // Download shared file groups (used by language includes)
-        for shared_files in config.shared.values()
+        for shared_config in config.shared.values()
         {
-            for file_entry in shared_files
+            for file_entry in &shared_config.files
             {
                 download_entry(&file_entry.source)?;
             }
