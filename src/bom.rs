@@ -35,7 +35,8 @@ pub struct AgentConfig
 /// Languages can include shared file groups or other languages via `includes`.
 /// Resolution order: included files first (depth-first), then own `files`.
 /// Skills are installed to the cross-client `.agents/skills/` directory when
-/// the language is selected. Skills are NOT inherited via `includes`.
+/// the language is selected. Skills from included `shared` groups are propagated;
+/// skills from included *languages* are NOT propagated.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LanguageConfig
 {
@@ -45,6 +46,20 @@ pub struct LanguageConfig
     pub files:    Vec<FileMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills:   Vec<SkillDefinition>
+}
+
+/// Shared file group with files and optional skills
+///
+/// Shared groups are referenced by languages via `includes`. When a language
+/// includes a shared group, the group's files are prepended and its skills
+/// are propagated to the language's resolved skill list.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SharedConfig
+{
+    #[serde(default)]
+    pub files:  Vec<FileMapping>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<SkillDefinition>
 }
 
 /// Integration configuration with files
@@ -94,7 +109,7 @@ pub struct TemplateConfig
     pub agents:      HashMap<String, AgentConfig>,
     pub languages:   HashMap<String, LanguageConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub shared:      HashMap<String, Vec<FileMapping>>,
+    pub shared:      HashMap<String, SharedConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub integration: HashMap<String, IntegrationConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -156,9 +171,9 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
 
     for include_name in &lang_config.includes
     {
-        if let Some(shared_files) = config.shared.get(include_name.as_str())
+        if let Some(shared_config) = config.shared.get(include_name.as_str())
         {
-            files.extend(shared_files.iter().cloned());
+            files.extend(shared_config.files.iter().cloned());
         }
         else if config.languages.contains_key(include_name.as_str()) == true
         {
@@ -174,6 +189,40 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
     files.extend(lang_config.files.iter().cloned());
 
     Ok(files)
+}
+
+/// Resolves a language's complete skill list including skills from shared includes
+///
+/// Collects the language's own `skills` plus skills from any `shared` groups
+/// referenced via `includes`. Skills from other included *languages* are NOT
+/// propagated (only shared groups propagate skills).
+///
+/// # Arguments
+///
+/// * `lang` - Language name to resolve
+/// * `config` - Parsed template configuration
+///
+/// # Errors
+///
+/// Returns an error if the language is not found in templates.yml
+pub fn resolve_language_skills(lang: &str, config: &TemplateConfig) -> Result<Vec<SkillDefinition>>
+{
+    let lang_config = config.languages.get(lang).ok_or_else(|| anyhow::anyhow!("Language '{}' not found in templates.yml", lang))?;
+
+    let mut skills = Vec::new();
+
+    for include_name in &lang_config.includes
+    {
+        if let Some(shared_config) = config.shared.get(include_name.as_str()) &&
+            shared_config.skills.is_empty() == false
+        {
+            skills.extend(shared_config.skills.iter().cloned());
+        }
+    }
+
+    skills.extend(lang_config.skills.iter().cloned());
+
+    Ok(skills)
 }
 
 /// Bill of Materials - maps agent names to their target file paths
@@ -331,6 +380,11 @@ mod tests
         LanguageConfig { includes, files, skills: vec![] }
     }
 
+    fn make_shared(files: Vec<FileMapping>) -> SharedConfig
+    {
+        SharedConfig { files, skills: vec![] }
+    }
+
     fn minimal_config() -> TemplateConfig
     {
         TemplateConfig {
@@ -443,7 +497,8 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("cmake".to_string(), vec![make_mapping("cmake-build.md", "$instructions"), make_mapping("cmake.gitignore", "$workspace/.gitignore")]);
+        shared
+            .insert("cmake".to_string(), make_shared(vec![make_mapping("cmake-build.md", "$instructions"), make_mapping("cmake.gitignore", "$workspace/.gitignore")]));
         config.shared = shared;
 
         config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
@@ -482,7 +537,7 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("base".to_string(), vec![make_mapping("base.gitignore", "$workspace/.gitignore")]);
+        shared.insert("base".to_string(), make_shared(vec![make_mapping("base.gitignore", "$workspace/.gitignore")]));
         config.shared = shared;
 
         config.languages.insert("a".to_string(), make_lang(vec!["base".to_string()], vec![make_mapping("a.md", "$instructions")]));
@@ -503,7 +558,7 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("cmake".to_string(), vec![make_mapping("cmake.md", "$instructions")]);
+        shared.insert("cmake".to_string(), make_shared(vec![make_mapping("cmake.md", "$instructions")]));
         config.shared = shared;
 
         config.languages.insert("c".to_string(), make_lang(vec![], vec![make_mapping("c.md", "$instructions")]));
@@ -573,7 +628,7 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("group".to_string(), vec![make_mapping("a.ini", "$workspace/.editorconfig")]);
+        shared.insert("group".to_string(), make_shared(vec![make_mapping("a.ini", "$workspace/.editorconfig")]));
         config.shared = shared;
 
         config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("b.ini", "$workspace/.editorconfig")]));
@@ -602,7 +657,7 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("group".to_string(), vec![make_mapping("shared.md", "$instructions")]);
+        shared.insert("group".to_string(), make_shared(vec![make_mapping("shared.md", "$instructions")]));
         config.shared = shared;
 
         config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("own.md", "$instructions")]));
@@ -792,8 +847,12 @@ agents:
         source: 'https://github.com/user/claude-skills/tree/main/skill-a'
 shared:
   cmake:
-    - source: cmake-build.md
-      target: '$instructions'
+    files:
+      - source: cmake-build.md
+        target: '$instructions'
+    skills:
+      - name: cmake-skill
+        source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
 languages:
   c:
     includes: [cmake]
@@ -829,7 +888,10 @@ skills:
         assert!(config.agents.is_empty() == false);
         assert_eq!(config.agents.get("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent"))?.skills.len(), 1);
         assert!(config.shared.is_empty() == false);
-        assert_eq!(config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?.len(), 1);
+        let cmake_shared = config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?;
+        assert_eq!(cmake_shared.files.len(), 1);
+        assert_eq!(cmake_shared.skills.len(), 1);
+        assert_eq!(cmake_shared.skills[0].name, "cmake-skill");
         assert_eq!(config.languages.len(), 2);
         assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.includes.is_empty() == false);
         assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.skills.is_empty() == true);
@@ -889,5 +951,145 @@ skills:
         assert_eq!(config.skills[0].name, "create-rule");
         assert_eq!(config.instructions.len(), 1);
         Ok(())
+    }
+
+    // -- SharedConfig serde --
+
+    #[test]
+    fn test_shared_config_files_only() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+files:
+  - source: cmake-build.md
+    target: '$instructions'
+"#;
+        let config: SharedConfig = serde_yaml::from_str(yaml)?;
+        assert_eq!(config.files.len(), 1);
+        assert!(config.skills.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_shared_config_with_skills() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+files:
+  - source: cmake-build.md
+    target: '$instructions'
+skills:
+  - name: cmake-skill
+    source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+"#;
+        let config: SharedConfig = serde_yaml::from_str(yaml)?;
+        assert_eq!(config.files.len(), 1);
+        assert_eq!(config.skills.len(), 1);
+        assert_eq!(config.skills[0].name, "cmake-skill");
+        Ok(())
+    }
+
+    #[test]
+    fn test_shared_config_empty_files() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+files: []
+skills:
+  - name: only-skill
+    source: 'https://github.com/user/repo/tree/main/only-skill'
+"#;
+        let config: SharedConfig = serde_yaml::from_str(yaml)?;
+        assert!(config.files.is_empty() == true);
+        assert_eq!(config.skills.len(), 1);
+        Ok(())
+    }
+
+    // -- resolve_language_skills --
+
+    #[test]
+    fn test_resolve_language_skills_own_only() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.languages.insert("rust".to_string(), LanguageConfig {
+            includes: vec![],
+            files:    vec![make_mapping("rust.md", "$instructions")],
+            skills:   vec![SkillDefinition { name: "rust-analyzer".to_string(), source: "https://example.com/rust-analyzer".to_string() }]
+        });
+
+        let skills = resolve_language_skills("rust", &config)?;
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "rust-analyzer");
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_from_shared() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.shared.insert("cmake".to_string(), SharedConfig {
+            files:  vec![make_mapping("cmake.md", "$instructions")],
+            skills: vec![SkillDefinition { name: "cmake-skill".to_string(), source: "https://example.com/cmake-skill".to_string() }]
+        });
+        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
+
+        let skills = resolve_language_skills("c", &config)?;
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "cmake-skill");
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_shared_plus_own() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.shared.insert("cmake".to_string(), SharedConfig {
+            files:  vec![make_mapping("cmake.md", "$instructions")],
+            skills: vec![SkillDefinition { name: "cmake-skill".to_string(), source: "https://example.com/cmake-skill".to_string() }]
+        });
+        config.languages.insert("c".to_string(), LanguageConfig {
+            includes: vec!["cmake".to_string()],
+            files:    vec![make_mapping("c.md", "$instructions")],
+            skills:   vec![SkillDefinition { name: "c-skill".to_string(), source: "https://example.com/c-skill".to_string() }]
+        });
+
+        let skills = resolve_language_skills("c", &config)?;
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].name, "cmake-skill");
+        assert_eq!(skills[1].name, "c-skill");
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_no_inherit_from_language() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.languages.insert("swift".to_string(), LanguageConfig {
+            includes: vec![],
+            files:    vec![make_mapping("swift.md", "$instructions")],
+            skills:   vec![SkillDefinition { name: "swift-skill".to_string(), source: "https://example.com/swift-skill".to_string() }]
+        });
+        config.languages.insert("swiftui".to_string(), make_lang(vec!["swift".to_string()], vec![make_mapping("swiftui.md", "$instructions")]));
+
+        let skills = resolve_language_skills("swiftui", &config)?;
+        assert!(skills.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_shared_no_skills() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.shared.insert("cmake".to_string(), make_shared(vec![make_mapping("cmake.md", "$instructions")]));
+        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
+
+        let skills = resolve_language_skills("c", &config)?;
+        assert!(skills.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_not_found()
+    {
+        let config = minimal_config();
+        let err = resolve_language_skills("nonexistent", &config).unwrap_err();
+        assert!(err.to_string().contains("not found in templates.yml") == true);
     }
 }

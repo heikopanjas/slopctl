@@ -797,6 +797,21 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-03-26 (v11.4.0, shared group skills propagation)
+
+- Introduced `SharedConfig` struct in `bom.rs` with `files` and `skills` fields
+- Changed `TemplateConfig.shared` from `HashMap<String, Vec<FileMapping>>` to `HashMap<String, SharedConfig>`
+- Skills defined on shared groups propagate to including languages via `includes`
+- Added `resolve_language_skills()` function: collects language own skills + shared group skills
+- Skills from included *languages* are still NOT propagated (only shared groups)
+- Updated `template_engine.rs` to use `resolve_language_skills` for language skill install
+- Updated `download_manager.rs` shared download loop for new `SharedConfig` format
+- Updated `list.rs` to use `resolve_language_skills` for accurate skill counts
+- Updated `templates/v4/templates.yml` shared section to use `files:` key
+- Added `make_shared()` test helper in `bom.rs`
+- Added tests: `SharedConfig` serde, `resolve_language_skills` (own, shared, combined, no-inherit, not-found)
+- Version bump: 11.3.0 to 11.4.0 (MINOR - shared skills feature)
+
 ### 2026-03-26 (v11.3.0, V4 template format with agent/language skills)
 
 - Bumped template version from 3 to 4 (V4 format)
