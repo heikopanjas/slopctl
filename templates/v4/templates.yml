@@ -16,6 +16,7 @@ version: 4
 # V4 additions:
 # - `skills` on agents: skills associated with a specific agent (installed to agent skill dir)
 # - `skills` on languages: skills associated with a language (installed to cross-client .agents/skills/)
+# - `skills` on shared groups: propagated to including languages via `includes`
 #
 # Placeholders:
 #   $workspace     - Project root directory
@@ -68,12 +69,15 @@ agents:
         target: '$workspace/.cursor/commands/init-session.md'
 
 # Reusable file groups shared across multiple languages
+# Each group has `files` (FileMapping list) and optional `skills` (SkillDefinition list).
+# Skills from shared groups propagate to including languages via `includes`.
 shared:
   cmake:
-    - source: cmake-build-commands.md
-      target: '$instructions'
-    - source: cmake-git-ignore.txt
-      target: '$workspace/.gitignore'
+    files:
+      - source: cmake-build-commands.md
+        target: '$instructions'
+      - source: cmake-git-ignore.txt
+        target: '$workspace/.gitignore'
 
 # Language-specific coding standards templates
 languages:

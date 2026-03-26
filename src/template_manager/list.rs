@@ -5,7 +5,12 @@ use std::collections::BTreeSet;
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{Result, bom::BillOfMaterials, file_tracker::FileTracker, template_engine};
+use crate::{
+    Result,
+    bom::{self, BillOfMaterials},
+    file_tracker::FileTracker,
+    template_engine
+};
 
 impl TemplateManager
 {
@@ -85,7 +90,15 @@ impl TemplateManager
         {
             let lang_config = config.languages.get(lang_name.as_str());
             let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!("includes: {}", inc.join(", ")));
-            let skill_annotation = lang_config.map(|lc| lc.skills.len()).filter(|&n| n > 0).map(|n| format!("{} skill(s)", n));
+            let resolved_skill_count = bom::resolve_language_skills(lang_name, &config).map(|s| s.len()).unwrap_or(0);
+            let skill_annotation = if resolved_skill_count > 0
+            {
+                Some(format!("{} skill(s)", resolved_skill_count))
+            }
+            else
+            {
+                None
+            };
 
             let annotations: Vec<String> = [includes_annotation, skill_annotation].into_iter().flatten().collect();
 
