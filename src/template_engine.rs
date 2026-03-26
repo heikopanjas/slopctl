@@ -382,46 +382,27 @@ impl<'a> TemplateEngine<'a>
             println!("{} {}", "!".yellow(), err.yellow());
         }
 
-        let skill_agent = options.agent.map(|a| a.to_string()).or_else(|| agent_defaults::detect_installed_agent(&workspace));
+        let skill_base_dir = if let Some(agent_name) = options.agent
+        {
+            agent_defaults::get_skill_dir(agent_name).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile))
+        }
+        else
+        {
+            Some(self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile))
+        };
 
-        if let Some(ref agent_name) = skill_agent &&
+        if let Some(ref skill_dir) = skill_base_dir &&
             config.skills.is_empty() == false
         {
-            self.install_skills(
-                config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
-                agent_name,
-                &workspace,
-                &userprofile,
-                temp_path,
-                &mut files_to_copy
-            )?;
+            self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
         }
 
         if options.skills.is_empty() == false
         {
-            let resolved_agent =
-                skill_agent.as_deref().ok_or_else(|| anyhow::anyhow!("Cannot install skills: no --agent specified and no agent detected in workspace"))?;
+            let skill_dir = skill_base_dir.as_ref().ok_or_else(|| anyhow::anyhow!("Cannot install skills: unknown agent, no skill directory defined"))?;
 
-            let adhoc_skills: Vec<(String, String)> = options
-                .skills
-                .iter()
-                .map(|s| {
-                    if Self::is_local_path(s) == true
-                    {
-                        let resolved = Self::resolve_local_skill_path(s);
-                        let name = resolved.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| s.clone());
-                        (name, resolved.to_string_lossy().to_string())
-                    }
-                    else
-                    {
-                        let url = github::expand_shorthand(s);
-                        let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
-                        (name, url)
-                    }
-                })
-                .collect();
-
-            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), resolved_agent, &workspace, &userprofile, temp_path, &mut files_to_copy)?;
+            let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
+            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
         }
 
         validate_no_duplicate_targets(&files_to_copy)?;
@@ -448,7 +429,7 @@ impl<'a> TemplateEngine<'a>
 
         self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker)?;
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, &ctx, options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options)?;
 
         match copy_result
         {
@@ -643,7 +624,7 @@ impl<'a> TemplateEngine<'a>
     ///
     /// * `files_to_copy` - List of (source, target) file pairs
     /// * `file_tracker` - File tracker for checking modifications and recording installations
-    /// * `ctx` - Template context containing the template version for file tracking
+    /// * `template_version` - Template version for file tracking (0 for standalone skill installs)
     /// * `options` - Update options containing lang, agent, and force settings
     ///
     /// # Returns
@@ -654,7 +635,7 @@ impl<'a> TemplateEngine<'a>
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, ctx: &TemplateContext, options: &UpdateOptions
+        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
@@ -752,7 +733,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, ctx.template_version, options.lang.map(|l| l.to_string()), category.to_string());
+                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string());
             }
         }
 
@@ -827,23 +808,121 @@ impl<'a> TemplateEngine<'a>
         }
     }
 
-    /// Install skills into the agent's skill directory
+    /// Resolve ad-hoc skill sources from CLI `--skill` values into (name, source) pairs
+    ///
+    /// Local paths are resolved to absolute paths. GitHub shorthand is expanded to full URLs.
+    fn resolve_adhoc_skills(skills: &[String]) -> Vec<(String, String)>
+    {
+        skills
+            .iter()
+            .map(|s| {
+                if Self::is_local_path(s) == true
+                {
+                    let resolved = Self::resolve_local_skill_path(s);
+                    let name = resolved.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| s.clone());
+                    (name, resolved.to_string_lossy().to_string())
+                }
+                else
+                {
+                    let url = github::expand_shorthand(s);
+                    let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
+                    (name, url)
+                }
+            })
+            .collect()
+    }
+
+    /// Install ad-hoc skills without requiring global templates
+    ///
+    /// Standalone skill installation that bypasses all template processing (AGENTS.md,
+    /// language files, agent files). Skills are installed to the cross-client
+    /// `.agents/skills/` directory per the agentskills.io specification.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Update options (only `skills`, `force`, and `dry_run` are used)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if skill resolution, download, or copy operations fail
+    pub fn install_skills_only(&self, options: &UpdateOptions) -> Result<()>
+    {
+        require!(options.skills.is_empty() == false, Ok(()));
+
+        let workspace = std::env::current_dir()?;
+        let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
+
+        let skill_base_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+
+        let mut file_tracker = FileTracker::new(self.config_dir)?;
+        let temp_dir = tempfile::TempDir::new()?;
+
+        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+        let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
+        self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+
+        validate_no_duplicate_targets(&files_to_copy)?;
+
+        if options.dry_run == true
+        {
+            println!("\n{} Files that would be created/modified:", "→".blue());
+            for (_, target) in &files_to_copy
+            {
+                if target.exists()
+                {
+                    println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), target.display());
+                }
+            }
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+
+        println!("{} Copying skill files", "→".blue());
+
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
+
+        match copy_result
+        {
+            | CopyFilesResult::Done { skipped } =>
+            {
+                self.show_skipped_files_summary(&skipped);
+            }
+            | CopyFilesResult::Cancelled =>
+            {
+                return Ok(());
+            }
+        }
+
+        file_tracker.save()?;
+
+        println!("{} Skills installed successfully", "✓".green());
+        println!("{} Installed to cross-client directory: {}", "→".blue(), skill_base_dir.display().to_string().yellow());
+
+        Ok(())
+    }
+
+    /// Install skills into the given skill directory
     ///
     /// For each skill, resolves the source (local or GitHub) and adds file entries
     /// to the files_to_copy list. GitHub skills are discovered via SKILL.md scanning
     /// and downloaded recursively (including subdirectories). Local skills are copied
     /// recursively; absolute paths are used directly (ad-hoc local installs) while
     /// relative paths are resolved against the global template cache.
-    fn install_skills<'b, I>(
-        &self, skills: I, agent_name: &str, workspace: &Path, userprofile: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>
-    ) -> Result<()>
+    ///
+    /// # Arguments
+    ///
+    /// * `skills` - Iterator of (name, source) pairs
+    /// * `skill_base_dir` - Resolved target directory for skills (e.g. `.cursor/skills` or `.agents/skills`)
+    /// * `temp_dir` - Temporary directory for GitHub downloads
+    /// * `files_to_copy` - Accumulator for (source, target) file pairs
+    fn install_skills<'b, I>(&self, skills: I, skill_base_dir: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
     where I: Iterator<Item = (&'b str, &'b str)>
     {
-        let skill_dir_template =
-            agent_defaults::get_skill_dir(agent_name).ok_or_else(|| anyhow::anyhow!("Unknown agent '{}': no skill directory defined", agent_name))?;
-
-        let skill_base_dir = self.resolve_placeholder(skill_dir_template, workspace, userprofile);
-
         for (skill_name, source) in skills
         {
             if github::is_url(source) == true
@@ -1430,5 +1509,138 @@ mod tests
             (PathBuf::from("template.ini"), PathBuf::from("/workspace/.other-config")),
         ];
         assert!(validate_no_duplicate_targets(&files).is_ok() == true);
+    }
+
+    // -- resolve_adhoc_skills --
+
+    #[test]
+    fn test_resolve_adhoc_skills_github_shorthand()
+    {
+        let skills = vec!["user/my-skill".to_string()];
+        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0, "my-skill");
+        assert!(resolved[0].1.contains("github.com") == true);
+    }
+
+    #[test]
+    fn test_resolve_adhoc_skills_local_path()
+    {
+        let skills = vec!["./my-local-skill".to_string()];
+        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].0, "my-local-skill");
+        assert!(Path::new(&resolved[0].1).is_absolute() == true);
+    }
+
+    #[test]
+    fn test_resolve_adhoc_skills_mixed()
+    {
+        let skills = vec!["user/remote-skill".to_string(), "./local-skill".to_string()];
+        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].0, "remote-skill");
+        assert_eq!(resolved[1].0, "local-skill");
+    }
+
+    // -- cross-client skill directory --
+
+    #[test]
+    fn test_resolve_cross_client_skill_dir()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let result = engine.resolve_placeholder(crate::agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("/projects/myapp/.agents/skills"));
+    }
+
+    #[test]
+    fn test_skill_base_dir_with_agent_uses_agent_specific()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let dir_template = crate::agent_defaults::get_skill_dir("cursor").expect("cursor should have skill dir");
+        let result = engine.resolve_placeholder(dir_template, &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("/projects/myapp/.cursor/skills"));
+    }
+
+    #[test]
+    fn test_skill_base_dir_without_agent_uses_cross_client()
+    {
+        let engine = TemplateEngine::new(Path::new("/config"));
+        let workspace = PathBuf::from("/projects/myapp");
+        let userprofile = PathBuf::from("/home/user");
+
+        let result = engine.resolve_placeholder(crate::agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+        assert!(result.to_string_lossy().contains(".agents/skills") == true);
+    }
+
+    // -- install_skills (unit) --
+
+    #[test]
+    fn test_install_skills_local_to_cross_client_dir() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace_dir = tempfile::TempDir::new()?;
+        let temp_dir = tempfile::TempDir::new()?;
+
+        let skill_source = workspace_dir.path().join("test-skill");
+        fs::create_dir_all(&skill_source)?;
+        fs::write(skill_source.join("SKILL.md"), "---\nname: test-skill\ndescription: A test skill.\n---\n\n# Test Skill\n")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skill_base_dir = workspace_dir.path().join(".agents/skills");
+        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+        let source_str = skill_source.to_string_lossy().to_string();
+        let skills_input = vec![("test-skill".to_string(), source_str)];
+        engine.install_skills(skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+
+        assert_eq!(files_to_copy.len(), 1);
+        assert_eq!(files_to_copy[0].1, skill_base_dir.join("test-skill/SKILL.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_install_skills_local_with_subdirectories() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace_dir = tempfile::TempDir::new()?;
+        let temp_dir = tempfile::TempDir::new()?;
+
+        let skill_source = workspace_dir.path().join("my-skill");
+        fs::create_dir_all(skill_source.join("scripts"))?;
+        fs::write(skill_source.join("SKILL.md"), "---\nname: my-skill\ndescription: Test.\n---\n")?;
+        fs::write(skill_source.join("scripts/setup.sh"), "#!/bin/bash\necho hello")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skill_base_dir = workspace_dir.path().join(".agents/skills");
+        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+
+        let source_str = skill_source.to_string_lossy().to_string();
+        let skills_input = vec![("my-skill".to_string(), source_str)];
+        engine.install_skills(skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+
+        assert_eq!(files_to_copy.len(), 2);
+        let targets: Vec<PathBuf> = files_to_copy.iter().map(|(_, t)| t.clone()).collect();
+        assert!(targets.contains(&skill_base_dir.join("my-skill/SKILL.md")) == true);
+        assert!(targets.contains(&skill_base_dir.join("my-skill/scripts/setup.sh")) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_install_skills_only_empty_skills_is_noop() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
+
+        engine.install_skills_only(&options)?;
+        Ok(())
     }
 }

@@ -7,6 +7,24 @@ use crate::{Result, template_engine};
 
 impl TemplateManager
 {
+    /// Installs ad-hoc skills without requiring global templates
+    ///
+    /// Delegates to `TemplateEngine::install_skills_only` which installs skills
+    /// to the cross-client `.agents/skills/` directory.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Aggregated CLI parameters (only `skills`, `force`, `dry_run` are used)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if skill installation fails
+    pub fn install_skills(&self, options: &template_engine::UpdateOptions) -> Result<()>
+    {
+        let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
+        engine.install_skills_only(options)
+    }
+
     /// Updates local templates from global storage
     ///
     /// This method detects the template version and dispatches to the

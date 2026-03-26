@@ -12,6 +12,10 @@ pub const PLACEHOLDER_WORKSPACE: &str = "$workspace";
 /// Placeholder for the user profile/home directory
 pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 
+/// Cross-client skill directory per the agentskills.io specification.
+/// All compliant agents scan this path alongside their native skill directories.
+pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
+
 /// An agent-specific instruction file with its conventional location
 #[derive(Debug, Clone)]
 pub struct InstructionFile
@@ -186,5 +190,12 @@ mod tests
         std::fs::write(workspace.join("CLAUDE.md"), b"test")?;
         assert_eq!(detect_installed_agent(workspace), Some("claude".to_string()));
         Ok(())
+    }
+
+    #[test]
+    fn test_cross_client_skill_dir_uses_workspace_placeholder()
+    {
+        assert!(CROSS_CLIENT_SKILL_DIR.starts_with("$workspace"));
+        assert!(CROSS_CLIENT_SKILL_DIR.contains(".agents/skills"));
     }
 }

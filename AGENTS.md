@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-21
+**Last updated:** 2026-03-26
 
 <!-- {mission} -->
 
@@ -796,6 +796,23 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-03-26 (v11.2.0, independent skill installation)
+
+- Made `--skill` independent from `--lang` and `--agent` in the `install` command
+- `--skill` alone now installs skills without requiring global templates, AGENTS.md, or an agent
+- Skills installed without `--agent` go to the cross-client `$workspace/.agents/skills/` directory per the agentskills.io specification
+- Skills installed with `--agent` continue using the agent-specific path (e.g. `.cursor/skills/`)
+- When `--skill` is used with `--lang` (no agent), skills also use the cross-client path
+- Added `CROSS_CLIENT_SKILL_DIR` constant in `agent_defaults.rs`
+- Added `install_skills_only()` method to `TemplateEngine` for standalone skill installation
+- Added `install_skills()` method to `TemplateManager` for skill-only routing
+- Refactored `install_skills()` to accept `skill_base_dir` directly instead of deriving from agent name (DRY)
+- Refactored `copy_files_with_tracking()` to accept `template_version: u32` instead of `&TemplateContext`
+- Extracted `resolve_adhoc_skills()` helper to eliminate duplication between `update()` and `install_skills_only()`
+- Updated `main.rs` to route skill-only mode directly, skipping template download
+- Added 8 new tests covering cross-client dir, resolve_adhoc_skills, and install_skills
+- Version bump: 11.1.1 to 11.2.0 (MINOR - independent skill install feature)
 
 ### 2026-03-21 (Windows/PowerShell guidelines)
 
