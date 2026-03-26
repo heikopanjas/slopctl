@@ -27,20 +27,24 @@ pub struct AgentConfig
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompts:      Vec<FileMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills:       Vec<FileMapping>
+    pub skills:       Vec<SkillDefinition>
 }
 
-/// Language configuration with files and optional includes
+/// Language configuration with files, optional includes, and optional skills
 ///
 /// Languages can include shared file groups or other languages via `includes`.
 /// Resolution order: included files first (depth-first), then own `files`.
+/// Skills are installed to the cross-client `.agents/skills/` directory when
+/// the language is selected. Skills are NOT inherited via `includes`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LanguageConfig
 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub includes: Vec<String>,
     #[serde(default)]
-    pub files:    Vec<FileMapping>
+    pub files:    Vec<FileMapping>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills:   Vec<SkillDefinition>
 }
 
 /// Integration configuration with files
@@ -58,10 +62,11 @@ pub struct MainConfig
     pub target: String
 }
 
-/// Agent-agnostic skill definition (top-level in templates.yml)
+/// Skill definition used in agents, languages, and top-level skills sections
 ///
 /// Skills are directories containing SKILL.md + optional supporting files.
-/// The install target is resolved from `agent_defaults` based on the active agent.
+/// The install target is resolved based on context: agent-specific dir for agent
+/// skills, cross-client `.agents/skills/` for language and top-level skills.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDefinition
 {
@@ -71,10 +76,10 @@ pub struct SkillDefinition
 
 /// Default version for templates.yml (used when version field is missing)
 ///
-/// Switched to version 3 in v9.0.0 (shared groups + includes)
+/// Switched to version 4 in v11.3.0 (agent/language skill associations)
 fn default_version() -> u32
 {
-    3
+    4
 }
 
 /// Template configuration structure parsed from templates.yml
@@ -218,7 +223,7 @@ impl BillOfMaterials
         {
             let mut file_paths = Vec::new();
 
-            for mapping in agent_config.instructions.iter().chain(&agent_config.prompts).chain(&agent_config.skills)
+            for mapping in agent_config.instructions.iter().chain(&agent_config.prompts)
             {
                 if let Some(path) = Self::resolve_workspace_path(&mapping.target)
                 {
@@ -321,10 +326,15 @@ mod tests
         FileMapping { source: source.to_string(), target: target.to_string() }
     }
 
+    fn make_lang(includes: Vec<String>, files: Vec<FileMapping>) -> LanguageConfig
+    {
+        LanguageConfig { includes, files, skills: vec![] }
+    }
+
     fn minimal_config() -> TemplateConfig
     {
         TemplateConfig {
-            version:     3,
+            version:     4,
             main:        None,
             agents:      HashMap::new(),
             languages:   HashMap::new(),
@@ -339,19 +349,19 @@ mod tests
     // -- default_version --
 
     #[test]
-    fn test_default_version_returns_3()
+    fn test_default_version_returns_4()
     {
-        assert_eq!(default_version(), 3);
+        assert_eq!(default_version(), 4);
     }
 
     // -- TemplateConfig serde --
 
     #[test]
-    fn test_template_config_version_defaults_to_3() -> anyhow::Result<()>
+    fn test_template_config_version_defaults_to_4() -> anyhow::Result<()>
     {
         let yaml = "languages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
-        assert_eq!(config.version, 3);
+        assert_eq!(config.version, 4);
         Ok(())
     }
 
@@ -407,10 +417,9 @@ mod tests
     fn test_resolve_simple_language_no_includes() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("rust".to_string(), LanguageConfig {
-            includes: vec![],
-            files:    vec![make_mapping("rust.md", "$instructions"), make_mapping("rust.toml", "$workspace/.rustfmt.toml")]
-        });
+        config
+            .languages
+            .insert("rust".to_string(), make_lang(vec![], vec![make_mapping("rust.md", "$instructions"), make_mapping("rust.toml", "$workspace/.rustfmt.toml")]));
 
         let files = resolve_language_files("rust", &config)?;
         assert_eq!(files.len(), 2);
@@ -437,7 +446,7 @@ mod tests
         shared.insert("cmake".to_string(), vec![make_mapping("cmake-build.md", "$instructions"), make_mapping("cmake.gitignore", "$workspace/.gitignore")]);
         config.shared = shared;
 
-        config.languages.insert("c".to_string(), LanguageConfig { includes: vec!["cmake".to_string()], files: vec![make_mapping("c.md", "$instructions")] });
+        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
 
         let files = resolve_language_files("c", &config)?;
         assert_eq!(files.len(), 3);
@@ -453,13 +462,10 @@ mod tests
     fn test_resolve_includes_another_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("swift".to_string(), LanguageConfig {
-            includes: vec![],
-            files:    vec![make_mapping("swift.md", "$instructions"), make_mapping("swift.ini", "$workspace/.editorconfig")]
-        });
         config
             .languages
-            .insert("swiftui".to_string(), LanguageConfig { includes: vec!["swift".to_string()], files: vec![make_mapping("swiftui.md", "$instructions")] });
+            .insert("swift".to_string(), make_lang(vec![], vec![make_mapping("swift.md", "$instructions"), make_mapping("swift.ini", "$workspace/.editorconfig")]));
+        config.languages.insert("swiftui".to_string(), make_lang(vec!["swift".to_string()], vec![make_mapping("swiftui.md", "$instructions")]));
 
         let files = resolve_language_files("swiftui", &config)?;
         assert_eq!(files.len(), 3);
@@ -479,8 +485,8 @@ mod tests
         shared.insert("base".to_string(), vec![make_mapping("base.gitignore", "$workspace/.gitignore")]);
         config.shared = shared;
 
-        config.languages.insert("a".to_string(), LanguageConfig { includes: vec!["base".to_string()], files: vec![make_mapping("a.md", "$instructions")] });
-        config.languages.insert("b".to_string(), LanguageConfig { includes: vec!["a".to_string()], files: vec![make_mapping("b.md", "$instructions")] });
+        config.languages.insert("a".to_string(), make_lang(vec!["base".to_string()], vec![make_mapping("a.md", "$instructions")]));
+        config.languages.insert("b".to_string(), make_lang(vec!["a".to_string()], vec![make_mapping("b.md", "$instructions")]));
 
         let files = resolve_language_files("b", &config)?;
         assert_eq!(files.len(), 3);
@@ -500,11 +506,8 @@ mod tests
         shared.insert("cmake".to_string(), vec![make_mapping("cmake.md", "$instructions")]);
         config.shared = shared;
 
-        config.languages.insert("c".to_string(), LanguageConfig { includes: vec![], files: vec![make_mapping("c.md", "$instructions")] });
-        config.languages.insert("c-ext".to_string(), LanguageConfig {
-            includes: vec!["cmake".to_string(), "c".to_string()],
-            files:    vec![make_mapping("ext.md", "$instructions")]
-        });
+        config.languages.insert("c".to_string(), make_lang(vec![], vec![make_mapping("c.md", "$instructions")]));
+        config.languages.insert("c-ext".to_string(), make_lang(vec!["cmake".to_string(), "c".to_string()], vec![make_mapping("ext.md", "$instructions")]));
 
         let files = resolve_language_files("c-ext", &config)?;
         assert_eq!(files.len(), 3);
@@ -520,8 +523,8 @@ mod tests
     fn test_resolve_include_only_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("base".to_string(), LanguageConfig { includes: vec![], files: vec![make_mapping("base.md", "$instructions")] });
-        config.languages.insert("alias".to_string(), LanguageConfig { includes: vec!["base".to_string()], files: vec![] });
+        config.languages.insert("base".to_string(), make_lang(vec![], vec![make_mapping("base.md", "$instructions")]));
+        config.languages.insert("alias".to_string(), make_lang(vec!["base".to_string()], vec![]));
 
         let files = resolve_language_files("alias", &config)?;
         assert_eq!(files.len(), 1);
@@ -535,8 +538,8 @@ mod tests
     fn test_resolve_circular_include()
     {
         let mut config = minimal_config();
-        config.languages.insert("a".to_string(), LanguageConfig { includes: vec!["b".to_string()], files: vec![] });
-        config.languages.insert("b".to_string(), LanguageConfig { includes: vec!["a".to_string()], files: vec![] });
+        config.languages.insert("a".to_string(), make_lang(vec!["b".to_string()], vec![]));
+        config.languages.insert("b".to_string(), make_lang(vec!["a".to_string()], vec![]));
 
         let err = resolve_language_files("a", &config).unwrap_err();
         assert!(err.to_string().contains("Circular include") == true);
@@ -546,7 +549,7 @@ mod tests
     fn test_resolve_include_not_found()
     {
         let mut config = minimal_config();
-        config.languages.insert("lang".to_string(), LanguageConfig { includes: vec!["nonexistent".to_string()], files: vec![] });
+        config.languages.insert("lang".to_string(), make_lang(vec!["nonexistent".to_string()], vec![]));
 
         let err = resolve_language_files("lang", &config).unwrap_err();
         assert!(err.to_string().contains("not found in shared or languages") == true);
@@ -557,7 +560,7 @@ mod tests
     {
         let mut config = minimal_config();
         config.shared = HashMap::new();
-        config.languages.insert("lang".to_string(), LanguageConfig { includes: vec!["missing".to_string()], files: vec![] });
+        config.languages.insert("lang".to_string(), make_lang(vec!["missing".to_string()], vec![]));
 
         let err = resolve_language_files("lang", &config).unwrap_err();
         assert!(err.to_string().contains("not found in shared or languages") == true);
@@ -573,9 +576,7 @@ mod tests
         shared.insert("group".to_string(), vec![make_mapping("a.ini", "$workspace/.editorconfig")]);
         config.shared = shared;
 
-        config
-            .languages
-            .insert("lang".to_string(), LanguageConfig { includes: vec!["group".to_string()], files: vec![make_mapping("b.ini", "$workspace/.editorconfig")] });
+        config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("b.ini", "$workspace/.editorconfig")]));
 
         let err = resolve_language_files("lang", &config).unwrap_err();
         assert!(err.to_string().contains("Duplicate target") == true);
@@ -586,10 +587,10 @@ mod tests
     fn test_resolve_multiple_instructions_targets_allowed() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("rust".to_string(), LanguageConfig {
-            includes: vec![],
-            files:    vec![make_mapping("coding.md", "$instructions"), make_mapping("build.md", "$instructions"), make_mapping("extra.md", "$instructions")]
-        });
+        config.languages.insert(
+            "rust".to_string(),
+            make_lang(vec![], vec![make_mapping("coding.md", "$instructions"), make_mapping("build.md", "$instructions"), make_mapping("extra.md", "$instructions")])
+        );
 
         let files = resolve_language_files("rust", &config)?;
         assert_eq!(files.len(), 3);
@@ -604,7 +605,7 @@ mod tests
         shared.insert("group".to_string(), vec![make_mapping("shared.md", "$instructions")]);
         config.shared = shared;
 
-        config.languages.insert("lang".to_string(), LanguageConfig { includes: vec!["group".to_string()], files: vec![make_mapping("own.md", "$instructions")] });
+        config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("own.md", "$instructions")]));
 
         let files = resolve_language_files("lang", &config)?;
         assert_eq!(files.len(), 2);
@@ -748,14 +749,18 @@ agents:
 languages: {}
 agents:
   cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
     skills:
-      - source: skills/my-skill/SKILL.md
-        target: '$workspace/.cursor/skills/my-skill/SKILL.md'
+      - name: create-rule
+        source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
 "#;
         fs::write(&config_path, yaml)?;
 
         let bom = BillOfMaterials::from_config(&config_path)?;
         assert!(bom.has_agent("cursor") == true);
+        // Skills are SkillDefinition (no target), so only instructions contribute to BoM
         assert_eq!(bom.get_agent_files("cursor").ok_or_else(|| anyhow::anyhow!("missing cursor agent files"))?.len(), 1);
         Ok(())
     }
@@ -773,7 +778,7 @@ agents:
     fn test_full_template_config_parse() -> anyhow::Result<()>
     {
         let yaml = r#"
-version: 3
+version: 4
 main:
   source: AGENTS.md
   target: '$workspace/AGENTS.md'
@@ -782,6 +787,9 @@ agents:
     instructions:
       - source: claude/CLAUDE.md
         target: '$workspace/CLAUDE.md'
+    skills:
+      - name: claude-skill
+        source: 'https://github.com/user/claude-skills/tree/main/skill-a'
 shared:
   cmake:
     - source: cmake-build.md
@@ -796,6 +804,9 @@ languages:
     files:
       - source: rust.md
         target: '$instructions'
+    skills:
+      - name: rust-analyzer
+        source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
 integration:
   git:
     files:
@@ -812,20 +823,71 @@ skills:
     source: 'https://github.com/user/repo/tree/main/skills/my-skill'
 "#;
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
-        assert_eq!(config.version, 3);
+        assert_eq!(config.version, 4);
         assert!(config.main.is_some() == true);
         assert_eq!(config.main.as_ref().ok_or_else(|| anyhow::anyhow!("missing main config"))?.source, "AGENTS.md");
         assert!(config.agents.is_empty() == false);
+        assert_eq!(config.agents.get("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent"))?.skills.len(), 1);
         assert!(config.shared.is_empty() == false);
         assert_eq!(config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?.len(), 1);
         assert_eq!(config.languages.len(), 2);
         assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.includes.is_empty() == false);
+        assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.skills.is_empty() == true);
         assert!(config.languages.get("rust").ok_or_else(|| anyhow::anyhow!("missing rust language"))?.includes.is_empty() == true);
+        assert_eq!(config.languages.get("rust").ok_or_else(|| anyhow::anyhow!("missing rust language"))?.skills.len(), 1);
         assert!(config.integration.is_empty() == false);
         assert!(config.principles.is_empty() == false);
         assert!(config.mission.is_empty() == false);
         assert!(config.skills.is_empty() == false);
         assert_eq!(config.skills[0].name, "my-skill");
+        Ok(())
+    }
+
+    // -- LanguageConfig skills serde --
+
+    #[test]
+    fn test_language_config_skills_defaults_empty() -> anyhow::Result<()>
+    {
+        let yaml = "files:\n  - source: a.md\n    target: '$instructions'";
+        let config: LanguageConfig = serde_yaml::from_str(yaml)?;
+        assert!(config.skills.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_language_config_with_skills() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+files:
+  - source: rust.md
+    target: '$instructions'
+skills:
+  - name: rust-analyzer
+    source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
+"#;
+        let config: LanguageConfig = serde_yaml::from_str(yaml)?;
+        assert_eq!(config.skills.len(), 1);
+        assert_eq!(config.skills[0].name, "rust-analyzer");
+        Ok(())
+    }
+
+    // -- AgentConfig skills serde --
+
+    #[test]
+    fn test_agent_config_skills_as_skill_definition() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+instructions:
+  - source: cursor/cursorrules
+    target: '$workspace/.cursorrules'
+skills:
+  - name: create-rule
+    source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+"#;
+        let config: AgentConfig = serde_yaml::from_str(yaml)?;
+        assert_eq!(config.skills.len(), 1);
+        assert_eq!(config.skills[0].name, "create-rule");
+        assert_eq!(config.instructions.len(), 1);
         Ok(())
     }
 }

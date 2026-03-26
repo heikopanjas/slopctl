@@ -144,8 +144,8 @@ enum Commands
     }
 }
 
-/// Default template source URL (V3 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v3";
+/// Default template source URL (V4 templates - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v4";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///

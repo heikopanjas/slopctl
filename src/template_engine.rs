@@ -145,7 +145,7 @@ pub fn validate_no_duplicate_targets(files: &[(PathBuf, PathBuf)]) -> Result<()>
 /// Template engine for vibe-cop (agents.md standard)
 ///
 /// Handles template generation, fragment merging, placeholder resolution,
-/// and skill installation. Supports V2 and V3 template formats.
+/// and skill installation. Supports V2-V4 template formats.
 pub struct TemplateEngine<'a>
 {
     config_dir: &'a Path
@@ -352,7 +352,7 @@ impl<'a> TemplateEngine<'a>
         {
             if let Some(agent_config) = config.agents.get(agent_name)
             {
-                for entry in agent_config.instructions.iter().chain(&agent_config.prompts).chain(&agent_config.skills)
+                for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
                 {
                     let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
                     {
@@ -382,25 +382,37 @@ impl<'a> TemplateEngine<'a>
             println!("{} {}", "!".yellow(), err.yellow());
         }
 
-        let skill_base_dir = if let Some(agent_name) = options.agent
-        {
-            agent_defaults::get_skill_dir(agent_name).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile))
-        }
-        else
-        {
-            Some(self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile))
-        };
+        let agent_skill_dir = options.agent.and_then(agent_defaults::get_skill_dir).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
+        let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
 
-        if let Some(ref skill_dir) = skill_base_dir &&
-            config.skills.is_empty() == false
+        // Agent-specific skills from templates.yml → agent skill dir
+        if let Some(agent_name) = options.agent &&
+            let Some(agent_config) = config.agents.get(agent_name) &&
+            agent_config.skills.is_empty() == false &&
+            let Some(ref dir) = agent_skill_dir
         {
+            self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, &mut files_to_copy)?;
+        }
+
+        // Language-specific skills from templates.yml → cross-client dir
+        if let Some(lang) = options.lang &&
+            let Some(lang_config) = config.languages.get(lang) &&
+            lang_config.skills.is_empty() == false
+        {
+            self.install_skills(lang_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), &cross_client_skill_dir, temp_path, &mut files_to_copy)?;
+        }
+
+        // Top-level skills from templates.yml → agent dir if agent specified, else cross-client
+        if config.skills.is_empty() == false
+        {
+            let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
             self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
         }
 
+        // Ad-hoc CLI skills → agent dir if agent specified, else cross-client
         if options.skills.is_empty() == false
         {
-            let skill_dir = skill_base_dir.as_ref().ok_or_else(|| anyhow::anyhow!("Cannot install skills: unknown agent, no skill directory defined"))?;
-
+            let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
             let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
             self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
         }
@@ -1073,10 +1085,10 @@ mod tests
     fn test_load_template_config_valid() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
-        fs::write(dir.path().join("templates.yml"), "version: 3\nlanguages: {}")?;
+        fs::write(dir.path().join("templates.yml"), "version: 4\nlanguages: {}")?;
 
         let config = load_template_config(dir.path())?;
-        assert_eq!(config.version, 3);
+        assert_eq!(config.version, 4);
         Ok(())
     }
 
@@ -1374,7 +1386,7 @@ mod tests
         let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.")?;
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 3 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 4 };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1401,7 +1413,7 @@ mod tests
             source,
             target: target.clone(),
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
-            template_version: 3
+            template_version: 4
         };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
@@ -1422,7 +1434,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1442,7 +1454,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
         let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1462,7 +1474,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 3 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;

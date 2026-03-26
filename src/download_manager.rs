@@ -127,7 +127,7 @@ impl DownloadManager
 
         for agent_config in config.agents.values()
         {
-            for entry in agent_config.instructions.iter().chain(&agent_config.prompts).chain(&agent_config.skills)
+            for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
             {
                 download_entry(&entry.source)?;
             }

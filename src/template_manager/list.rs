@@ -84,15 +84,18 @@ impl TemplateManager
         for lang_name in languages
         {
             let lang_config = config.languages.get(lang_name.as_str());
-            let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!(" (includes: {})", inc.join(", ")));
+            let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!("includes: {}", inc.join(", ")));
+            let skill_annotation = lang_config.map(|lc| lc.skills.len()).filter(|&n| n > 0).map(|n| format!("{} skill(s)", n));
 
-            if let Some(annotation) = includes_annotation
+            let annotations: Vec<String> = [includes_annotation, skill_annotation].into_iter().flatten().collect();
+
+            if annotations.is_empty() == true
             {
-                println!("  • {}{}", lang_name, annotation.dimmed());
+                println!("  • {}", lang_name);
             }
             else
             {
-                println!("  • {}", lang_name);
+                println!("  • {} ({})", lang_name, annotations.join(", ").dimmed());
             }
         }
 
