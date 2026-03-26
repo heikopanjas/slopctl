@@ -123,6 +123,9 @@ languages:
         target: '$workspace/.editorconfig'
       - source: swift-git-ignore.txt
         target: '$workspace/.gitignore'
+    skills:
+      - name: swift-skill
+        source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
 
 # Integration templates for specific tools/workflows
 integration:
