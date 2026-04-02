@@ -382,7 +382,7 @@ fn main()
                 {
                     "Installing"
                 };
-                println!("{} {} skills to cross-client directory", "→".blue(), prefix);
+                println!("{} {} skills", "→".blue(), prefix);
                 manager.install_skills(&options)
             }
             else

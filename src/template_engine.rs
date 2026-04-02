@@ -866,7 +866,22 @@ impl<'a> TemplateEngine<'a>
         let workspace = std::env::current_dir()?;
         let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
 
-        let skill_base_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+        // Detect all installed agents; install into each agent's skill dir.
+        // Fall back to the cross-client dir when no agent is present.
+        let installed_agents = agent_defaults::detect_all_installed_agents(&workspace);
+
+        let skill_dirs: Vec<(String, PathBuf)> = if installed_agents.is_empty() == false
+        {
+            installed_agents
+                .iter()
+                .filter_map(|agent| agent_defaults::get_skill_dir(agent).map(|dir| (agent.clone(), self.resolve_placeholder(dir, &workspace, &userprofile))))
+                .collect()
+        }
+        else
+        {
+            let cross_client = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+            vec![("cross-client".to_string(), cross_client)]
+        };
 
         let mut file_tracker = FileTracker::new(self.config_dir)?;
         let temp_dir = tempfile::TempDir::new()?;
@@ -874,7 +889,10 @@ impl<'a> TemplateEngine<'a>
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
 
         let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
-        self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+        for (_, skill_dir) in &skill_dirs
+        {
+            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_dir.path(), &mut files_to_copy)?;
+        }
 
         validate_no_duplicate_targets(&files_to_copy)?;
 
@@ -883,7 +901,7 @@ impl<'a> TemplateEngine<'a>
             println!("\n{} Files that would be created/modified:", "→".blue());
             for (_, target) in &files_to_copy
             {
-                if target.exists()
+                if target.exists() == true
                 {
                     println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
                 }
@@ -915,7 +933,17 @@ impl<'a> TemplateEngine<'a>
         file_tracker.save()?;
 
         println!("{} Skills installed successfully", "✓".green());
-        println!("{} Installed to cross-client directory: {}", "→".blue(), skill_base_dir.display().to_string().yellow());
+        if installed_agents.is_empty() == true
+        {
+            println!("{} Installed to cross-client directory: {}", "→".blue(), skill_dirs[0].1.display().to_string().yellow());
+        }
+        else
+        {
+            for (agent, skill_dir) in &skill_dirs
+            {
+                println!("{} Installed to {} ({})", "→".blue(), skill_dir.display().to_string().yellow(), agent.green());
+            }
+        }
 
         Ok(())
     }

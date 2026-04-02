@@ -3,7 +3,7 @@
 use std::{
     fs,
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::Command
 };
 
@@ -110,6 +110,38 @@ pub fn remove_file_and_cleanup_parents(path: &Path) -> Result<()>
         }
     }
 
+    Ok(())
+}
+
+/// Recursively collects all files under a directory
+///
+/// Walks the directory tree and appends the absolute path of every file
+/// (not directory) to the supplied accumulator. Directory entries that
+/// cannot be read are silently skipped.
+///
+/// # Arguments
+///
+/// * `dir` - Root directory to walk
+/// * `files` - Accumulator for discovered file paths
+///
+/// # Errors
+///
+/// Returns an error if `dir` cannot be read
+pub fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) -> Result<()>
+{
+    for entry in fs::read_dir(dir)?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() == true
+        {
+            collect_files_recursive(&path, files)?;
+        }
+        else
+        {
+            files.push(path);
+        }
+    }
     Ok(())
 }
 
@@ -411,6 +443,39 @@ mod tests
         let result = remove_file_and_cleanup_parents(&dir.path().join("nonexistent.txt"));
         assert!(result.is_err() == true);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_collect_files_recursive_flat() -> anyhow::Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        fs::write(dir.path().join("a.txt"), "a")?;
+        fs::write(dir.path().join("b.txt"), "b")?;
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir.path(), &mut files)?;
+        files.sort();
+
+        assert_eq!(files.len(), 2);
+        assert!(files[0].ends_with("a.txt") == true);
+        assert!(files[1].ends_with("b.txt") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_collect_files_recursive_nested() -> anyhow::Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        fs::create_dir_all(dir.path().join("sub"))?;
+        fs::write(dir.path().join("top.txt"), "top")?;
+        fs::write(dir.path().join("sub/leaf.txt"), "leaf")?;
+
+        let mut files = Vec::new();
+        collect_files_recursive(dir.path(), &mut files)?;
+        files.sort();
+
+        assert_eq!(files.len(), 2);
         Ok(())
     }
 }
