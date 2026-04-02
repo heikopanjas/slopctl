@@ -111,7 +111,8 @@ impl TemplateManager
             println!("  {} No agents installed", "○".yellow());
         }
 
-        // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc)
+        // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc).
+        // Only count paths that actually exist on disk to avoid phantom skills from stale entries.
         let file_tracker = FileTracker::new(&self.config_dir)?;
         let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
 
@@ -120,6 +121,10 @@ impl TemplateManager
             let mut skill_names: BTreeSet<String> = BTreeSet::new();
             for (path, _) in &skill_entries
             {
+                if path.exists() == false
+                {
+                    continue;
+                }
                 if let Some(name) = Self::extract_skill_name_from_path(path)
                 {
                     skill_names.insert(name);
@@ -134,11 +139,15 @@ impl TemplateManager
             }
         }
 
-        // Merge FileTracker entries into managed files for the complete list
+        // Merge FileTracker entries into managed files for the complete list.
+        // Only include files that exist on disk.
         let all_tracked = file_tracker.get_workspace_entries(&current_dir);
         for (path, _) in all_tracked
         {
-            managed_files.push(path);
+            if path.exists() == true
+            {
+                managed_files.push(path);
+            }
         }
 
         if agents_md_path.exists() == true

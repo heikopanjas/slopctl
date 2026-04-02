@@ -6,10 +6,10 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Result,
+    Result, agent_defaults,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
-    utils::{confirm_action, remove_file_and_cleanup_parents}
+    utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
 
 impl TemplateManager
@@ -40,6 +40,7 @@ impl TemplateManager
         let remove_all = agent.is_none() && has_skill_target == false;
 
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
+        let mut stale_tracker_paths: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
 
         // Collect agent files from BoM when agent or --all is requested
@@ -102,21 +103,54 @@ impl TemplateManager
             }
         }
 
-        // Collect skill files by name from FileTracker
+        // Collect skill files by name from all agent skill dirs and cross-client dir
         if has_skill_target == true
         {
+            let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
+            let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
+
             let file_tracker = FileTracker::new(&self.config_dir)?;
             let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
 
             for skill_name in skills
             {
                 let mut found = false;
+
+                // Scan filesystem under every agent skill dir + cross-client dir
+                for search_dir in &skill_search_dirs
+                {
+                    let candidate = search_dir.join(skill_name);
+                    if candidate.is_dir() == true
+                    {
+                        let mut dir_files = Vec::new();
+                        collect_files_recursive(&candidate, &mut dir_files)?;
+                        for f in dir_files
+                        {
+                            if files_to_remove.contains(&f) == false
+                            {
+                                files_to_remove.push(f);
+                                found = true;
+                            }
+                        }
+                    }
+                }
+
+                // Also sweep FileTracker for any tracked paths outside the standard dirs.
+                // Collect stale entries (tracked but missing on disk) for silent tracker cleanup.
                 for (path, _) in &skill_entries
                 {
-                    if Self::extract_skill_name_from_path(path).as_deref() == Some(skill_name) && path.exists() == true
+                    if Self::extract_skill_name_from_path(path).as_deref() == Some(skill_name.as_str())
                     {
-                        files_to_remove.push(path.clone());
-                        found = true;
+                        if path.exists() == true && files_to_remove.contains(path) == false
+                        {
+                            files_to_remove.push(path.clone());
+                            found = true;
+                        }
+                        else if path.exists() == false && stale_tracker_paths.contains(path) == false
+                        {
+                            stale_tracker_paths.push(path.clone());
+                            found = true;
+                        }
                     }
                 }
 
@@ -131,11 +165,25 @@ impl TemplateManager
 
         files_to_remove.sort();
         files_to_remove.dedup();
+        stale_tracker_paths.sort();
+        stale_tracker_paths.dedup();
 
         let description = description_parts.join(", ");
 
+        // Silently purge stale tracker entries (tracked but no longer on disk) even when
+        // there are no real files to remove; this prevents phantom skills in status output.
         if files_to_remove.is_empty() == true
         {
+            if stale_tracker_paths.is_empty() == false && dry_run == false
+            {
+                let mut file_tracker = FileTracker::new(&self.config_dir)?;
+                for path in &stale_tracker_paths
+                {
+                    file_tracker.remove_entry(path);
+                }
+                file_tracker.save()?;
+            }
+
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
         }
@@ -184,6 +232,12 @@ impl TemplateManager
                     eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
                 }
             }
+        }
+
+        // Also prune any stale tracker entries collected alongside real files
+        for path in &stale_tracker_paths
+        {
+            file_tracker.remove_entry(path);
         }
 
         file_tracker.save()?;

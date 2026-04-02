@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-03-26
+**Last updated:** 2026-04-02
 
 <!-- {mission} -->
 
@@ -796,6 +796,36 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-02 (v11.6.1, fix phantom skills in status)
+
+- Fixed `status` reporting phantom skill names (e.g. `.agents`) from stale FileTracker entries whose files no longer exist on disk
+- `status` now filters both skill name extraction and managed file listing by `path.exists()`
+- Fixed `remove --skill <name>` to silently prune stale tracker entries (tracked but missing from disk) for the given skill name; previously stale entries were never cleaned up because `path.exists()` was false
+- Stale entries are cleaned whether or not real files are also being removed: when there are no real files to delete, the stale entries are pruned directly; when there ARE real files, stale entries are pruned alongside them
+- Version bump: 11.6.0 to 11.6.1 (PATCH - bug fixes)
+
+### 2026-04-02 (v11.6.0, multi-agent skill remove)
+
+- Changed `remove --skill <name>` to scan the filesystem in every installed agent's skill directory AND the cross-client `.agents/skills/` directory
+- Previously only the FileTracker was consulted, missing untracked or manually placed skill files
+- Added `resolve_placeholder_path()` free function to `agent_defaults.rs` (extracts logic from the private `TemplateEngine::resolve_placeholder` method)
+- Added `get_all_skill_search_dirs(workspace, userprofile) -> Vec<PathBuf>` to `agent_defaults.rs`: returns agent skill dirs for all detected agents + cross-client dir, deduplicated
+- Added `collect_files_recursive(dir, files)` to `utils.rs` and exported from `lib.rs`
+- Updated `remove.rs` skill block: for each skill name, scans `<search_dir>/<skill_name>/` on disk in all candidate dirs; falls back to FileTracker sweep for any tracked files outside standard dirs; deduplicates before removal
+- Added 7 new tests: `resolve_placeholder_path` (workspace, userprofile, literal), `get_all_skill_search_dirs` (no agents, with agent), `collect_files_recursive` (flat, nested)
+- Version bump: 11.5.0 to 11.6.0 (MINOR - new multi-agent skill removal)
+
+### 2026-04-02 (v11.5.0, multi-agent skill install)
+
+- Changed `install --skill` (without `--agent`) to detect all installed agents in the workspace
+- Skills are now installed into each detected agent's skill directory (e.g. `.cursor/skills/`, `.claude/skills/`)
+- Falls back to cross-client `.agents/skills/` only when no agents are detected
+- Added `detect_all_installed_agents()` to `agent_defaults.rs`; returns all agents whose instruction files exist (vs. `detect_installed_agent` which returns only the first)
+- Updated `install_skills_only()` in `template_engine.rs` to iterate over all detected agent skill dirs
+- Updated skill-only log message in `main.rs` from "to cross-client directory" to generic "Installing skills"
+- Added 3 new tests: `test_detect_all_installed_agents_none`, `_single`, `_multiple`
+- Version bump: 11.4.0 to 11.5.0 (MINOR - new multi-agent skill install behavior)
 
 ### 2026-03-26 (v11.4.0, shared group skills propagation)
 
