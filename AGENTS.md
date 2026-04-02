@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-02 (v11.8.0)
+**Last updated:** 2026-04-02 (v11.9.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,16 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-02 (v11.9.0, language-to-language skill propagation)
+
+- Changed `resolve_language_skills` to propagate skills from included *languages* in addition to shared groups
+- Extracted `resolve_language_skills_inner` recursive helper with cycle detection (mirrors `resolve_language_files_inner`)
+- A language that `includes` another language now inherits its skills depth-first; own skills always come last
+- Updated test `test_resolve_language_skills_no_inherit_from_language` → `test_resolve_language_skills_inherit_from_language` to assert propagation
+- Added `test_resolve_language_skills_multilevel_language_inherit` (3-level chain) and `test_resolve_language_skills_cycle_detection`
+- Updated README.md and AGENTS.md to reflect new behaviour
+- Version bump: 11.8.0 to 11.9.0 (MINOR - new skill propagation feature)
 
 ### 2026-04-02 (v11.8.0, remove --lang flag)
 

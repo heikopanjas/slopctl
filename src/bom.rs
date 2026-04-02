@@ -191,11 +191,13 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
     Ok(files)
 }
 
-/// Resolves a language's complete skill list including skills from shared includes
+/// Resolves a language's complete skill list including skills from shared groups
+/// and included languages
 ///
-/// Collects the language's own `skills` plus skills from any `shared` groups
-/// referenced via `includes`. Skills from other included *languages* are NOT
-/// propagated (only shared groups propagate skills).
+/// Collects the language's own `skills` plus skills from any `shared` groups or
+/// other languages referenced via `includes`. Recurses into included languages
+/// depth-first with cycle detection. Included skills are prepended; the
+/// language's own skills come last.
 ///
 /// # Arguments
 ///
@@ -204,9 +206,20 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
 ///
 /// # Errors
 ///
-/// Returns an error if the language is not found in templates.yml
+/// Returns an error if the language is not found in templates.yml or a circular
+/// include is detected
 pub fn resolve_language_skills(lang: &str, config: &TemplateConfig) -> Result<Vec<SkillDefinition>>
 {
+    let mut visited = HashSet::new();
+    resolve_language_skills_inner(lang, config, &mut visited)
+}
+
+/// Recursive helper for `resolve_language_skills` with cycle detection
+fn resolve_language_skills_inner(lang: &str, config: &TemplateConfig, visited: &mut HashSet<String>) -> Result<Vec<SkillDefinition>>
+{
+    require!(visited.contains(lang) == false, Err(anyhow::anyhow!("Circular include detected in skills: '{}'", lang)));
+    visited.insert(lang.to_string());
+
     let lang_config = config.languages.get(lang).ok_or_else(|| anyhow::anyhow!("Language '{}' not found in templates.yml", lang))?;
 
     let mut skills = Vec::new();
@@ -217,6 +230,11 @@ pub fn resolve_language_skills(lang: &str, config: &TemplateConfig) -> Result<Ve
             shared_config.skills.is_empty() == false
         {
             skills.extend(shared_config.skills.iter().cloned());
+        }
+        else if config.languages.contains_key(include_name.as_str()) == true
+        {
+            let included = resolve_language_skills_inner(include_name, config, visited)?;
+            skills.extend(included);
         }
     }
 
@@ -1058,7 +1076,7 @@ skills:
     }
 
     #[test]
-    fn test_resolve_language_skills_no_inherit_from_language() -> anyhow::Result<()>
+    fn test_resolve_language_skills_inherit_from_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
         config.languages.insert("swift".to_string(), LanguageConfig {
@@ -1066,11 +1084,56 @@ skills:
             files:    vec![make_mapping("swift.md", "$instructions")],
             skills:   vec![SkillDefinition { name: "swift-skill".to_string(), source: "https://example.com/swift-skill".to_string() }]
         });
-        config.languages.insert("swiftui".to_string(), make_lang(vec!["swift".to_string()], vec![make_mapping("swiftui.md", "$instructions")]));
+        config.languages.insert("swiftui".to_string(), LanguageConfig {
+            includes: vec!["swift".to_string()],
+            files:    vec![make_mapping("swiftui.md", "$instructions")],
+            skills:   vec![SkillDefinition { name: "swiftui-skill".to_string(), source: "https://example.com/swiftui-skill".to_string() }]
+        });
 
         let skills = resolve_language_skills("swiftui", &config)?;
-        assert!(skills.is_empty() == true);
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].name, "swift-skill");
+        assert_eq!(skills[1].name, "swiftui-skill");
         Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_multilevel_language_inherit() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.languages.insert("base".to_string(), LanguageConfig {
+            includes: vec![],
+            files:    vec![],
+            skills:   vec![SkillDefinition { name: "base-skill".to_string(), source: "https://example.com/base-skill".to_string() }]
+        });
+        config.languages.insert("mid".to_string(), LanguageConfig {
+            includes: vec!["base".to_string()],
+            files:    vec![],
+            skills:   vec![SkillDefinition { name: "mid-skill".to_string(), source: "https://example.com/mid-skill".to_string() }]
+        });
+        config.languages.insert("top".to_string(), LanguageConfig {
+            includes: vec!["mid".to_string()],
+            files:    vec![],
+            skills:   vec![SkillDefinition { name: "top-skill".to_string(), source: "https://example.com/top-skill".to_string() }]
+        });
+
+        let skills = resolve_language_skills("top", &config)?;
+        assert_eq!(skills.len(), 3);
+        assert_eq!(skills[0].name, "base-skill");
+        assert_eq!(skills[1].name, "mid-skill");
+        assert_eq!(skills[2].name, "top-skill");
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_skills_cycle_detection()
+    {
+        let mut config = minimal_config();
+        config.languages.insert("a".to_string(), LanguageConfig { includes: vec!["b".to_string()], files: vec![], skills: vec![] });
+        config.languages.insert("b".to_string(), LanguageConfig { includes: vec!["a".to_string()], files: vec![], skills: vec![] });
+
+        let err = resolve_language_skills("a", &config).unwrap_err();
+        assert!(err.to_string().contains("Circular include detected in skills") == true);
     }
 
     #[test]
