@@ -90,7 +90,7 @@ vibe-cop uses the V4 template format following the [agents.md](https://agents.md
 - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md when needed
 - [Agent Skills](https://agentskills.io) support: define skills per agent, per language, or as top-level entries
 - Shared file groups (`shared` section) and composable languages (`includes`) for reuse across languages
-- Skills associated with agents, languages, or shared groups — shared group skills propagate via `includes`
+- Skills associated with agents, languages, or shared groups — skills propagate via `includes` (from shared groups and from included languages)
 - Simpler initialization: `vibe-cop install --lang rust` or omit `--lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
@@ -985,7 +985,8 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 - All skill definitions use the same format: `name` + `source` (GitHub URL or local path)
 - **Agent skills** (`agents.<name>.skills`): installed to the agent-specific directory (e.g. `.cursor/skills/`) when that agent is selected
 - **Language skills** (`languages.<name>.skills`): installed to the cross-client `.agents/skills/` directory when that language is selected
-- **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`. Skills from included *languages* are NOT propagated — only shared groups propagate skills.
+- **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`
+- **Language include skills**: skills from an included *language* are also propagated depth-first (e.g. `swiftui` including `swift` inherits `swift`'s skills); cycle detection prevents infinite recursion. See the [`includes` section](#includes-composable-languages-and-shared-groups) for full details.
 - **Top-level skills** (`skills`): installed to agent-specific directory if `--agent` is specified, otherwise cross-client
 - **CLI `--skill`**: supports `user/repo` shorthand (expanded to full GitHub URL), full `https://github.com/...` URLs, and local filesystem paths (`./path`, `~/path`, `/absolute/path`)
 - **Standalone mode**: `--skill` can be used without `--lang` or `--agent` — skills are installed to the cross-client `$workspace/.agents/skills/` directory without requiring global templates, AGENTS.md, or an agent. This follows the [agentskills.io](https://agentskills.io) cross-client interoperability spec.
@@ -1174,6 +1175,119 @@ mission:
     - source: mission-statement.md
       target: '$instructions'
 ```
+
+### `includes`: Composable Languages and Shared Groups
+
+The `includes` key on a language entry lets you pull in files and skills from other definitions so you don't repeat yourself. There are two kinds of targets you can include, and they behave slightly differently.
+
+#### Kind 1 — Shared groups (`shared` section)
+
+A shared group is a named bucket of files and skills that has no meaning on its own; it only exists to be reused. Think of it like a mixin.
+
+```yaml
+shared:
+  cmake:
+    files:
+      - source: cmake-build-commands.md
+        target: '$instructions'
+    skills:
+      - name: cmake-skill
+        source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+
+languages:
+  c:
+    includes: [cmake]        # pulls in cmake files AND cmake skills
+    files:
+      - source: c-coding-conventions.md
+        target: '$instructions'
+
+  c++:
+    includes: [cmake]        # same cmake files and skills, no duplication
+    files:
+      - source: cpp-coding-conventions.md
+        target: '$instructions'
+```
+
+When a user runs `vibe-cop install --lang c++`, they get:
+
+- `cmake-build-commands.md` merged into AGENTS.md (from the cmake shared group)
+- `cpp-coding-conventions.md` merged into AGENTS.md (own file)
+- `cmake-skill` installed (propagated from the shared group)
+
+#### Kind 2 — Other languages (`languages` section)
+
+A language can also include another language. This is useful when one language is a superset of another — for example, SwiftUI is Swift plus extra conventions.
+
+```yaml
+languages:
+  swift:
+    files:
+      - source: swift-coding-conventions.md
+        target: '$instructions'
+      - source: swift-format-instructions.json
+        target: '$workspace/.swiftformat'
+    skills:
+      - name: swift-analyzer
+        source: 'https://github.com/user/swift-skills/tree/main/swift-analyzer'
+
+  swiftui:
+    includes: [swift]        # inherits swift's files AND skills
+    files:
+      - source: swiftui-coding-conventions.md
+        target: '$instructions'
+    skills:
+      - name: swiftui-components
+        source: 'https://github.com/user/swift-skills/tree/main/swiftui-components'
+```
+
+When a user runs `vibe-cop install --lang swiftui`, they get everything from `swift` first, then `swiftui`'s own additions on top:
+
+| What gets installed | Source |
+|---|---|
+| `swift-coding-conventions.md` → AGENTS.md | inherited from `swift` |
+| `.swiftformat` | inherited from `swift` |
+| `swiftui-coding-conventions.md` → AGENTS.md | own |
+| `swift-analyzer` skill | inherited from `swift` |
+| `swiftui-components` skill | own |
+
+#### Resolution order
+
+Included items always come **before** the language's own items. For multiple includes, they are resolved left to right, depth-first. Example:
+
+```yaml
+languages:
+  base:
+    files: [base.md → $instructions]
+
+  mid:
+    includes: [base]
+    files: [mid.md → $instructions]
+
+  top:
+    includes: [mid]
+    files: [top.md → $instructions]
+```
+
+Installing `top` produces: `base.md`, then `mid.md`, then `top.md` — in that order.
+
+Multiple includes in one language follow the same left-to-right, depth-first rule:
+
+```yaml
+languages:
+  full:
+    includes: [base, mid]   # base resolved first (depth-first), then mid, then own
+    files: [full.md → $instructions]
+```
+
+#### Key rules
+
+| Rule | Detail |
+|---|---|
+| **Shared groups propagate skills** | `includes: [my-shared]` → inherits both files and skills from the shared group |
+| **Languages propagate skills** | `includes: [swift]` → inherits both files and skills from `swift` |
+| **No duplicate disk targets** | Two entries targeting the same `$workspace/` path cause an error at install time; `$instructions` fragments are exempt |
+| **Cycle detection** | Circular includes (e.g. `a` includes `b` includes `a`) are caught and reported as an error |
+| **Mixing both kinds** | A language can include a mix of shared groups and other languages: `includes: [cmake, swift]` |
 
 ### Template Management
 
