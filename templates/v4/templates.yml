@@ -152,6 +152,7 @@ mission:
     target: '$instructions'
   - source: technology-stack.md
     target: '$instructions'
+
 # Agent-agnostic skills (installed based on --agent or to cross-client .agents/skills/)
 #
 # Skills are directories containing SKILL.md + optional supporting files.
