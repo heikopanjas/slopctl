@@ -7,7 +7,7 @@ version: 4
 # - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md
 # - Single source of truth: AGENTS.md
 # - Agent-specific prompts/commands are still supported (operational files)
-# - Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+# - Compatible with Claude Code, Cursor, GitHub Copilot, and Codex
 #
 # V3 additions:
 # - `shared` section for reusable file groups
@@ -124,8 +124,14 @@ languages:
       - source: swift-git-ignore.txt
         target: '$workspace/.gitignore'
     skills:
-      - name: swift-skill
+      - name: swift-concurrency-pro
         source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
+
+  swiftui:
+    includes: [swift]
+    skills:
+      - name: swiftui-pro
+        source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
 
 # Integration templates for specific tools/workflows
 integration:
