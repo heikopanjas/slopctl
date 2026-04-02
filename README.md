@@ -21,6 +21,7 @@ vibe-cop is a command-line tool that helps you:
 - **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates or GitHub repos
 - **Independent skill loading** – Install skills standalone with `--skill user/repo` (no templates or agent required); uses cross-client `.agents/skills/` directory per agentskills.io spec
 - **Keep templates synchronized** – Update global templates from remote sources
+- **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
@@ -48,7 +49,8 @@ vibe-cop/
 │   │   ├── mod.rs              # Struct, constructor, and helpers
 │   │   ├── update.rs           # install/update command logic
 │   │   ├── purge.rs            # Purge all vibe-cop files
-│   │   ├── remove.rs           # Remove agent-specific files
+│   │   ├── remove.rs           # Remove agent/language/skill files
+│   │   ├── doctor.rs           # Workspace health checks and fixes
 │   │   ├── status.rs           # Show project status
 │   │   └── list.rs             # List available agents/languages
 │   └── utils.rs                # Utility functions
@@ -353,6 +355,29 @@ vibe-cop remove --agent claude
 # Removes CLAUDE.md, .cursor/commands/, .github/prompts/, etc.
 ```
 
+**Scenario: Remove language config files (switch languages)**
+
+```bash
+# Remove Rust config files (.rustfmt.toml, .editorconfig, .gitignore, etc.)
+vibe-cop remove --lang rust
+
+# Then install C++ config files
+vibe-cop install --lang c++
+```
+
+**Scenario: Diagnose and fix workspace issues**
+
+```bash
+# Check for broken/stale managed files
+vibe-cop doctor --verbose
+
+# Fix what can be fixed automatically (prune stale entries, strip unmerged markers)
+vibe-cop doctor --fix
+
+# Re-merge language sections after fixing an unmerged AGENTS.md
+vibe-cop install --lang rust
+```
+
 **Scenario: Switch from Cursor to Claude (keep Rust setup)**
 
 ```bash
@@ -575,9 +600,9 @@ vibe-cop purge --dry-run
   - If AGENTS.md has NOT been customized (still has template marker):
     - AGENTS.md is deleted normally
 
-### `remove` - Remove Agent-Specific Files
+### `remove` - Remove Agent, Language, or Skill Files
 
-Remove agent-specific files from the current directory based on the Bill of Materials (BoM).
+Remove agent-specific, language-specific, or named skill files from the current directory.
 
 **Usage:**
 
@@ -585,14 +610,22 @@ Remove agent-specific files from the current directory based on the Bill of Mate
 # Remove specific agent's files
 vibe-cop remove --agent <agent> [--force] [--dry-run]
 
-# Remove all agent-specific files (keeps AGENTS.md)
+# Remove language disk files (e.g. .rustfmt.toml, .editorconfig)
+vibe-cop remove --lang <lang> [--force] [--dry-run]
+
+# Remove a named skill
+vibe-cop remove --skill <name> [--force] [--dry-run]
+
+# Remove all agent-specific files and skills (keeps AGENTS.md)
 vibe-cop remove --all [--force] [--dry-run]
 ```
 
 **Options:**
 
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
-- `--all` - Remove all agent-specific files (cannot be used with --agent)
+- `--lang <string>` - Language to remove disk files for (e.g., rust, c++, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths.
+- `--skill <string>` - Skill name to remove (repeatable). Scans all agent skill dirs and the cross-client `.agents/skills/` directory.
+- `--all` - Remove all agent-specific files and skills (cannot be used with `--agent` or `--lang`)
 - `--force` - Force removal without confirmation
 - `--dry-run` - Preview what would be deleted without making changes
 
@@ -602,8 +635,14 @@ vibe-cop remove --all [--force] [--dry-run]
 # Remove Claude-specific files with confirmation
 vibe-cop remove --agent claude
 
-# Remove Copilot files without confirmation
-vibe-cop remove --agent copilot --force
+# Remove Rust language files (.rustfmt.toml, .editorconfig, etc.)
+vibe-cop remove --lang rust
+
+# Remove a named skill
+vibe-cop remove --skill create-rule
+
+# Remove language files and agent files together
+vibe-cop remove --lang rust --agent cursor
 
 # Remove all agent-specific files (keeps AGENTS.md)
 vibe-cop remove --all
@@ -612,24 +651,96 @@ vibe-cop remove --all
 vibe-cop remove --all --force
 
 # Preview what would be deleted
+vibe-cop remove --lang rust --dry-run
 vibe-cop remove --all --dry-run
 ```
 
 **Behavior:**
 
 - Loads templates.yml from global storage to build Bill of Materials (BoM)
-- BoM maps agent names to their target file paths in the workspace
+- `--agent`: removes agent instruction, prompt, and skill files; BoM is the source of truth
+- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); skips `$instructions` fragments and `$userprofile` paths; validates the language name against templates.yml
+- `--skill`: scans all agent skill directories and the cross-client `.agents/skills/` directory for that skill name; also sweeps FileTracker for any tracked paths outside standard directories; stale tracker entries are silently pruned
 - Only removes files that exist in the current directory
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
 - If `--dry-run` is specified, shows files that would be deleted without removing them
-- Removes agent-specific files (instructions, prompts, and skills)
 - Automatically cleans up empty parent directories
 - **NEVER touches AGENTS.md** (use `purge` command to remove AGENTS.md)
 - Does NOT affect global templates in local data directory
-- If agent not found in BoM, shows list of available agents
-- Cannot specify both `--agent` and `--all` (mutually exclusive)
-- Must specify either `--agent` or `--all`
+- If agent/language not found in BoM/templates, shows a list of available options
+- `--all` is mutually exclusive with `--agent` and `--lang`
+- Must specify at least one of `--agent`, `--lang`, `--skill`, or `--all`
+
+### `doctor` - Check Workspace Health
+
+Check the workspace for stale or broken managed files and optionally fix them.
+
+**Usage:**
+
+```bash
+vibe-cop doctor [--fix] [--dry-run] [--verbose]
+```
+
+**Options:**
+
+- `--fix` - Automatically repair detected issues where safe to do so
+- `--dry-run` - Preview what would be fixed without applying changes
+- `--verbose` - Print every checked file and its result during the scan
+
+**Issue categories detected:**
+
+| Kind | Condition | Symbol |
+|------|-----------|--------|
+| **Missing** | File is tracked but no longer exists on disk (stale tracker entry) | `✗` |
+| **Unmerged** | AGENTS.md (main file) exists but still contains the template marker | `✗` |
+| **Modified** | File exists but SHA changed since installation (informational) | `!` |
+
+**What `--fix` repairs:**
+
+- **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `vibe-cop install` to reinstall.
+- **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `vibe-cop install` afterward for a full re-merge with language sections.
+- **Modified** — No automatic fix; shown as informational. Use `vibe-cop install --force` to overwrite if intended.
+
+**Examples:**
+
+```bash
+# Check workspace for issues
+vibe-cop doctor
+
+# Show every file checked alongside its result
+vibe-cop doctor --verbose
+
+# Automatically fix what can be fixed
+vibe-cop doctor --fix
+
+# Preview fixes without applying them
+vibe-cop doctor --fix --dry-run
+```
+
+**Example output (with --verbose and issues present):**
+
+```
+Checking workspace files:
+
+  ✓ OK:       .cursor/commands/init-session.md
+  ✓ OK:       CLAUDE.md
+  ✗ Missing:  .cursorrules
+  ✗ Unmerged: AGENTS.md
+  ! Modified: .rustfmt.toml
+
+Issues found:
+
+  ✗ Missing:  .cursorrules (tracked but deleted)
+  ✗ Unmerged: AGENTS.md (template marker still present)
+  ! Modified: .rustfmt.toml (changed since install)
+
+  ✗ 1 stale tracker entry
+  ✗ 1 file with unmerged template marker
+  ! 1 modified file (no automatic fix available)
+
+→ Run 'vibe-cop doctor --fix' to automatically fix issues
+```
 
 ### `status` - Show Project Status
 
@@ -650,6 +761,8 @@ vibe-cop status
 - **Project Status:**
   - AGENTS.md existence and customization status
   - Which agents are currently installed
+  - Installed language (from FileTracker metadata)
+  - Installed skills (grouped by name)
 - **Managed Files:** List of all vibe-cop managed files in current directory
 
 **Example output:**
@@ -666,9 +779,10 @@ Global Templates:
 Project Status:
   ✓ AGENTS.md: exists (customized)
   ✓ Installed agents: claude, cursor
+  ✓ Installed language: rust
   ✓ Installed skills: 2
-    • .cursor/skills/create-rule/SKILL.md
-    • .cursor/skills/create-skill/SKILL.md
+    • create-rule
+    • create-skill
 
 Managed Files:
   • AGENTS.md
@@ -1194,6 +1308,12 @@ Run `vibe-cop update` to download the latest global templates, then `vibe-cop in
 **How do I remove local templates?**
 Run `vibe-cop purge` to remove all agent files and AGENTS.md, or `vibe-cop remove --all` to keep AGENTS.md.
 
+**How do I remove language config files?**
+Run `vibe-cop remove --lang <language>` (e.g. `vibe-cop remove --lang rust`). This removes disk files like `.rustfmt.toml` and `.editorconfig` but does NOT remove language fragments already merged into AGENTS.md.
+
+**How do I fix stale or broken managed files?**
+Run `vibe-cop doctor` to list issues, or `vibe-cop doctor --fix` to repair them automatically. Issues detected: missing tracked files (stale tracker entries), unmerged AGENTS.md templates, and modified files (informational). Use `--verbose` to see the result for every tracked file.
+
 **How do I preview changes before applying?**
 Use the `--dry-run` flag on any command: `vibe-cop install --lang rust --dry-run` or `vibe-cop install --agent cursor --dry-run`
 
@@ -1255,4 +1375,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: March 26, 2026 (v11.4.0)
+Last updated: April 2, 2026 (v11.8.0)
