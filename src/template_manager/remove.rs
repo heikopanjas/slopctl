@@ -6,38 +6,42 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Result, agent_defaults,
+    Result, agent_defaults, bom,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
+    template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
 
 impl TemplateManager
 {
-    /// Remove agent-specific files and/or skills from the current directory
+    /// Remove agent-specific, language-specific, and/or skill files from the current directory
     ///
-    /// Deletes files associated with the specified agent (or all agents if None)
-    /// and/or named skills. Agent files come from the Bill of Materials; skill
-    /// files come from the FileTracker (covering template, top-level, and ad-hoc).
-    /// AGENTS.md is never touched by this operation.
+    /// Deletes files associated with the specified agent, language, and/or skills.
+    /// Agent files come from the Bill of Materials; language files are resolved via
+    /// `resolve_language_files`; skill files come from the FileTracker (covering
+    /// template, top-level, and ad-hoc sources). AGENTS.md is never touched.
     ///
     /// # Arguments
     ///
-    /// * `agent` - Optional agent name. If Some, removes files for that agent only. If None, removes files for all agents.
+    /// * `agent` - Optional agent name. If Some, removes files for that agent only.
+    /// * `lang` - Optional language name. If Some, removes disk files for that language.
     /// * `skills` - Skill names to remove. Empty slice means no skill-specific removal.
     /// * `force` - If true, skip confirmation prompt
     /// * `dry_run` - If true, only show what would be removed without actually removing
     ///
     /// # Errors
     ///
-    /// Returns an error if templates.yml cannot be loaded, agent is not found, or file deletion fails
-    pub fn remove(&self, agent: Option<&str>, skills: &[String], force: bool, dry_run: bool) -> Result<()>
+    /// Returns an error if templates.yml cannot be loaded, agent/language is not found,
+    /// or file deletion fails
+    pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, skills: &[String], force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
         let config_file = self.config_dir.join("templates.yml");
         let has_agent_target = agent.is_some();
+        let has_lang_target = lang.is_some();
         let has_skill_target = skills.is_empty() == false;
-        let remove_all = agent.is_none() && has_skill_target == false;
+        let remove_all = agent.is_none() && lang.is_none() && has_skill_target == false;
 
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
         let mut stale_tracker_paths: Vec<PathBuf> = Vec::new();
@@ -101,6 +105,41 @@ impl TemplateManager
 
                 description_parts.push("all agents and skills".to_string());
             }
+        }
+
+        // Collect language disk files when --lang is requested
+        if has_lang_target == true
+        {
+            require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'vibe-cop install' first to set up templates.")));
+
+            let lang_name = lang.unwrap();
+            let config = template_engine::load_template_config(&self.config_dir)?;
+
+            if config.languages.contains_key(lang_name) == false
+            {
+                let mut available: Vec<&String> = config.languages.keys().collect();
+                available.sort();
+                return Err(anyhow::anyhow!(
+                    "Language '{}' not found in templates.yml.\nAvailable languages: {}",
+                    lang_name,
+                    available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                ));
+            }
+
+            let file_mappings = bom::resolve_language_files(lang_name, &config)?;
+            for mapping in file_mappings
+            {
+                if let Some(path) = BillOfMaterials::resolve_workspace_path(&mapping.target)
+                {
+                    let abs_path = current_dir.join(path);
+                    if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
+                    {
+                        files_to_remove.push(abs_path);
+                    }
+                }
+            }
+
+            description_parts.push(format!("language '{}'", lang_name.yellow()));
         }
 
         // Collect skill files by name from all agent skill dirs and cross-client dir
@@ -263,9 +302,10 @@ impl TemplateManager
 #[cfg(test)]
 mod tests
 {
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
 
     use super::TemplateManager;
+    use crate::bom::BillOfMaterials;
 
     #[test]
     fn test_path_belongs_to_cursor()
@@ -293,5 +333,41 @@ mod tests
     {
         let path = PathBuf::from("/home/user/project/AGENTS.md");
         assert!(TemplateManager::path_belongs_to_agent(&path, "cursor") == false);
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_skips_instructions()
+    {
+        assert!(BillOfMaterials::resolve_workspace_path("$instructions").is_none() == true);
+        assert!(BillOfMaterials::resolve_workspace_path("$instructions/rust.md").is_none() == true);
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_skips_userprofile()
+    {
+        assert!(BillOfMaterials::resolve_workspace_path("$userprofile/.codex/init.md").is_none() == true);
+    }
+
+    #[test]
+    fn test_resolve_workspace_path_resolves_workspace()
+    {
+        let result = BillOfMaterials::resolve_workspace_path("$workspace/.rustfmt.toml");
+        assert!(result.is_some() == true);
+        assert_eq!(result.unwrap(), PathBuf::from("./.rustfmt.toml"));
+    }
+
+    #[test]
+    fn test_remove_lang_unknown_errors() -> anyhow::Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        let config_path = dir.path().join("templates.yml");
+        let yaml = "languages:\n  rust:\n    files: []\n";
+        fs::write(&config_path, yaml)?;
+
+        let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("nonexistent"), &[], false, true);
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("not found in templates.yml") == true);
+        Ok(())
     }
 }

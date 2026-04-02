@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-02 (v11.7.0)
+**Last updated:** 2026-04-02 (v11.8.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,17 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-02 (v11.8.0, remove --lang flag)
+
+- Added `--lang <name>` option to the `remove` subcommand
+- Resolves the language's full file list via `bom::resolve_language_files` (honours `includes` chains)
+- Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths (user-global)
+- Validates that the given language name exists in templates.yml; reports available languages on error
+- `--all` is now mutually exclusive with both `--agent` and `--lang`
+- Made `BillOfMaterials::resolve_workspace_path` public for reuse in remove.rs
+- Added 4 new tests: instructions/userprofile skipping, workspace path resolution, unknown lang error
+- Version bump: 11.7.0 to 11.8.0 (MINOR - new flag)
 
 ### 2026-04-02 (v11.7.0, doctor command)
 

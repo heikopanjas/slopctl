@@ -46,16 +46,17 @@ impl TemplateManager
     ///
     /// * `fix` - If true, automatically repair issues where safe to do so
     /// * `dry_run` - If true, show what would be done without applying any changes
+    /// * `verbose` - If true, print every checked file and its check result
     ///
     /// # Errors
     ///
     /// Returns an error if the current directory or FileTracker cannot be read
-    pub fn doctor(&self, fix: bool, dry_run: bool) -> Result<()>
+    pub fn doctor(&self, fix: bool, dry_run: bool, verbose: bool) -> Result<()>
     {
         let workspace = std::env::current_dir()?;
         let mut tracker = FileTracker::new(&self.config_dir)?;
 
-        let issues = Self::collect_issues(&tracker, &workspace)?;
+        let issues = Self::collect_issues(&tracker, &workspace, verbose)?;
 
         if issues.is_empty() == true
         {
@@ -235,21 +236,40 @@ impl TemplateManager
     }
 
     /// Collect all issues from the FileTracker for the current workspace
-    fn collect_issues(tracker: &FileTracker, workspace: &Path) -> Result<Vec<DoctorIssue>>
+    ///
+    /// When `verbose` is true, prints each checked file and its check result
+    /// as the scan progresses.
+    fn collect_issues(tracker: &FileTracker, workspace: &Path, verbose: bool) -> Result<Vec<DoctorIssue>>
     {
         let mut issues: Vec<DoctorIssue> = Vec::new();
         let entries = tracker.get_workspace_entries(workspace);
+        let has_entries = entries.is_empty() == false;
+
+        if verbose == true && has_entries == true
+        {
+            println!("{}", "Checking workspace files:".bold());
+            println!();
+        }
 
         for (path, metadata) in entries
         {
+            let rel = path.strip_prefix(workspace).unwrap_or(&path);
             match tracker.check_modification(&path)?
             {
                 | FileStatus::Deleted =>
                 {
+                    if verbose == true
+                    {
+                        println!("  {} {} {}", "✗".red(), "Missing: ".red(), rel.display().to_string().red());
+                    }
                     issues.push(DoctorIssue { kind: IssueKind::MissingFile, path });
                 }
                 | FileStatus::Modified =>
                 {
+                    if verbose == true
+                    {
+                        println!("  {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow());
+                    }
                     issues.push(DoctorIssue { kind: IssueKind::ModifiedFile, path });
                 }
                 | FileStatus::Unmodified =>
@@ -257,7 +277,15 @@ impl TemplateManager
                     // Only "main" category files carry the template marker; flag if still present
                     if metadata.category == "main" && template_engine::is_file_customized(&path)? == false
                     {
+                        if verbose == true
+                        {
+                            println!("  {} {} {}", "✗".red(), "Unmerged:".red(), rel.display().to_string().red());
+                        }
                         issues.push(DoctorIssue { kind: IssueKind::UnmergedTemplate, path });
+                    }
+                    else if verbose == true
+                    {
+                        println!("  {} {} {}", "✓".green(), "OK:      ".green(), rel.display().to_string().dimmed());
                     }
                 }
                 | FileStatus::NotTracked =>
@@ -265,6 +293,11 @@ impl TemplateManager
                     // Should not occur via get_workspace_entries; ignore defensively
                 }
             }
+        }
+
+        if verbose == true && has_entries == true
+        {
+            println!();
         }
 
         Ok(issues)
@@ -336,7 +369,7 @@ mod tests
         let dir = make_temp_dir();
         // Empty tracker (no installed_files.json) → no issues
         let tracker = FileTracker::new(dir.path()).unwrap();
-        let issues = TemplateManager::collect_issues(&tracker, dir.path()).unwrap();
+        let issues = TemplateManager::collect_issues(&tracker, dir.path(), false).unwrap();
         assert!(issues.is_empty() == true);
     }
 
@@ -347,7 +380,7 @@ mod tests
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
         // Should succeed with no issues when tracker is empty
         // (doctor uses current_dir, not dir.path(), so we just test it doesn't error)
-        let result = manager.doctor(false, false);
+        let result = manager.doctor(false, false, false);
         assert!(result.is_ok() == true);
     }
 
@@ -370,7 +403,7 @@ mod tests
 
         // Reload and check
         let tracker2 = FileTracker::new(&data_dir).unwrap();
-        let issues = TemplateManager::collect_issues(&tracker2, &workspace).unwrap();
+        let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
         assert!(issues.len() == 1);
         assert!(matches!(issues[0].kind, IssueKind::MissingFile) == true);
     }
@@ -395,7 +428,7 @@ mod tests
         tracker.save().unwrap();
 
         let tracker2 = FileTracker::new(&data_dir).unwrap();
-        let issues = TemplateManager::collect_issues(&tracker2, &workspace).unwrap();
+        let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
         assert!(issues.len() == 1);
         assert!(matches!(issues[0].kind, IssueKind::UnmergedTemplate) == true);
     }

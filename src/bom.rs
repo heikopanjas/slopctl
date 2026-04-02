@@ -301,7 +301,7 @@ impl BillOfMaterials
     /// # Returns
     ///
     /// Some(PathBuf) if the path is workspace-relative, None otherwise
-    fn resolve_workspace_path(target: &str) -> Option<PathBuf>
+    pub fn resolve_workspace_path(target: &str) -> Option<PathBuf>
     {
         // Skip userprofile paths (user-global, not project-specific)
         if target.contains("$userprofile")
