@@ -1,6 +1,6 @@
 # vibe-cop
 
-**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude, Cursor, Copilot, Aider, Jules, Factory, and others) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
+**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude Code, Cursor, GitHub Copilot, and Codex) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
 ![MIT License](https://img.shields.io/badge/-MIT%20License-000000?style=flat-square&logo=opensource&logoColor=white)
 ![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=zsh&logoColor=white)
@@ -23,7 +23,7 @@ vibe-cop is a command-line tool that helps you:
 - **Keep templates synchronized** – Update global templates from remote sources
 - **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
-- **Support multiple agents** – Compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+- **Support multiple agents** – Compatible with Claude Code, Cursor, GitHub Copilot, and Codex
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
 - **Template versioning** – V4 templates with shared file groups (with skill propagation), composable languages, and agent/language skill associations
 
@@ -86,7 +86,7 @@ vibe-cop uses the V4 template format following the [agents.md](https://agents.md
 **Philosophy**: One AGENTS.md file that works across all agents.
 
 - Follows the [agents.md](https://agents.md) community standard
-- Single AGENTS.md file compatible with Claude, Cursor, Copilot, Aider, Jules, Factory, and more
+- Single AGENTS.md file compatible with Claude Code, Cursor, GitHub Copilot, and Codex
 - Agent-specific instruction files (e.g. CLAUDE.md) reference AGENTS.md when needed
 - [Agent Skills](https://agentskills.io) support: define skills per agent, per language, or as top-level entries
 - Shared file groups (`shared` section) and composable languages (`includes`) for reuse across languages
@@ -172,7 +172,7 @@ With `--lang rust` this will:
 1. Copy main AGENTS.md template to your project
 2. Merge language-specific fragments (Rust conventions, build commands) into AGENTS.md
 3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
-4. **Single AGENTS.md works with all agents** (Claude, Cursor, Copilot, Aider, Jules, Factory, etc.)
+4. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, and Codex)
 
 Without `--lang`, you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
@@ -252,19 +252,17 @@ my-rust-project/
 
 ### Step 4: Start Coding with Any Agent
 
-**With Claude/Cursor:**
+**With Claude Code or Cursor:**
 
 Open your agent and reference `AGENTS.md` in project settings. The single AGENTS.md works automatically.
-
-**With Aider:**
-
-```bash
-aider --read AGENTS.md
-```
 
 **With GitHub Copilot:**
 
 Copilot automatically reads AGENTS.md from your workspace.
+
+**With Codex:**
+
+Codex reads AGENTS.md from your workspace automatically.
 
 ### Step 5: Verify Agent Understands Instructions
 
@@ -929,14 +927,10 @@ All templates in this repository enforce these critical rules:
 
 **Universal Support**: Single AGENTS.md works with all agents following the [agents.md](https://agents.md) standard:
 
-- Claude (Anthropic)
+- Claude Code (Anthropic)
 - Cursor (AI code editor)
 - GitHub Copilot (GitHub)
-- OpenAI Codex
-- Aider (command-line AI)
-- Jules (coding assistant)
-- Factory (AI dev tool)
-- Any agent that reads AGENTS.md
+- Codex (OpenAI)
 
 One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md when needed. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent.
 
