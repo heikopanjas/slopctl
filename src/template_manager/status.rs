@@ -80,6 +80,9 @@ impl TemplateManager
             println!("  {} AGENTS.md: {}", "○".yellow(), "not found".yellow());
         }
 
+        // FileTracker is used for language, skills, and managed-file queries below
+        let file_tracker = FileTracker::new(&self.config_dir)?;
+
         // Detect installed agents via BoM
         let mut installed_agents: Vec<String> = Vec::new();
         let mut managed_files: Vec<PathBuf> = Vec::new();
@@ -111,9 +114,18 @@ impl TemplateManager
             println!("  {} No agents installed", "○".yellow());
         }
 
+        // Installed language (from FileTracker metadata)
+        if let Some(lang) = file_tracker.get_installed_language_for_workspace(&current_dir)
+        {
+            println!("  {} Installed language: {}", "✓".green(), lang.green());
+        }
+        else
+        {
+            println!("  {} No language installed", "○".yellow());
+        }
+
         // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc).
         // Only count paths that actually exist on disk to avoid phantom skills from stale entries.
-        let file_tracker = FileTracker::new(&self.config_dir)?;
         let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
 
         if skill_entries.is_empty() == false

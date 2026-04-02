@@ -98,6 +98,10 @@ enum Commands
         #[arg(long)]
         agent: Option<String>,
 
+        /// Programming language or framework (e.g., rust, c++, swift)
+        #[arg(long)]
+        lang: Option<String>,
+
         /// Remove all agent-specific files and skills
         #[arg(long, default_value = "false")]
         all: bool,
@@ -130,7 +134,11 @@ enum Commands
 
         /// Preview changes without applying them
         #[arg(long, default_value = "false")]
-        dry_run: bool
+        dry_run: bool,
+
+        /// Print every checked file and its result
+        #[arg(long, default_value = "false")]
+        verbose: bool
     },
     /// Show current project status
     Status,
@@ -471,19 +479,19 @@ fn main()
             }
         }
         | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
-        | Commands::Remove { agent, all, skill, force, dry_run } =>
+        | Commands::Remove { agent, lang, all, skill, force, dry_run } =>
         {
-            if all == true && agent.is_some() == true
+            if all == true && (agent.is_some() == true || lang.is_some() == true)
             {
-                Err(anyhow::anyhow!("Cannot specify both --agent and --all options"))
+                Err(anyhow::anyhow!("Cannot specify --agent or --lang together with --all"))
             }
-            else if all == false && agent.is_none() == true && skill.is_empty() == true
+            else if all == false && agent.is_none() == true && lang.is_none() == true && skill.is_empty() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --all, or --skill"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --skill"))
             }
             else
             {
-                manager.remove(agent.as_deref(), &skill, force, dry_run)
+                manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
         | Commands::Completions { shell } =>
@@ -492,7 +500,7 @@ fn main()
             generate(shell, &mut Cli::command(), "vibe-cop", &mut io::stdout());
             Ok(())
         }
-        | Commands::Doctor { fix, dry_run } => manager.doctor(fix, dry_run),
+        | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
         | Commands::Status => manager.status(),
         | Commands::List => manager.list(),
         | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
