@@ -1,5 +1,6 @@
 //! Template management functionality for vibe-cop
 
+mod doctor;
 mod list;
 mod purge;
 mod remove;

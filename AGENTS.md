@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-02
+**Last updated:** 2026-04-02 (v11.7.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,17 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-02 (v11.7.0, doctor command)
+
+- Added `doctor` subcommand to check workspace for stale or broken managed files
+- Detects three issue categories: missing files (tracker entry exists, file deleted), unmerged templates (main file still has TEMPLATE_MARKER), and modified files (SHA changed since install, informational)
+- Added `--fix` flag: prunes stale FileTracker entries for missing files and strips TEMPLATE_MARKER from unmerged files
+- Added `--dry-run` flag: shows what would be fixed without applying changes; works independently of `--fix`
+- Created `src/template_manager/doctor.rs` with `DoctorIssue`, `IssueKind`, `collect_issues`, `fix_unmerged_template`, and `doctor()` on `TemplateManager`
+- Added `Doctor { fix, dry_run }` variant to `Commands` enum in `main.rs` with dispatch arm
+- Added 5 unit tests covering: marker stripping, content preservation, empty tracker, missing file detection, unmerged template detection
+- Version bump: 11.6.1 to 11.7.0 (MINOR - new command)
 
 ### 2026-04-02 (v11.6.1, fix phantom skills in status)
 

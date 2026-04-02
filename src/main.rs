@@ -121,6 +121,17 @@ enum Commands
         #[arg(value_enum)]
         shell: ShellType
     },
+    /// Check workspace for stale or broken managed files
+    Doctor
+    {
+        /// Automatically fix detected issues where possible
+        #[arg(long, default_value = "false")]
+        fix: bool,
+
+        /// Preview changes without applying them
+        #[arg(long, default_value = "false")]
+        dry_run: bool
+    },
     /// Show current project status
     Status,
     /// List available agents and languages
@@ -481,6 +492,7 @@ fn main()
             generate(shell, &mut Cli::command(), "vibe-cop", &mut io::stdout());
             Ok(())
         }
+        | Commands::Doctor { fix, dry_run } => manager.doctor(fix, dry_run),
         | Commands::Status => manager.status(),
         | Commands::List => manager.list(),
         | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
