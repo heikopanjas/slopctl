@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v12.2.1)
+**Last updated:** 2026-04-06 (v12.3.1)
 
 <!-- {mission} -->
 
@@ -796,6 +796,30 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v12.3.1, remove falls back to FileTracker)
+
+- Made `remove --agent` and `remove --lang` fall back to FileTracker when the entry no longer exists in templates.yml
+- Previously, removing an agent/language that was deleted from templates.yml after installation returned a hard error, orphaning installed files
+- `remove --agent`: tries BoM first; if agent not found, queries FileTracker for category "agent" entries filtered by `path_belongs_to_agent`
+- `remove --lang`: tries templates.yml first; if language not found, queries FileTracker for entries where `meta.lang` matches, excluding "main" and "skill" categories
+- `remove --all`: now supplements BoM agent files with FileTracker-tracked agent entries, catching agents no longer in BoM
+- Removed hard `require!(config_file.exists())` guards; BoM loading is now optional/graceful
+- Renamed test `test_remove_lang_unknown_errors` to `test_remove_lang_unknown_no_error` (no longer an error)
+- Added 3 new tests: agent fallback to tracker, lang fallback to tracker, lang fallback excludes main/skill
+- Added CWD_LOCK mutex for test serialization (process-global `set_current_dir` safety)
+- Version bump: 12.3.0 to 12.3.1 (PATCH - bug fix)
+
+### 2026-04-06 (v12.3.0, validate agent and language before install)
+
+- Added early validation in `TemplateEngine::update()` that rejects unknown agent/language names before any work begins
+- Previously, unknown agent printed a soft warning and continued the install (main template, principles, integration still installed)
+- Unknown language was caught by `resolve_language_files` but only after principles/mission had already been processed
+- Both now fail immediately after loading templates.yml, listing available names in the error message
+- Removed the unreachable soft-warning `else` branch for unknown agents
+- Error format matches existing `remove --lang` pattern with newline-separated available list
+- Added 4 new tests: unknown agent rejected, unknown language rejected, known agent accepted, known language accepted
+- Version bump: 12.2.1 to 12.3.0 (MINOR - new validation behavior)
 
 ### 2026-04-06 (v12.2.1, filesystem skill detection in list)
 

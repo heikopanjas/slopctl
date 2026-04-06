@@ -264,6 +264,30 @@ impl<'a> TemplateEngine<'a>
 
         let config = load_template_config(self.config_dir)?;
 
+        if let Some(agent_name) = options.agent &&
+            config.agents.contains_key(agent_name) == false
+        {
+            let mut available: Vec<&String> = config.agents.keys().collect();
+            available.sort();
+            return Err(anyhow::anyhow!(
+                "Agent '{}' not found in templates.yml.\nAvailable agents: {}",
+                agent_name,
+                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+
+        if let Some(lang) = options.lang &&
+            config.languages.contains_key(lang) == false
+        {
+            let mut available: Vec<&String> = config.languages.keys().collect();
+            available.sort();
+            return Err(anyhow::anyhow!(
+                "Language '{}' not found in templates.yml.\nAvailable languages: {}",
+                lang,
+                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+
         let workspace = std::env::current_dir()?;
         let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
 
@@ -378,10 +402,6 @@ impl<'a> TemplateEngine<'a>
                     let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
                     directories_to_create.push(dir_path);
                 }
-            }
-            else
-            {
-                println!("{} Agent '{}' not found in templates.yml", "!".yellow(), agent_name.yellow());
             }
         }
 
@@ -1716,6 +1736,112 @@ mod tests
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
 
         engine.install_skills_only(&options)?;
+        Ok(())
+    }
+
+    /// Write a minimal templates.yml with known agents and languages
+    fn write_minimal_templates_yml(dir: &std::path::Path) -> anyhow::Result<()>
+    {
+        let yml = r#"version: 5
+main:
+  source: AGENTS.md
+  target: '$workspace/AGENTS.md'
+agents:
+  cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
+  claude:
+    instructions:
+      - source: claude/CLAUDE.md
+        target: '$workspace/CLAUDE.md'
+languages:
+  rust:
+    files:
+      - source: rust-format.toml
+        target: '$workspace/.rustfmt.toml'
+  swift:
+    files:
+      - source: swift-format.json
+        target: '$workspace/.swift-format'
+"#;
+        fs::write(dir.join("templates.yml"), yml)?;
+        fs::write(dir.join("AGENTS.md"), TEMPLATE_BASE)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_rejects_unknown_agent() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: None, agent: Some("nonexistent"), mission: None, skills: &skills, force: false, dry_run: false };
+
+        let result = engine.update(&options);
+        assert!(result.is_err() == true);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found in templates.yml") == true);
+        assert!(err.contains("nonexistent") == true);
+        assert!(err.contains("cursor") == true);
+        assert!(err.contains("claude") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_rejects_unknown_language() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: Some("nonexistent"), agent: None, mission: None, skills: &skills, force: false, dry_run: false };
+
+        let result = engine.update(&options);
+        assert!(result.is_err() == true);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found in templates.yml") == true);
+        assert!(err.contains("nonexistent") == true);
+        assert!(err.contains("rust") == true);
+        assert!(err.contains("swift") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_accepts_known_agent() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        fs::create_dir_all(config_dir.path().join("cursor"))?;
+        fs::write(config_dir.path().join("cursor/cursorrules"), "test")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: None, agent: Some("cursor"), mission: None, skills: &skills, force: false, dry_run: true };
+
+        let result = engine.update(&options);
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_accepts_known_language() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        fs::write(config_dir.path().join("rust-format.toml"), "max_width = 100")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &skills, force: false, dry_run: true };
+
+        let result = engine.update(&options);
+        assert!(result.is_ok() == true);
         Ok(())
     }
 }

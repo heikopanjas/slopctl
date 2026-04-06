@@ -32,8 +32,7 @@ impl TemplateManager
     ///
     /// # Errors
     ///
-    /// Returns an error if templates.yml cannot be loaded, agent/language is not found,
-    /// or file deletion fails
+    /// Returns an error if file deletion fails or the current directory cannot be determined
     pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, skills: &[String], force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
@@ -47,28 +46,52 @@ impl TemplateManager
         let mut stale_tracker_paths: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
 
-        // Collect agent files from BoM when agent or --all is requested
+        // Collect agent files when agent or --all is requested.
+        // Tries BoM first (templates.yml); falls back to FileTracker when the
+        // agent/template entry was removed after installation.
         if has_agent_target == true || remove_all == true
         {
-            require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'vibe-cop install' first to set up templates.")));
+            let file_tracker = FileTracker::new(&self.config_dir)?;
 
-            let bom = BillOfMaterials::from_config(&config_file)?;
+            let bom = if config_file.exists() == true
+            {
+                BillOfMaterials::from_config(&config_file).ok()
+            }
+            else
+            {
+                None
+            };
 
             if let Some(agent_name) = agent
             {
-                if bom.has_agent(agent_name) == false
+                let found_in_bom = if let Some(ref bom) = bom &&
+                    bom.has_agent(agent_name) == true
                 {
-                    let available_agents = bom.get_agent_names();
-                    return Err(anyhow::anyhow!("Agent '{}' not found in Bill of Materials.\nAvailable agents: {}", agent_name, available_agents.join(", ")));
+                    if let Some(agent_files) = bom.get_agent_files(agent_name)
+                    {
+                        files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                    }
+                    true
                 }
-
-                if let Some(agent_files) = bom.get_agent_files(agent_name)
+                else
                 {
-                    files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                    false
+                };
+
+                if found_in_bom == false
+                {
+                    println!("{} Agent '{}' not in templates.yml, using installation records", "→".blue(), agent_name.yellow());
+                    let agent_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "agent");
+                    for (path, _) in agent_entries
+                    {
+                        if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true
+                        {
+                            files_to_remove.push(path);
+                        }
+                    }
                 }
 
                 // Also collect ad-hoc/top-level skill files under this agent's skill dir
-                let file_tracker = FileTracker::new(&self.config_dir)?;
                 let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
                 for (path, _) in skill_entries
                 {
@@ -82,22 +105,34 @@ impl TemplateManager
             }
             else
             {
-                // --all: collect files for every agent
-                let agent_names = bom.get_agent_names();
-                for name in &agent_names
+                // --all: collect agent files from BoM if available
+                if let Some(ref bom) = bom
                 {
-                    if let Some(agent_files) = bom.get_agent_files(name)
+                    let agent_names = bom.get_agent_names();
+                    for name in &agent_names
                     {
-                        files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                        if let Some(agent_files) = bom.get_agent_files(name)
+                        {
+                            files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                        }
+                    }
+                }
+
+                // Supplement with tracked agent files not already collected from BoM
+                let agent_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "agent");
+                for (path, _) in agent_entries
+                {
+                    if path.exists() == true && files_to_remove.contains(&path) == false
+                    {
+                        files_to_remove.push(path);
                     }
                 }
 
                 // Also collect ALL skill files from FileTracker
-                let file_tracker = FileTracker::new(&self.config_dir)?;
                 let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
                 for (path, _) in skill_entries
                 {
-                    if path.exists() == true
+                    if path.exists() == true && files_to_remove.contains(&path) == false
                     {
                         files_to_remove.push(path);
                     }
@@ -107,34 +142,52 @@ impl TemplateManager
             }
         }
 
-        // Collect language disk files when --lang is requested
+        // Collect language disk files when --lang is requested.
+        // Tries templates.yml first; falls back to FileTracker when the
+        // language entry was removed after installation.
         if has_lang_target == true
         {
-            require!(config_file.exists() == true, Err(anyhow::anyhow!("Global templates not found. Run 'vibe-cop install' first to set up templates.")));
-
             let lang_name = lang.unwrap();
-            let config = template_engine::load_template_config(&self.config_dir)?;
 
-            if config.languages.contains_key(lang_name) == false
+            let found_in_config = if config_file.exists() == true &&
+                let Ok(config) = template_engine::load_template_config(&self.config_dir) &&
+                config.languages.contains_key(lang_name) == true
             {
-                let mut available: Vec<&String> = config.languages.keys().collect();
-                available.sort();
-                return Err(anyhow::anyhow!(
-                    "Language '{}' not found in templates.yml.\nAvailable languages: {}",
-                    lang_name,
-                    available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-                ));
-            }
-
-            let file_mappings = bom::resolve_language_files(lang_name, &config)?;
-            for mapping in file_mappings
-            {
-                if let Some(path) = BillOfMaterials::resolve_workspace_path(&mapping.target)
+                if let Ok(file_mappings) = bom::resolve_language_files(lang_name, &config)
                 {
-                    let abs_path = current_dir.join(path);
-                    if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
+                    for mapping in file_mappings
                     {
-                        files_to_remove.push(abs_path);
+                        if let Some(path) = BillOfMaterials::resolve_workspace_path(&mapping.target)
+                        {
+                            let abs_path = current_dir.join(path);
+                            if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
+                            {
+                                files_to_remove.push(abs_path);
+                            }
+                        }
+                    }
+                }
+                true
+            }
+            else
+            {
+                false
+            };
+
+            if found_in_config == false
+            {
+                println!("{} Language '{}' not in templates.yml, using installation records", "→".blue(), lang_name.yellow());
+                let file_tracker = FileTracker::new(&self.config_dir)?;
+                let all_entries = file_tracker.get_workspace_entries(&current_dir);
+                for (path, meta) in all_entries
+                {
+                    if meta.lang.as_deref() == Some(lang_name) &&
+                        meta.category != "main" &&
+                        meta.category != "skill" &&
+                        path.exists() == true &&
+                        files_to_remove.contains(&path) == false
+                    {
+                        files_to_remove.push(path);
                     }
                 }
             }
@@ -302,10 +355,13 @@ impl TemplateManager
 #[cfg(test)]
 mod tests
 {
-    use std::{fs, path::PathBuf};
+    use std::{fs, path::PathBuf, sync::Mutex};
 
     use super::TemplateManager;
-    use crate::bom::BillOfMaterials;
+    use crate::{bom::BillOfMaterials, file_tracker::FileTracker};
+
+    /// Serializes tests that call `std::env::set_current_dir` (process-global state)
+    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_path_belongs_to_cursor()
@@ -357,7 +413,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_lang_unknown_errors() -> anyhow::Result<()>
+    fn test_remove_lang_unknown_no_error() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -366,8 +422,102 @@ mod tests
 
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
         let result = manager.remove(None, Some("nonexistent"), &[], false, true);
-        assert!(result.is_err() == true);
-        assert!(result.unwrap_err().to_string().contains("not found in templates.yml") == true);
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_falls_back_to_file_tracker() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nagents:\n  claude:\n    instructions: []\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let agent_file = workspace.path().join(".cursorrules");
+        fs::write(&agent_file, "test")?;
+
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("cursor"), None, &[], false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_falls_back_to_file_tracker() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  swift:\n    files: []\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let lang_file = workspace.path().join(".rustfmt.toml");
+        fs::write(&lang_file, "max_width = 100")?;
+
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("rust"), &[], false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_fallback_excludes_main_and_skill() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let lang_file = workspace.path().join(".rustfmt.toml");
+        let main_file = workspace.path().join("AGENTS.md");
+        let skill_dir = workspace.path().join(".cursor/skills/rust-conventions");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&lang_file, "max_width = 100")?;
+        fs::write(&main_file, "# Agents")?;
+        fs::write(&skill_file, "# Skill")?;
+
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into(), workspace.path());
+        tracker.record_installation(&main_file, "sha2".into(), 5, Some("rust".into()), "main".into(), workspace.path());
+        tracker.record_installation(&skill_file, "sha3".into(), 5, Some("rust".into()), "skill".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("rust"), &[], false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
         Ok(())
     }
 }
