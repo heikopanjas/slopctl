@@ -1115,10 +1115,10 @@ mod tests
     fn test_load_template_config_valid() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
-        fs::write(dir.path().join("templates.yml"), "version: 4\nlanguages: {}")?;
+        fs::write(dir.path().join("templates.yml"), "version: 5\nlanguages: {}")?;
 
         let config = load_template_config(dir.path())?;
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
         Ok(())
     }
 
@@ -1416,7 +1416,7 @@ mod tests
         let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.")?;
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 5 };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1443,7 +1443,7 @@ mod tests
             source,
             target: target.clone(),
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
-            template_version: 4
+            template_version: 5
         };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
@@ -1464,7 +1464,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1484,7 +1484,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1504,7 +1504,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;

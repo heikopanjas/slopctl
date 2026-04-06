@@ -50,9 +50,9 @@ impl TemplateManager
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V4: vibe-cop config source.url https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v4"
+                "V1 templates are no longer supported. Migrate to V5: vibe-cop config source.url https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5"
             )),
-            | 2..=4 =>
+            | 2..=5 =>
             {
                 if options.lang.is_some() && options.agent.is_some()
                 {

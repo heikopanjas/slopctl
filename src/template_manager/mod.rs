@@ -4,7 +4,6 @@ mod doctor;
 mod list;
 mod purge;
 mod remove;
-mod status;
 mod update;
 
 use std::{

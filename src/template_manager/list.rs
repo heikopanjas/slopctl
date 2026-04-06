@@ -1,6 +1,6 @@
 //! Template list command
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use owo_colors::OwoColorize;
 
@@ -14,18 +14,224 @@ use crate::{
 
 impl TemplateManager
 {
-    /// List available agents, languages, and skills
+    /// List workspace status or available templates
     ///
-    /// Displays all available agents and languages from the global templates,
-    /// along with their installation status. Shows template-defined skills
-    /// and any ad-hoc installed skills from the FileTracker.
+    /// With `global == false` (default), shows workspace state:
+    /// - Global template status (downloaded, location)
+    /// - AGENTS.md status (exists, customized)
+    /// - Installed agents (detected by checking for their files)
+    /// - Installed skills (from FileTracker, covers all sources)
+    /// - All vibe-cop managed files in current directory (verbose only)
+    ///
+    /// With `global == true`, shows the available template catalog:
+    /// - Available agents with install status and skill counts
+    /// - Available languages with includes, resolved skill names
+    /// - Top-level skills from templates.yml
+    /// - Ad-hoc installed skills from FileTracker
+    ///
+    /// # Arguments
+    ///
+    /// * `global` - When true, shows available templates catalog instead of workspace state
+    /// * `verbose` - When true (workspace mode only), prints the full list of managed files
     ///
     /// # Errors
     ///
-    /// Returns an error if templates.yml cannot be loaded
-    pub fn list(&self) -> Result<()>
+    /// Returns an error if the current directory cannot be determined or templates.yml cannot be loaded
+    pub fn list(&self, global: bool, verbose: bool) -> Result<()>
     {
+        if global == true
+        {
+            self.list_global()
+        }
+        else
+        {
+            self.list_workspace(verbose)
+        }
+    }
+
+    /// Show workspace state (default mode)
+    fn list_workspace(&self, verbose: bool) -> Result<()>
+    {
+        let current_dir = std::env::current_dir()?;
+
         println!("{}", "vibe-cop list".bold());
+        println!();
+
+        // Global templates status
+        println!("{}", "Global Templates:".bold());
+        if self.has_global_templates() == true
+        {
+            println!("  {} Installed at: {}", "✓".green(), self.config_dir.display().to_string().yellow());
+
+            if let Ok(config) = template_engine::load_template_config(&self.config_dir)
+            {
+                println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
+
+                if config.agents.is_empty() == false
+                {
+                    let agents: Vec<&String> = config.agents.keys().collect();
+                    println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
+                }
+
+                let languages: Vec<&String> = config.languages.keys().collect();
+                if languages.is_empty() == false
+                {
+                    println!("  {} Available languages: {}", "→".blue(), languages.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
+                }
+            }
+        }
+        else
+        {
+            println!("  {} Not installed", "✗".red());
+            println!("  {} Run 'vibe-cop update' to download templates", "→".blue());
+        }
+
+        println!();
+
+        // AGENTS.md status
+        println!("{}", "Project Status:".bold());
+        let agents_md_path = current_dir.join("AGENTS.md");
+        if agents_md_path.exists() == true
+        {
+            let customized = template_engine::is_file_customized(&agents_md_path).unwrap_or(false);
+            if customized == true
+            {
+                println!("  {} AGENTS.md: {} (customized)", "✓".green(), "exists".green());
+            }
+            else
+            {
+                println!("  {} AGENTS.md: {} (from template)", "✓".green(), "exists".yellow());
+            }
+        }
+        else
+        {
+            println!("  {} AGENTS.md: {}", "○".yellow(), "not found".yellow());
+        }
+
+        let file_tracker = FileTracker::new(&self.config_dir)?;
+
+        // Detect installed agents via BoM
+        let mut installed_agents: Vec<String> = Vec::new();
+
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(&config_file)
+        {
+            for agent_name in bom.get_agent_names()
+            {
+                if let Some(files) = bom.get_agent_files(&agent_name) &&
+                    files.iter().any(|f| f.exists()) == true
+                {
+                    installed_agents.push(agent_name.clone());
+                }
+            }
+        }
+
+        if installed_agents.is_empty() == false
+        {
+            println!("  {} Installed agents: {}", "✓".green(), installed_agents.join(", ").green());
+        }
+        else
+        {
+            println!("  {} No agents installed", "○".yellow());
+        }
+
+        // Installed language (from FileTracker metadata)
+        if let Some(lang) = file_tracker.get_installed_language_for_workspace(&current_dir)
+        {
+            println!("  {} Installed language: {}", "✓".green(), lang.green());
+        }
+        else
+        {
+            println!("  {} No language installed", "○".yellow());
+        }
+
+        // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc).
+        // Only count paths that actually exist on disk to avoid phantom skills from stale entries.
+        let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+
+        if skill_entries.is_empty() == false
+        {
+            let mut skill_names: BTreeSet<String> = BTreeSet::new();
+            for (path, _) in &skill_entries
+            {
+                if path.exists() == false
+                {
+                    continue;
+                }
+                if let Some(name) = Self::extract_skill_name_from_path(path)
+                {
+                    skill_names.insert(name);
+                }
+            }
+
+            let count = skill_names.len();
+            println!("  {} Installed skills: {}", "✓".green(), count.to_string().green());
+            for name in &skill_names
+            {
+                println!("    {} {}", "•".blue(), name.yellow());
+            }
+        }
+
+        if verbose == true
+        {
+            let mut managed_files: Vec<PathBuf> = Vec::new();
+
+            if config_file.exists() == true &&
+                let Ok(bom) = BillOfMaterials::from_config(&config_file)
+            {
+                for agent_name in bom.get_agent_names()
+                {
+                    if let Some(files) = bom.get_agent_files(&agent_name)
+                    {
+                        managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
+                    }
+                }
+            }
+
+            let all_tracked = file_tracker.get_workspace_entries(&current_dir);
+            for (path, _) in all_tracked
+            {
+                if path.exists() == true
+                {
+                    managed_files.push(path);
+                }
+            }
+
+            if agents_md_path.exists() == true
+            {
+                managed_files.push(agents_md_path);
+            }
+
+            println!();
+
+            managed_files.sort();
+            managed_files.dedup();
+
+            if managed_files.is_empty() == false
+            {
+                println!("{}", "Managed Files:".bold());
+                for file in &managed_files
+                {
+                    let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
+                    println!("  • {}", display_path.display().to_string().yellow());
+                }
+            }
+            else
+            {
+                println!("{}", "Managed Files:".bold());
+                println!("  {} No vibe-cop files found in current directory", "○".yellow());
+                println!("  {} Run 'vibe-cop install --lang <lang> --agent <agent>' to set up", "→".blue());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Show available templates catalog (--global mode)
+    fn list_global(&self) -> Result<()>
+    {
+        println!("{}", "vibe-cop list --global".bold());
         println!();
 
         if self.has_global_templates() == false
@@ -90,10 +296,11 @@ impl TemplateManager
         {
             let lang_config = config.languages.get(lang_name.as_str());
             let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!("includes: {}", inc.join(", ")));
-            let resolved_skill_count = bom::resolve_language_skills(lang_name, &config).map(|s| s.len()).unwrap_or(0);
-            let skill_annotation = if resolved_skill_count > 0
+
+            let resolved_skills = bom::resolve_language_skills(lang_name, &config).unwrap_or_default();
+            let skill_annotation = if resolved_skills.is_empty() == false
             {
-                Some(format!("{} skill(s)", resolved_skill_count))
+                Some(format!("{} skill(s)", resolved_skills.len()))
             }
             else
             {
@@ -110,9 +317,22 @@ impl TemplateManager
             {
                 println!("  • {} ({})", lang_name, annotations.join(", ").dimmed());
             }
+
+            for skill in &resolved_skills
+            {
+                let source_info = if crate::github::is_url(&skill.source) == true
+                {
+                    "(GitHub)"
+                }
+                else
+                {
+                    "(local)"
+                };
+                println!("    {} {} {}", "•".blue(), skill.name, source_info.dimmed());
+            }
         }
 
-        // Collect template-defined skill names for deduplication
+        // Collect template-defined skill names for deduplication against ad-hoc
         let mut template_skill_names: BTreeSet<String> = BTreeSet::new();
 
         if config.skills.is_empty() == false

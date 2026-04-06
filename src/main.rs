@@ -140,15 +140,17 @@ enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// Show current project status
-    Status
+    /// List workspace status or available templates
+    List
     {
-        /// Show managed file list
+        /// Show available agents, languages, and skills from global templates
+        #[arg(short, long, default_value = "false")]
+        global: bool,
+
+        /// Show managed file list (workspace mode only)
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// List available agents and languages
-    List,
     /// Manage configuration
     Config
     {
@@ -168,8 +170,8 @@ enum Commands
     }
 }
 
-/// Default template source URL (V4 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v4";
+/// Default template source URL (V5 templates - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -506,8 +508,7 @@ fn main()
             Ok(())
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
-        | Commands::Status { verbose } => manager.status(verbose),
-        | Commands::List => manager.list(),
+        | Commands::List { global, verbose } => manager.list(global, verbose),
         | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
     };
 

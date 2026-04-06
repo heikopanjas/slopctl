@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v11.11.0)
+**Last updated:** 2026-04-06 (v12.1.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,27 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v12.1.0, merge list and status commands)
+
+- Removed `status` command; `list` now serves both roles
+- `list` (default): shows workspace state (global templates, AGENTS.md, installed agents/language/skills, managed files with `-v`)
+- `list --global` / `list -g`: shows available template catalog (agents, languages, skills from templates.yml)
+- Added `--global` (`-g`) and `--verbose` (`-v`) flags to `List` command
+- Enhanced `--global` view to show language/shared-group skill names inline under each language
+- Deleted `src/template_manager/status.rs`; moved logic into `list.rs` split across `list_workspace()` and `list_global()` helpers
+- Updated README.md references from `vibe-cop status` to `vibe-cop list`
+- Version bump: 12.0.0 to 12.1.0 (MINOR - merged commands, new --global flag)
+
+### 2026-04-06 (v12.0.0, template version V5)
+
+- MAJOR version bump: 11.11.0 to 12.0.0 (template format version change)
+- Bumped template version from 4 to 5
+- Renamed `templates/v4` directory to `templates/v5`
+- Updated default source URL, migration error message, and accepted version range (2..=5)
+- Updated `default_version()` return value and all related tests
+- Updated all V4/v4 references in README.md to V5/v5
+- No migration path from V4 provided
 
 ### 2026-04-06 (v11.11.0, short CLI options)
 

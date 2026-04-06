@@ -91,10 +91,10 @@ pub struct SkillDefinition
 
 /// Default version for templates.yml (used when version field is missing)
 ///
-/// Switched to version 4 in v11.3.0 (agent/language skill associations)
+/// Switched to version 5 in v12.0.0 (extensive skill handling improvements)
 fn default_version() -> u32
 {
-    4
+    5
 }
 
 /// Template configuration structure parsed from templates.yml
@@ -406,7 +406,7 @@ mod tests
     fn minimal_config() -> TemplateConfig
     {
         TemplateConfig {
-            version:     4,
+            version:     5,
             main:        None,
             agents:      HashMap::new(),
             languages:   HashMap::new(),
@@ -421,19 +421,19 @@ mod tests
     // -- default_version --
 
     #[test]
-    fn test_default_version_returns_4()
+    fn test_default_version_returns_5()
     {
-        assert_eq!(default_version(), 4);
+        assert_eq!(default_version(), 5);
     }
 
     // -- TemplateConfig serde --
 
     #[test]
-    fn test_template_config_version_defaults_to_4() -> anyhow::Result<()>
+    fn test_template_config_version_defaults_to_5() -> anyhow::Result<()>
     {
         let yaml = "languages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
         Ok(())
     }
 
@@ -851,7 +851,7 @@ agents:
     fn test_full_template_config_parse() -> anyhow::Result<()>
     {
         let yaml = r#"
-version: 4
+version: 5
 main:
   source: AGENTS.md
   target: '$workspace/AGENTS.md'
@@ -900,7 +900,7 @@ skills:
     source: 'https://github.com/user/repo/tree/main/skills/my-skill'
 "#;
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
         assert!(config.main.is_some() == true);
         assert_eq!(config.main.as_ref().ok_or_else(|| anyhow::anyhow!("missing main config"))?.source, "AGENTS.md");
         assert!(config.agents.is_empty() == false);
