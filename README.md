@@ -25,7 +25,7 @@ vibe-cop is a command-line tool that helps you:
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Compatible with Claude Code, Cursor, GitHub Copilot, and Codex
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
-- **Template versioning** – V5 templates with shared file groups (with skill propagation), composable languages, and agent/language skill associations
+- **Template versioning** – V5 templates with shared file groups (with skill propagation), composable languages, agent/language skill associations, and agent directories
 
 ## Repository Structure
 
@@ -542,7 +542,7 @@ vibe-cop install --lang rust --dry-run
 - **`--skill` standalone**: When used without `--lang` or `--agent`, installs skills directly to the cross-client `$workspace/.agents/skills/` directory without downloading global templates or creating AGENTS.md
 - **`--skill` with `--agent`**: Installs skills to the agent-specific directory (e.g. `.cursor/skills/`) alongside agent templates
 - **`--skill` with `--lang`** (no agent): Installs skills to the cross-client `.agents/skills/` directory alongside language templates
-- **With `--agent` only** (no `--lang`): Creates AGENTS.md with mission, principles, integration (no language files); preserves existing language if previously installed; installs agent-associated skills from templates.yml
+- **With `--agent` only** (no `--lang`): Creates AGENTS.md with mission, principles, integration (no language files); preserves existing language if previously installed; installs agent-associated skills from templates.yml; creates agent-declared directories (e.g. `.cursor/plans`)
 - **With `--lang`**: Creates single AGENTS.md plus language config files; installs language-associated skills (own + inherited from shared groups) from templates.yml to cross-client directory; optional `--agent` adds agent prompts and agent skills
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
@@ -1059,6 +1059,28 @@ vibe-cop install --skill https://github.com/user/skills/tree/main/create-rule
 vibe-cop install --skill ./my-local-skill
 ```
 
+### Agent Directories
+
+Agents can declare workspace directories that should be created during `install`. This is useful for directories that the agent expects to exist but that are not tracked by version control — for example, Cursor's `.cursor/plans` directory for storing agent-generated plans.
+
+**Example in templates.yml:**
+
+```yaml
+agents:
+  cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
+    directories:
+      - target: '$workspace/.cursor/plans'
+```
+
+When a user runs `vibe-cop install --agent cursor`, the `.cursor/plans` directory is created in the workspace alongside the usual instruction and prompt files. If the directory already exists, the step is silently skipped. Directories are also shown in `--dry-run` output.
+
+Each entry in `directories` has a single field:
+
+- `target` — Destination path using the standard placeholders (`$workspace`, `$userprofile`)
+
 ### Template Configuration (templates.yml)
 
 The `templates.yml` file defines the template structure with a version field and multiple sections:
@@ -1073,7 +1095,7 @@ The `templates.yml` file defines the template structure with a version field and
 **Main Sections:**
 
 1. **main**: Main AGENTS.md instruction file (primary source of truth)
-2. **agents**: Agent-specific files with `instructions`, `prompts`, and `skills` (name + source)
+2. **agents**: Agent-specific files with `instructions`, `prompts`, `skills` (name + source), and `directories` (workspace paths to create during install)
 3. **shared**: Reusable file groups with `files` and optional `skills` (skills propagate to including languages via `includes`)
 4. **languages**: Language-specific coding standards fragments (merged into AGENTS.md), with optional `includes` and `skills`
 5. **integration**: Tool/workflow integration fragments (merged into AGENTS.md, e.g., git workflows)
@@ -1130,6 +1152,8 @@ agents:
         skills:
             - name: create-rule
               source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+        directories:
+            - target: '$workspace/.cursor/plans'
 
 shared:
     cmake:
@@ -1303,7 +1327,7 @@ When you run `vibe-cop install --lang rust`:
 5. Merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
 6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
 7. Single AGENTS.md works with all agents
-8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md) and agent skills
+8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md), agent skills, and creates agent directories (e.g. `.cursor/plans`)
 9. Language-associated skills are installed to the cross-client `.agents/skills/` directory
 10. You're ready to start coding with any agent
 
@@ -1478,4 +1502,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: April 2, 2026 (v11.8.0)
+Last updated: April 6, 2026 (v12.2.0)

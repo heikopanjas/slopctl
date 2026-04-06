@@ -18,6 +18,9 @@ version: 5
 # - `skills` on languages: skills associated with a language (installed to cross-client .agents/skills/)
 # - `skills` on shared groups: propagated to including languages via `includes`
 #
+# V5 additions:
+# - `directories` on agents: workspace directories to create during install
+#
 # Placeholders:
 #   $workspace     - Project root directory
 #   $userprofile   - User profile/home directory
@@ -67,6 +70,8 @@ agents:
     prompts:
       - source: cursor/commands/init-session.md
         target: '$workspace/.cursor/commands/init-session.md'
+    directories:
+      - target: '$workspace/.cursor/plans'
 
 # Reusable file groups shared across multiple languages
 # Each group has `files` (FileMapping list) and optional `skills` (SkillDefinition list).

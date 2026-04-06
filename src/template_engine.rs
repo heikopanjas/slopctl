@@ -348,6 +348,8 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
+        let mut directories_to_create: Vec<PathBuf> = Vec::new();
+
         if let Some(agent_name) = options.agent
         {
             if let Some(agent_config) = config.agents.get(agent_name)
@@ -369,6 +371,12 @@ impl<'a> TemplateEngine<'a>
                         let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
                         files_to_copy.push((source_path, target_path));
                     }
+                }
+
+                for dir_entry in &agent_config.directories
+                {
+                    let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
+                    directories_to_create.push(dir_path);
                 }
             }
             else
@@ -437,11 +445,17 @@ impl<'a> TemplateEngine<'a>
 
         if options.dry_run == true
         {
-            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy);
+            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy, &directories_to_create);
             return Ok(());
         }
 
         self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
+
+        for dir_path in &directories_to_create
+        {
+            fs::create_dir_all(dir_path)?;
+            println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
+        }
 
         let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options, &workspace)?;
 
@@ -542,15 +556,16 @@ impl<'a> TemplateEngine<'a>
         Ok(())
     }
 
-    /// Shows dry-run preview of files that would be created/modified
+    /// Shows dry-run preview of files and directories
     ///
     /// # Arguments
     ///
     /// * `ctx` - Template context for main AGENTS.md
     /// * `skip_agents_md` - Whether AGENTS.md is customized and should be skipped
     /// * `options` - Update options containing force and dry_run settings
-    /// * `files_to_copy` - List of (source, target) file pairs
-    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)])
+    /// * `files_to_copy` - List of (source, target) file tuples
+    /// * `directories` - List of directory paths
+    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)], directories: &[PathBuf])
     {
         println!("\n{} Files that would be created/modified:", "→".blue());
 
@@ -576,6 +591,22 @@ impl<'a> TemplateEngine<'a>
             else
             {
                 println!("  {} {} (would be created)", "●".green(), target.display());
+            }
+        }
+
+        if directories.is_empty() == false
+        {
+            println!("\n{} Directories that would be created:", "→".blue());
+            for dir_path in directories
+            {
+                if dir_path.exists() == true
+                {
+                    println!("  {} {} (exists)", "○".yellow(), dir_path.display());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), dir_path.display());
+                }
             }
         }
 

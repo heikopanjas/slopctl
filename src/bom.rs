@@ -18,7 +18,14 @@ pub struct FileMapping
     pub target: String
 }
 
-/// Agent configuration with instructions, prompts, and skills
+/// Directory entry that an agent declares for creation during install
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DirectoryEntry
+{
+    pub target: String
+}
+
+/// Agent configuration with instructions, prompts, skills, and directories
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentConfig
 {
@@ -27,7 +34,9 @@ pub struct AgentConfig
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompts:      Vec<FileMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills:       Vec<SkillDefinition>
+    pub skills:       Vec<SkillDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directories:  Vec<DirectoryEntry>
 }
 
 /// Language configuration with files, optional includes, and optional skills
@@ -863,6 +872,8 @@ agents:
     skills:
       - name: claude-skill
         source: 'https://github.com/user/claude-skills/tree/main/skill-a'
+    directories:
+      - target: '$workspace/.claude/plans'
 shared:
   cmake:
     files:
@@ -904,7 +915,9 @@ skills:
         assert!(config.main.is_some() == true);
         assert_eq!(config.main.as_ref().ok_or_else(|| anyhow::anyhow!("missing main config"))?.source, "AGENTS.md");
         assert!(config.agents.is_empty() == false);
-        assert_eq!(config.agents.get("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent"))?.skills.len(), 1);
+        let claude_agent = config.agents.get("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent"))?;
+        assert_eq!(claude_agent.skills.len(), 1);
+        assert_eq!(claude_agent.directories.len(), 1);
         assert!(config.shared.is_empty() == false);
         let cmake_shared = config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?;
         assert_eq!(cmake_shared.files.len(), 1);
@@ -968,6 +981,44 @@ skills:
         assert_eq!(config.skills.len(), 1);
         assert_eq!(config.skills[0].name, "create-rule");
         assert_eq!(config.instructions.len(), 1);
+        Ok(())
+    }
+
+    // -- DirectoryEntry serde --
+
+    #[test]
+    fn test_directory_entry_basic() -> anyhow::Result<()>
+    {
+        let yaml = "target: '$workspace/.cursor/plans'";
+        let entry: DirectoryEntry = serde_yaml::from_str(yaml)?;
+        assert_eq!(entry.target, "$workspace/.cursor/plans");
+        Ok(())
+    }
+
+    // -- AgentConfig directories serde --
+
+    #[test]
+    fn test_agent_config_directories_defaults_empty() -> anyhow::Result<()>
+    {
+        let yaml = "instructions:\n  - source: cursor/cursorrules\n    target: '$workspace/.cursorrules'";
+        let config: AgentConfig = serde_yaml::from_str(yaml)?;
+        assert!(config.directories.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_agent_config_with_directories() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+instructions:
+  - source: cursor/cursorrules
+    target: '$workspace/.cursorrules'
+directories:
+  - target: '$workspace/.cursor/plans'
+"#;
+        let config: AgentConfig = serde_yaml::from_str(yaml)?;
+        assert_eq!(config.directories.len(), 1);
+        assert_eq!(config.directories[0].target, "$workspace/.cursor/plans");
         Ok(())
     }
 

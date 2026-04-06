@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v12.1.1)
+**Last updated:** 2026-04-06 (v12.2.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,16 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v12.2.0, agent directories)
+
+- Added `DirectoryEntry` struct with `target` field in `bom.rs`
+- Added `directories: Vec<DirectoryEntry>` to `AgentConfig` for agent-declared workspace directories
+- Agent directories created with `create_dir_all` during install
+- Dry-run output now shows directories that would be created
+- Updated `templates/v5/templates.yml`: cursor agent gets `directories` with `.cursor/plans`
+- Added 3 new tests: DirectoryEntry serde, AgentConfig directories defaults and parsing
+- Version bump: 12.1.1 to 12.2.0 (MINOR - new feature)
 
 ### 2026-04-06 (v12.1.1, fix workspace scoping in FileTracker)
 
