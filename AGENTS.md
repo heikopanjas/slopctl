@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-03 (v11.9.0)
+**Last updated:** 2026-04-06 (v11.11.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,27 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v11.11.0, short CLI options)
+
+- Added short option aliases to all CLI flags across every command
+- install: `-l` (lang), `-a` (agent), `-m` (mission), `-s` (skill), `-f` (force), `-n` (dry-run)
+- update: `-f` (from), `-n` (dry-run)
+- purge: `-f` (force), `-n` (dry-run)
+- remove: `-a` (agent), `-l` (lang), `-s` (skill), `-f` (force), `-n` (dry-run); `--all` stays long-only (dangerous operation)
+- doctor: `-f` (fix), `-n` (dry-run), `-v` (verbose)
+- status: `-v` (verbose)
+- config: `-l` (list), `-u` (unset)
+- Version bump: 11.10.0 to 11.11.0 (MINOR - new CLI ergonomics)
+
+### 2026-04-06 (v11.10.0, status --verbose flag)
+
+- Managed file list in `status` command is now hidden by default; shown only with `--verbose`
+- Added `--verbose` flag to `Status` variant in `main.rs`
+- Changed `status()` signature to accept `verbose: bool`
+- Moved managed file collection and display into a `verbose`-gated block
+- Separated agent detection from file collection to avoid dead writes when non-verbose
+- Version bump: 11.9.0 to 11.10.0 (MINOR - new CLI option)
 
 ### 2026-04-03 (templates-to-skills migration)
 

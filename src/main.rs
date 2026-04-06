@@ -46,60 +46,60 @@ enum Commands
     Install
     {
         /// Programming language or framework (e.g., rust, c++, swift)
-        #[arg(long)]
+        #[arg(short, long)]
         lang: Option<String>,
 
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
-        #[arg(long)]
+        #[arg(short, long)]
         agent: Option<String>,
 
         /// Custom mission statement (use @filename to read from file)
-        #[arg(long)]
+        #[arg(short, long)]
         mission: Option<String>,
 
         /// Install skill(s) from GitHub or local path (repeatable)
-        #[arg(long)]
+        #[arg(short, long)]
         skill: Vec<String>,
 
         /// Force overwrite of local files without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Update global templates from source
     Update
     {
         /// Path or URL to download/copy templates from
-        #[arg(long)]
+        #[arg(short, long)]
         from: Option<String>,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Purge all vibe-cop files from project
     Purge
     {
         /// Force purge without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Remove agent-specific files or skills from current directory
     Remove
     {
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
-        #[arg(long)]
+        #[arg(short, long)]
         agent: Option<String>,
 
         /// Programming language or framework (e.g., rust, c++, swift)
-        #[arg(long)]
+        #[arg(short, long)]
         lang: Option<String>,
 
         /// Remove all agent-specific files and skills
@@ -107,15 +107,15 @@ enum Commands
         all: bool,
 
         /// Remove skill(s) by name (repeatable)
-        #[arg(long)]
+        #[arg(short, long)]
         skill: Vec<String>,
 
         /// Force removal without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Generate shell completions
@@ -129,19 +129,24 @@ enum Commands
     Doctor
     {
         /// Automatically fix detected issues where possible
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         fix: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
         /// Print every checked file and its result
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         verbose: bool
     },
     /// Show current project status
-    Status,
+    Status
+    {
+        /// Show managed file list
+        #[arg(short, long, default_value = "false")]
+        verbose: bool
+    },
     /// List available agents and languages
     List,
     /// Manage configuration
@@ -154,11 +159,11 @@ enum Commands
         value: Option<String>,
 
         /// List all configuration values
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         list: bool,
 
         /// Unset a configuration key
-        #[arg(long)]
+        #[arg(short, long)]
         unset: Option<String>
     }
 }
@@ -501,7 +506,7 @@ fn main()
             Ok(())
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
-        | Commands::Status => manager.status(),
+        | Commands::Status { verbose } => manager.status(verbose),
         | Commands::List => manager.list(),
         | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
     };

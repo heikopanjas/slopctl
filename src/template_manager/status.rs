@@ -16,12 +16,16 @@ impl TemplateManager
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
     /// - Installed skills (from FileTracker, covers all sources)
-    /// - All vibe-cop managed files in current directory
+    /// - All vibe-cop managed files in current directory (verbose only)
+    ///
+    /// # Arguments
+    ///
+    /// * `verbose` - When true, prints the full list of managed files
     ///
     /// # Errors
     ///
     /// Returns an error if the current directory cannot be determined
-    pub fn status(&self) -> Result<()>
+    pub fn status(&self, verbose: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
 
@@ -85,7 +89,6 @@ impl TemplateManager
 
         // Detect installed agents via BoM
         let mut installed_agents: Vec<String> = Vec::new();
-        let mut managed_files: Vec<PathBuf> = Vec::new();
 
         let config_file = self.config_dir.join("templates.yml");
         if config_file.exists() == true &&
@@ -95,11 +98,9 @@ impl TemplateManager
             {
                 if let Some(files) = bom.get_agent_files(&agent_name)
                 {
-                    let existing_files: Vec<PathBuf> = files.iter().filter(|f| f.exists()).cloned().collect();
-                    if existing_files.is_empty() == false
+                    if files.iter().any(|f| f.exists()) == true
                     {
                         installed_agents.push(agent_name.clone());
-                        managed_files.extend(existing_files);
                     }
                 }
             }
@@ -151,42 +152,59 @@ impl TemplateManager
             }
         }
 
-        // Merge FileTracker entries into managed files for the complete list.
-        // Only include files that exist on disk.
-        let all_tracked = file_tracker.get_workspace_entries(&current_dir);
-        for (path, _) in all_tracked
+        if verbose == true
         {
-            if path.exists() == true
+            let mut managed_files: Vec<PathBuf> = Vec::new();
+
+            // Collect agent files from BoM
+            if config_file.exists() == true &&
+                let Ok(bom) = BillOfMaterials::from_config(&config_file)
             {
-                managed_files.push(path);
+                for agent_name in bom.get_agent_names()
+                {
+                    if let Some(files) = bom.get_agent_files(&agent_name)
+                    {
+                        managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
+                    }
+                }
             }
-        }
 
-        if agents_md_path.exists() == true
-        {
-            managed_files.push(agents_md_path);
-        }
-
-        println!();
-
-        // List all managed files
-        managed_files.sort();
-        managed_files.dedup();
-
-        if managed_files.is_empty() == false
-        {
-            println!("{}", "Managed Files:".bold());
-            for file in &managed_files
+            // Merge FileTracker entries for the complete list.
+            // Only include files that exist on disk.
+            let all_tracked = file_tracker.get_workspace_entries(&current_dir);
+            for (path, _) in all_tracked
             {
-                let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
-                println!("  • {}", display_path.display().to_string().yellow());
+                if path.exists() == true
+                {
+                    managed_files.push(path);
+                }
             }
-        }
-        else
-        {
-            println!("{}", "Managed Files:".bold());
-            println!("  {} No vibe-cop files found in current directory", "○".yellow());
-            println!("  {} Run 'vibe-cop install --lang <lang> --agent <agent>' to set up", "→".blue());
+
+            if agents_md_path.exists() == true
+            {
+                managed_files.push(agents_md_path);
+            }
+
+            println!();
+
+            managed_files.sort();
+            managed_files.dedup();
+
+            if managed_files.is_empty() == false
+            {
+                println!("{}", "Managed Files:".bold());
+                for file in &managed_files
+                {
+                    let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
+                    println!("  • {}", display_path.display().to_string().yellow());
+                }
+            }
+            else
+            {
+                println!("{}", "Managed Files:".bold());
+                println!("  {} No vibe-cop files found in current directory", "○".yellow());
+                println!("  {} Run 'vibe-cop install --lang <lang> --agent <agent>' to set up", "→".blue());
+            }
         }
 
         Ok(())
