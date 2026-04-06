@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-02 (v11.9.0)
+**Last updated:** 2026-04-03 (v11.9.0)
 
 <!-- {mission} -->
 
@@ -796,6 +796,16 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-03 (templates-to-skills migration)
+
+- Converted all coding-convention files to skills to reduce AGENTS.md context pressure
+- Created `templates/v4/skills/` with 10 skill directories: `rust-coding-conventions`, `c-coding-conventions`, `c++-coding-conventions`, `swift-coding-conventions`, `rust-build-commands`, `cmake-build-commands`, `swift-build-commands`, `make-build-commands`, `git-workflow`, `semantic-versioning`
+- Removed all `$instructions` entries for coding-conventions and build-commands from `templates.yml`; replaced with `skills:` entries on their respective languages and shared groups
+- For `git-workflow` and `semantic-versioning` (Tier 3): kept slim anchor fragments (`git-workflow-summary.md`, `semantic-versioning-summary.md`) as `$instructions`; added full-detail skills to top-level `skills:` section
+- Added `make-build-commands` skill to top-level `skills:` section (was not previously in templates.yml)
+- AGENTS.md template now receives no language convention blocks; agents load conventions on demand via the skill system
+- Context window savings: ~81 KB from coding conventions alone removed from AGENTS.md per install
 
 ### 2026-04-02 (v11.9.0, language-to-language skill propagation)
 
