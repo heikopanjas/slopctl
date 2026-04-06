@@ -441,9 +441,9 @@ impl<'a> TemplateEngine<'a>
             return Ok(());
         }
 
-        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker)?;
+        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options, &workspace)?;
 
         match copy_result
         {
@@ -597,7 +597,9 @@ impl<'a> TemplateEngine<'a>
     /// # Errors
     ///
     /// Returns an error if file operations fail
-    fn handle_main_template(&self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker) -> Result<()>
+    fn handle_main_template(
+        &self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker, workspace: &Path
+    ) -> Result<()>
     {
         if skip_agents_md && options.force == false
         {
@@ -622,7 +624,7 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string());
+        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string(), workspace);
 
         Ok(())
     }
@@ -649,7 +651,7 @@ impl<'a> TemplateEngine<'a>
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
+        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions, workspace: &Path
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
@@ -747,7 +749,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string());
+                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string(), workspace);
             }
         }
 
@@ -916,7 +918,7 @@ impl<'a> TemplateEngine<'a>
 
         println!("{} Copying skill files", "→".blue());
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options, &workspace)?;
 
         match copy_result
         {
