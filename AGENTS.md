@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v12.2.0)
+**Last updated:** 2026-04-06 (v12.2.1)
 
 <!-- {mission} -->
 
@@ -796,6 +796,16 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v12.2.1, filesystem skill detection in list)
+
+- Enhanced `list` (workspace mode) to discover installed skills by scanning agent skill directories on disk
+- Previously relied solely on FileTracker, missing manually placed or externally installed skills
+- Uses `agent_defaults::get_all_skill_search_dirs` to find all skill directories for installed agents + cross-client dir
+- Enumerates subdirectories in each skill dir; merges with FileTracker entries as fallback
+- Added "No skills installed" message when no skills found (consistent with agents/language sections)
+- Fixed `continue` guard in skill detection loop to use combined conditions per coding conventions
+- Version bump: 12.2.0 to 12.2.1 (PATCH - improved skill detection)
 
 ### 2026-04-06 (v12.2.0, agent directories)
 

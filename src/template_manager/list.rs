@@ -1,12 +1,12 @@
 //! Template list command
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Result,
+    Result, agent_defaults,
     bom::{self, BillOfMaterials},
     file_tracker::FileTracker,
     template_engine
@@ -20,7 +20,7 @@ impl TemplateManager
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
-    /// - Installed skills (from FileTracker, covers all sources)
+    /// - Installed skills (filesystem scan of agent skill dirs + FileTracker fallback)
     /// - All vibe-cop managed files in current directory (verbose only)
     ///
     /// With `global == true`, shows the available template catalog:
@@ -148,31 +148,50 @@ impl TemplateManager
             println!("  {} No language installed", "○".yellow());
         }
 
-        // Detect installed skills via FileTracker (covers template, top-level, and ad-hoc).
-        // Only count paths that actually exist on disk to avoid phantom skills from stale entries.
-        let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+        // Detect installed skills by scanning agent skill directories on disk,
+        // then merge in FileTracker entries for skills outside standard directories.
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
 
-        if skill_entries.is_empty() == false
+        let mut skill_names: BTreeSet<String> = BTreeSet::new();
+
+        for dir in &skill_search_dirs
         {
-            let mut skill_names: BTreeSet<String> = BTreeSet::new();
-            for (path, _) in &skill_entries
+            if dir.exists() == true &&
+                let Ok(entries) = fs::read_dir(dir)
             {
-                if path.exists() == false
+                for entry in entries.flatten()
                 {
-                    continue;
-                }
-                if let Some(name) = Self::extract_skill_name_from_path(path)
-                {
-                    skill_names.insert(name);
+                    if entry.path().is_dir() == true &&
+                        let Some(name) = entry.file_name().to_str()
+                    {
+                        skill_names.insert(name.to_string());
+                    }
                 }
             }
+        }
 
-            let count = skill_names.len();
-            println!("  {} Installed skills: {}", "✓".green(), count.to_string().green());
+        let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+        for (path, _) in &skill_entries
+        {
+            if path.exists() == true &&
+                let Some(name) = Self::extract_skill_name_from_path(path)
+            {
+                skill_names.insert(name);
+            }
+        }
+
+        if skill_names.is_empty() == false
+        {
+            println!("  {} Installed skills: {}", "✓".green(), skill_names.len().to_string().green());
             for name in &skill_names
             {
                 println!("    {} {}", "•".blue(), name.yellow());
             }
+        }
+        else
+        {
+            println!("  {} No skills installed", "○".yellow());
         }
 
         if verbose == true
