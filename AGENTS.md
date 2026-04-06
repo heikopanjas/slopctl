@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v12.1.0)
+**Last updated:** 2026-04-06 (v12.1.1)
 
 <!-- {mission} -->
 
@@ -796,6 +796,18 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-06 (v12.1.1, fix workspace scoping in FileTracker)
+
+- Fixed `list`, `purge`, `remove`, and `doctor` commands matching files from other workspaces when run from a parent directory (e.g. home)
+- Root cause: `get_workspace_entries` used `Path::starts_with` prefix matching, so `/Users/me` matched entries from `/Users/me/projects/app/`
+- Added `workspace: Option<String>` field to `FileMetadata` to record the exact workspace root at install time
+- Changed `record_installation()` to accept a `workspace: &Path` parameter and store its canonicalized path
+- Changed `get_workspace_entries()`, `get_workspace_entries_by_category()`, and `get_installed_language_for_workspace()` to exact-match on `meta.workspace` instead of `starts_with`
+- Legacy entries without workspace field (`None`) are silently skipped; they get a workspace assigned on next `install` or `update`
+- `workspace` field uses `serde(default, skip_serializing_if)` for backwards-compatible JSON serialization
+- Added 2 new tests: parent dir exclusion and legacy entry handling
+- Version bump: 12.1.0 to 12.1.1 (PATCH - bug fix)
 
 ### 2026-04-06 (v12.1.0, merge list and status commands)
 

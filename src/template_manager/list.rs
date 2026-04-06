@@ -69,11 +69,13 @@ impl TemplateManager
 
                 if config.agents.is_empty() == false
                 {
-                    let agents: Vec<&String> = config.agents.keys().collect();
+                    let mut agents: Vec<&String> = config.agents.keys().collect();
+                    agents.sort();
                     println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
                 }
 
-                let languages: Vec<&String> = config.languages.keys().collect();
+                let mut languages: Vec<&String> = config.languages.keys().collect();
+                languages.sort();
                 if languages.is_empty() == false
                 {
                     println!("  {} Available languages: {}", "→".blue(), languages.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
