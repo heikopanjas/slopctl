@@ -74,36 +74,43 @@ agents:
 shared:
   cmake:
     files:
-      - source: cmake-build-commands.md
+      - source: cmake-skills-hint.md
         target: '$instructions'
       - source: cmake-git-ignore.txt
         target: '$workspace/.gitignore'
+    skills:
+      - name: cmake-build-commands
+        source: 'skills/cmake-build-commands'
 
 # Language-specific coding standards templates
 languages:
   c:
     includes: [cmake]
     files:
-      - source: c-coding-conventions.md
+      - source: c-skills-hint.md
         target: '$instructions'
       - source: c-format-instructions.yml
         target: '$workspace/.clang-format'
       - source: c-editor-config.ini
         target: '$workspace/.editorconfig'
+    skills:
+      - name: c-coding-conventions
+        source: 'skills/c-coding-conventions'
   c++:
     includes: [cmake]
     files:
-      - source: c++-coding-conventions.md
+      - source: c++-skills-hint.md
         target: '$instructions'
       - source: c++-format-instructions.yml
         target: '$workspace/.clang-format'
       - source: c++-editor-config.ini
         target: '$workspace/.editorconfig'
+    skills:
+      - name: c++-coding-conventions
+        source: 'skills/c++-coding-conventions'
   rust:
     files:
-      - source: rust-coding-conventions.md
-        target: '$instructions'
-      - source: rust-build-commands.md
+      - source: rust-skills-hint.md
         target: '$instructions'
       - source: rust-format-instructions.toml
         target: '$workspace/.rustfmt.toml'
@@ -111,11 +118,14 @@ languages:
         target: '$workspace/.editorconfig'
       - source: rust-git-ignore.txt
         target: '$workspace/.gitignore'
+    skills:
+      - name: rust-coding-conventions
+        source: 'skills/rust-coding-conventions'
+      - name: rust-build-commands
+        source: 'skills/rust-build-commands'
   swift:
     files:
-      - source: swift-coding-conventions.md
-        target: '$instructions'
-      - source: swift-build-commands.md
+      - source: swift-skills-hint.md
         target: '$instructions'
       - source: swift-format-instructions.json
         target: '$workspace/.swift-format'
@@ -124,6 +134,10 @@ languages:
       - source: swift-git-ignore.txt
         target: '$workspace/.gitignore'
     skills:
+      - name: swift-coding-conventions
+        source: 'skills/swift-coding-conventions'
+      - name: swift-build-commands
+        source: 'skills/swift-build-commands'
       - name: swift-concurrency-pro
         source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
 
@@ -137,13 +151,13 @@ languages:
 integration:
   git:
     files:
-      - source: git-workflow-conventions.md
+      - source: git-workflow-summary.md
         target: '$instructions'
       - source: git-attributes-common.txt
         target: '$workspace/.gitattributes'
   versioning:
     files:
-      - source: semantic-versioning.md
+      - source: semantic-versioning-summary.md
         target: '$instructions'
 
 # General templates that apply to all projects
@@ -166,10 +180,10 @@ mission:
 #
 # Agent/language-specific skills use the same format under agents.<name>.skills
 # or languages.<name>.skills respectively (see V4 additions above).
-#
-# Example:
-#   skills:
-#     - name: create-rule
-#       source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
-#     - name: my-local-skill
-#       source: 'skills/my-local-skill'
+skills:
+  - name: git-workflow
+    source: 'skills/git-workflow'
+  - name: semantic-versioning
+    source: 'skills/semantic-versioning'
+  - name: make-build-commands
+    source: 'skills/make-build-commands'

@@ -1,3 +1,9 @@
+# C++ Coding Conventions
+
+Read this skill before writing, reviewing, or refactoring C++ code in this project.
+It covers RAII, naming, class structure, modern C++ features, documentation, and more.
+
+---
 
 ## C++ Coding Conventions
 
