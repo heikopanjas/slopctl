@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-06 (v12.3.1)
+**Last updated:** 2026-04-07 (v12.3.2)
 
 <!-- {mission} -->
 
@@ -796,6 +796,17 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-07 (v12.3.2, fix purge path dedup and skill discovery)
+
+- Fixed `purge` and `remove --all` attempting to delete the same file twice when it appeared in both BoM (relative path) and FileTracker (absolute path)
+- Root cause: BoM returns relative paths (e.g. `./.cursorrules`), FileTracker returns absolute paths; `sort()` + `dedup()` could not reconcile the two formats
+- BoM-sourced paths are now canonicalized to absolute paths before collection in both `purge.rs` and `remove.rs` (`--agent` and `--all` branches)
+- Added filesystem skill directory scanning to `purge` via `get_all_skill_search_dirs` + `collect_files_recursive`, matching the behavior already present in `list` (v12.2.1) and `remove --skill` (v11.6.0)
+- Previously, manually placed or untracked skills survived `purge`; they are now discovered and removed
+- Added 3 new purge tests: empty workspace dry-run, BoM/tracker deduplication, untracked skill discovery
+- Consolidated CWD_LOCK mutex from per-module statics in purge and remove tests to a single shared static in `template_manager/mod.rs`, preventing test race conditions on `set_current_dir`
+- Version bump: 12.3.1 to 12.3.2 (PATCH - bug fix)
 
 ### 2026-04-06 (v12.3.1, remove falls back to FileTracker)
 

@@ -1,16 +1,16 @@
 //! Template purge command
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Result,
+    Result, agent_defaults,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
     template_engine,
-    utils::{confirm_action, remove_file_and_cleanup_parents}
+    utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
 
 impl TemplateManager
@@ -35,7 +35,8 @@ impl TemplateManager
         let mut files_to_purge: Vec<PathBuf> = Vec::new();
         let mut agents_md_skipped = false;
 
-        // Collect agent files from BoM (template-defined)
+        // Collect agent files from BoM (template-defined), canonicalized to
+        // absolute paths so they dedup correctly against FileTracker entries.
         let config_file = self.config_dir.join("templates.yml");
         if config_file.exists() == true &&
             let Ok(bom) = BillOfMaterials::from_config(&config_file)
@@ -46,9 +47,10 @@ impl TemplateManager
                 {
                     for file in files
                     {
-                        if file.exists() == true
+                        if file.exists() == true &&
+                            let Ok(canonical) = fs::canonicalize(file)
                         {
-                            files_to_purge.push(file.clone());
+                            files_to_purge.push(canonical);
                         }
                     }
                 }
@@ -62,6 +64,26 @@ impl TemplateManager
             if path.exists() == true
             {
                 files_to_purge.push(path);
+            }
+        }
+
+        // Scan agent skill directories on disk to catch untracked/manually placed skills
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
+        for dir in &skill_search_dirs
+        {
+            if dir.exists() == true &&
+                let Ok(entries) = fs::read_dir(dir)
+            {
+                for entry in entries.flatten()
+                {
+                    if entry.path().is_dir() == true
+                    {
+                        let mut skill_files = Vec::new();
+                        let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                        files_to_purge.extend(skill_files);
+                    }
+                }
             }
         }
 
@@ -151,6 +173,98 @@ impl TemplateManager
             println!("{} Purged {} file(s) successfully", "✓".green(), purged_count);
         }
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use std::fs;
+
+    use super::TemplateManager;
+    use crate::{file_tracker::FileTracker, template_manager::CWD_LOCK};
+
+    #[test]
+    fn test_purge_dry_run_no_files() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.purge(false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_deduplicates_bom_and_tracker_paths() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Write a minimal templates.yml that declares an agent with a workspace file
+        let yaml = "version: 5\nagents:\n  cursor:\n    instructions:\n      - source: cursorrules.md\n        target: $workspace/.cursorrules\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        // Create the agent file on disk so BoM can find it
+        let agent_file = workspace.path().join(".cursorrules");
+        fs::write(&agent_file, "test")?;
+
+        // Record the same file in FileTracker (stores absolute path)
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.purge(true, false);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        // The file should have been removed exactly once (no double-removal error)
+        assert!(agent_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_discovers_untracked_skill_files() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Place a skill directory on disk without any FileTracker entry
+        let skill_dir = workspace.path().join(".agents/skills/my-skill");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# My Skill")?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.purge(true, false);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        // The untracked skill file should have been discovered and removed
+        assert!(skill_file.exists() == false);
         Ok(())
     }
 }

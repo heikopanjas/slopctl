@@ -1,6 +1,6 @@
 //! Template remove command
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use owo_colors::OwoColorize;
 
@@ -69,7 +69,7 @@ impl TemplateManager
                 {
                     if let Some(agent_files) = bom.get_agent_files(agent_name)
                     {
-                        files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                        files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).filter_map(|f| fs::canonicalize(f).ok()));
                     }
                     true
                 }
@@ -105,7 +105,8 @@ impl TemplateManager
             }
             else
             {
-                // --all: collect agent files from BoM if available
+                // --all: collect agent files from BoM if available, canonicalized
+                // to absolute paths so they dedup correctly against FileTracker entries.
                 if let Some(ref bom) = bom
                 {
                     let agent_names = bom.get_agent_names();
@@ -113,7 +114,7 @@ impl TemplateManager
                     {
                         if let Some(agent_files) = bom.get_agent_files(name)
                         {
-                            files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).cloned());
+                            files_to_remove.extend(agent_files.iter().filter(|f| f.exists()).filter_map(|f| fs::canonicalize(f).ok()));
                         }
                     }
                 }
@@ -355,13 +356,10 @@ impl TemplateManager
 #[cfg(test)]
 mod tests
 {
-    use std::{fs, path::PathBuf, sync::Mutex};
+    use std::{fs, path::PathBuf};
 
     use super::TemplateManager;
-    use crate::{bom::BillOfMaterials, file_tracker::FileTracker};
-
-    /// Serializes tests that call `std::env::set_current_dir` (process-global state)
-    static CWD_LOCK: Mutex<()> = Mutex::new(());
+    use crate::{bom::BillOfMaterials, file_tracker::FileTracker, template_manager::CWD_LOCK};
 
     #[test]
     fn test_path_belongs_to_cursor()
