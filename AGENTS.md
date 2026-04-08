@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-07 (v12.3.2)
+**Last updated:** 2026-04-09 (v12.3.3)
 
 <!-- {mission} -->
 
@@ -796,6 +796,12 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-09 (v12.3.3, clippy collapsible-if fix)
+
+- Collapsed nested `if let` into a single let-chain in `template_engine.rs` update() agent config block
+- Resolves clippy `collapsible_if` warning using idiomatic Rust 2024 let-chain syntax
+- Version bump: 12.3.2 to 12.3.3 (PATCH - lint fix)
 
 ### 2026-04-07 (v12.3.2, fix purge path dedup and skill discovery)
 

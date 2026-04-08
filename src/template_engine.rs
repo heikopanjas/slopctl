@@ -374,34 +374,32 @@ impl<'a> TemplateEngine<'a>
 
         let mut directories_to_create: Vec<PathBuf> = Vec::new();
 
-        if let Some(agent_name) = options.agent
+        if let Some(agent_name) = options.agent &&
+            let Some(agent_config) = config.agents.get(agent_name)
         {
-            if let Some(agent_config) = config.agents.get(agent_name)
+            for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
             {
-                for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
+                let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
                 {
-                    let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
+                    | Ok(p) => p,
+                    | Err(e) =>
                     {
-                        | Ok(p) => p,
-                        | Err(e) =>
-                        {
-                            println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
-                            continue;
-                        }
-                    };
-
-                    if source_path.exists()
-                    {
-                        let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                        files_to_copy.push((source_path, target_path));
+                        println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
+                        continue;
                     }
-                }
+                };
 
-                for dir_entry in &agent_config.directories
+                if source_path.exists()
                 {
-                    let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
-                    directories_to_create.push(dir_path);
+                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
                 }
+            }
+
+            for dir_entry in &agent_config.directories
+            {
+                let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
+                directories_to_create.push(dir_path);
             }
         }
 
