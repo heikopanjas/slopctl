@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-09 (v12.3.3)
+**Last updated:** 2026-04-09 (v12.3.4)
 
 <!-- {mission} -->
 
@@ -796,6 +796,18 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-09 (v12.3.4, fix skill directories not downloaded during update)
+
+- Fixed `download_templates_from_url` not downloading skill directories from the remote repository
+- Root cause: download loops processed `files` entries for all sections but never iterated over `skills` entries
+- Local-path skills (e.g. `skills/rust-coding-conventions`) were missing from the global template cache after `update`, causing "Skill source not found" errors at install time
+- Added `collect_local_skill_sources()`: gathers deduplicated local-path skill sources from all config sections (top-level, agents, languages, shared); skips URL-based skills (fetched at install time)
+- Added `download_skill_directory()`: uses GitHub Contents API to download a skill directory tree into the global cache, preserving directory structure
+- Added `download_skill_entries()`: recursive helper for downloading nested skill directory contents
+- Added `Default` derive to `AgentConfig`, `LanguageConfig`, `SharedConfig` for test ergonomics
+- Added 5 unit tests: empty config, top-level skills, URL filtering, deduplication, all-sections collection
+- Version bump: 12.3.3 to 12.3.4 (PATCH - bug fix)
 
 ### 2026-04-09 (v12.3.3, clippy collapsible-if fix)
 

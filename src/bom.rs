@@ -26,7 +26,7 @@ pub struct DirectoryEntry
 }
 
 /// Agent configuration with instructions, prompts, skills, and directories
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AgentConfig
 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -46,7 +46,7 @@ pub struct AgentConfig
 /// Skills are installed to the cross-client `.agents/skills/` directory when
 /// the language is selected. Skills from included `shared` groups are propagated;
 /// skills from included *languages* are NOT propagated.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LanguageConfig
 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -62,7 +62,7 @@ pub struct LanguageConfig
 /// Shared groups are referenced by languages via `includes`. When a language
 /// includes a shared group, the group's files are prepended and its skills
 /// are propagated to the language's resolved skill list.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SharedConfig
 {
     #[serde(default)]
