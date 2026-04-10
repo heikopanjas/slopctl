@@ -3,7 +3,7 @@
 //! Supports OpenAI, Anthropic, Ollama, and Mistral as backend providers.
 //! API keys are read from environment variables; Ollama requires no key.
 
-use std::env;
+use std::{env, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -174,7 +174,7 @@ impl LlmClient
 
         let model_name = model.unwrap_or(provider.default_model()).to_string();
 
-        let http = reqwest::blocking::Client::builder().user_agent("vibe-cop").build()?;
+        let http = reqwest::blocking::Client::builder().user_agent("vibe-cop").connect_timeout(Duration::from_secs(30)).timeout(Duration::from_secs(300)).build()?;
 
         Ok(Self { provider, model: model_name, api_key, http })
     }

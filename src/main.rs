@@ -166,7 +166,11 @@ enum Commands
         #[arg(short, long)]
         model: Option<String>,
 
-        /// Preview changes without calling the API
+        /// Write merged output to .merged sidecar files instead of replacing originals
+        #[arg(long, default_value = "false")]
+        preview: bool,
+
+        /// Show merge candidates without calling the LLM
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
@@ -547,7 +551,7 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { provider, model, dry_run, list_models } =>
+        | Commands::Merge { provider, model, preview, dry_run, list_models } =>
         {
             if list_models == true
             {
@@ -556,12 +560,12 @@ fn main()
             else if dry_run == true
             {
                 println!("{} Dry run: previewing merge candidates", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run)
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview)
             }
             else
             {
                 println!("{} AI-assisted merge of customized files", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run)
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview)
             }
         }
         | Commands::Completions { shell } =>

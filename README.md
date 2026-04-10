@@ -839,23 +839,27 @@ vibe-cop completions fish > ~/.config/fish/completions/vibe-cop.fish
 vibe-cop completions powershell > vibe-cop.ps1
 ```
 
-### `merge` - AI-Assisted Merge (Not Yet Implemented)
+### `merge` - AI-Assisted Merge
 
-Merge customized workspace files with updated templates using AI assistance.
+Merge customized workspace files with updated templates using AI assistance. By default, merged content replaces the original file directly. Use `--preview` to write `.merged` sidecar files for manual review instead.
 
 **Usage:**
 
 ```bash
-vibe-cop merge [--provider <provider>] [--model <model>] [--dry-run]
+vibe-cop merge --provider anthropic
+vibe-cop merge --provider openai --model gpt-4o
+vibe-cop merge --provider anthropic --preview
+vibe-cop merge --provider anthropic --dry-run
+vibe-cop merge --provider anthropic --list-models
 ```
 
 **Options:**
 
 - `--provider` / `-p` - LLM provider (openai, anthropic, ollama, mistral)
 - `--model` / `-m` - Model to use for merging
-- `--dry-run` / `-n` - Preview what would be merged without calling the API
-
-**Status:** This command is reserved for a future release. Running it currently prints a notice that the feature is not yet implemented.
+- `--preview` - Write `.merged` sidecar files instead of replacing originals
+- `--dry-run` / `-n` - Show merge candidates without calling the LLM
+- `--list-models` / `-L` - List available models from the selected provider
 
 ### `config` - Manage Configuration
 
