@@ -9,9 +9,10 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Config, Result,
+    Config, Result, agent_defaults,
     bom::{self, TemplateConfig},
     file_tracker::{FileStatus, FileTracker},
+    github,
     llm::{ChatMessage, LlmClient, Provider},
     template_engine::{self, TemplateEngine}
 };
@@ -238,18 +239,16 @@ impl TemplateManager
 
     /// Finds workspace files that need AI-assisted merging
     ///
-    /// A file is a merge candidate when:
-    /// 1. It is tracked by FileTracker for this workspace
-    /// 2. The user has modified it since installation (SHA changed)
-    /// 3. The corresponding template source has also changed
-    /// 4. It is not a "skill" category (skills are managed independently)
+    /// A file is a merge candidate when either:
+    /// - It is tracked, user-modified, AND the template source has also changed
+    /// - It exists on disk but is untracked, and its content differs from the
+    ///   current template (e.g. AGENTS.md was customized before tracking began,
+    ///   or was skipped by init because it was already customized)
     fn find_merge_candidates(&self) -> Result<Vec<MergeCandidate>>
     {
         let workspace = std::env::current_dir()?;
         let tracker = FileTracker::new(&self.config_dir)?;
         let entries = tracker.get_workspace_entries(&workspace);
-
-        require!(entries.is_empty() == false, Ok(Vec::new()));
 
         let config = template_engine::load_template_config(&self.config_dir)?;
         let engine = TemplateEngine::new(&self.config_dir);
@@ -258,13 +257,12 @@ impl TemplateManager
         let target_source_map = build_target_source_map(&engine, &config, &workspace, &userprofile, &tracker)?;
 
         let mut candidates = Vec::new();
+        let mut seen_paths = std::collections::HashSet::new();
 
+        // Tracked files: both user AND template must have changed since install
         for (path, metadata) in &entries
         {
-            if metadata.category == "skill"
-            {
-                continue;
-            }
+            seen_paths.insert(path.clone());
 
             if tracker.check_modification(path)? != FileStatus::Modified
             {
@@ -275,12 +273,29 @@ impl TemplateManager
             {
                 let template_sha = sha256_string(template_content);
 
-                // Both user AND template changed since install
                 if template_sha != metadata.original_sha
                 {
                     let display = path.strip_prefix(&workspace).unwrap_or(path).display().to_string();
                     candidates.push(MergeCandidate { workspace_path: path.clone(), template_content: template_content.clone(), display_name: display });
                 }
+            }
+        }
+
+        // Untracked files: exist on disk and differ from current template
+        for (target_path, template_content) in &target_source_map
+        {
+            if seen_paths.contains(target_path) || target_path.exists() == false
+            {
+                continue;
+            }
+
+            let current_sha = FileTracker::calculate_sha256(target_path)?;
+            let template_sha = sha256_string(template_content);
+
+            if current_sha != template_sha
+            {
+                let display = target_path.strip_prefix(&workspace).unwrap_or(target_path).display().to_string();
+                candidates.push(MergeCandidate { workspace_path: target_path.clone(), template_content: template_content.clone(), display_name: display });
             }
         }
 
@@ -365,6 +380,43 @@ fn build_target_source_map(
         }
     }
 
+    // Skill files: walk local skill sources and map each file to its installed target
+    let detected_agents = agent_defaults::detect_all_installed_agents(workspace);
+    let cross_client_raw = agent_defaults::CROSS_CLIENT_SKILL_DIR;
+
+    // Top-level skills → each detected agent's skill dir + cross-client fallback
+    if detected_agents.is_empty() == true
+    {
+        insert_skill_sources(engine, &config.skills, cross_client_raw, workspace, userprofile, &mut map);
+    }
+    else
+    {
+        for agent_name in &detected_agents
+        {
+            if let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
+            {
+                insert_skill_sources(engine, &config.skills, skill_dir, workspace, userprofile, &mut map);
+            }
+        }
+    }
+
+    // Agent-specific skills for each detected agent
+    for agent_name in &detected_agents
+    {
+        if let Some(agent_config) = config.agents.get(agent_name.as_str()) &&
+            let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
+        {
+            insert_skill_sources(engine, &agent_config.skills, skill_dir, workspace, userprofile, &mut map);
+        }
+    }
+
+    // Language skills → cross-client dir
+    if let Some(ref lang) = installed_lang &&
+        let Ok(lang_skills) = bom::resolve_language_skills(lang, config)
+    {
+        insert_skill_sources(engine, &lang_skills, cross_client_raw, workspace, userprofile, &mut map);
+    }
+
     Ok(map)
 }
 
@@ -380,6 +432,64 @@ fn insert_source_content(
         let Ok(content) = fs::read_to_string(&source_path)
     {
         map.insert(normalize_path(&target_path), content);
+    }
+}
+
+/// Walks local skill source directories and inserts each file into the target→content map
+///
+/// URL-based skill sources are skipped (they are fetched at install time, not cached locally).
+fn insert_skill_sources(
+    engine: &TemplateEngine, skills: &[bom::SkillDefinition], skill_dir_placeholder: &str, workspace: &Path, userprofile: &Path,
+    map: &mut std::collections::HashMap<PathBuf, String>
+)
+{
+    let skill_base = agent_defaults::resolve_placeholder_path(skill_dir_placeholder, workspace, userprofile);
+
+    for skill in skills
+    {
+        if github::is_url(&skill.source) == true
+        {
+            continue;
+        }
+
+        let source_dir = engine.config_dir().join(&skill.source);
+        if source_dir.is_dir() == false
+        {
+            continue;
+        }
+
+        let target_base = skill_base.join(&skill.name);
+        insert_skill_dir_recursive(&source_dir, &target_base, map);
+    }
+}
+
+/// Recursively reads files from a skill source directory and inserts them into the map
+fn insert_skill_dir_recursive(source_dir: &Path, target_base: &Path, map: &mut std::collections::HashMap<PathBuf, String>)
+{
+    let Ok(entries) = fs::read_dir(source_dir)
+    else
+    {
+        return;
+    };
+
+    for entry in entries.flatten()
+    {
+        let path = entry.path();
+
+        if path.is_dir() == true
+        {
+            if let Some(dir_name) = path.file_name()
+            {
+                insert_skill_dir_recursive(&path, &target_base.join(dir_name), map);
+            }
+        }
+        else if path.is_file() == true &&
+            let Some(filename) = path.file_name() &&
+            let Ok(content) = fs::read_to_string(&path)
+        {
+            let target_path = target_base.join(filename);
+            map.insert(normalize_path(&target_path), content);
+        }
     }
 }
 
@@ -603,6 +713,92 @@ mod tests
         let result = generate_fresh_main(&source, &engine, &config, None)?;
         assert!(result.contains(marker) == false);
         assert!(result.contains("# Title") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_skill_dir_recursive_maps_files() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let source_dir = dir.path().join("skills/my-skill");
+        fs::create_dir_all(&source_dir)?;
+        fs::write(source_dir.join("SKILL.md"), "# My Skill")?;
+        fs::write(source_dir.join("extra.md"), "Extra content")?;
+
+        let target_base = dir.path().join("workspace/.cursor/skills/my-skill");
+        fs::create_dir_all(&target_base)?;
+
+        let mut map = std::collections::HashMap::new();
+        insert_skill_dir_recursive(&source_dir, &target_base, &mut map);
+
+        assert_eq!(map.len(), 2);
+        let skill_md = normalize_path(&target_base.join("SKILL.md"));
+        let extra_md = normalize_path(&target_base.join("extra.md"));
+        assert_eq!(map.get(&skill_md).map(|s| s.as_str()), Some("# My Skill"));
+        assert_eq!(map.get(&extra_md).map(|s| s.as_str()), Some("Extra content"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_skill_dir_recursive_handles_subdirs() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let source_dir = dir.path().join("skills/my-skill");
+        let sub_dir = source_dir.join("scripts");
+        fs::create_dir_all(&sub_dir)?;
+        fs::write(source_dir.join("SKILL.md"), "# Skill")?;
+        fs::write(sub_dir.join("helper.sh"), "#!/bin/bash")?;
+
+        let target_base = dir.path().join("workspace/.agents/skills/my-skill");
+        fs::create_dir_all(target_base.join("scripts"))?;
+
+        let mut map = std::collections::HashMap::new();
+        insert_skill_dir_recursive(&source_dir, &target_base, &mut map);
+
+        assert_eq!(map.len(), 2);
+        let helper = normalize_path(&target_base.join("scripts/helper.sh"));
+        assert_eq!(map.get(&helper).map(|s| s.as_str()), Some("#!/bin/bash"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_insert_skill_sources_skips_urls()
+    {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let engine = TemplateEngine::new(dir.path());
+        let workspace = dir.path().join("workspace");
+        let userprofile = dir.path().join("home");
+
+        let skills = vec![bom::SkillDefinition { name: "remote-skill".into(), source: "https://github.com/user/repo".into() }];
+
+        let mut map = std::collections::HashMap::new();
+        insert_skill_sources(&engine, &skills, agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile, &mut map);
+
+        assert!(map.is_empty() == true);
+    }
+
+    #[test]
+    fn test_insert_skill_sources_includes_local_skills() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let skill_dir = dir.path().join("skills/git-workflow");
+        fs::create_dir_all(&skill_dir)?;
+        fs::write(skill_dir.join("SKILL.md"), "# Git Workflow")?;
+
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace)?;
+        let engine = TemplateEngine::new(dir.path());
+        let userprofile = dir.path().join("home");
+
+        let skills = vec![bom::SkillDefinition { name: "git-workflow".into(), source: "skills/git-workflow".into() }];
+
+        let mut map = std::collections::HashMap::new();
+        insert_skill_sources(&engine, &skills, agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile, &mut map);
+
+        assert_eq!(map.len(), 1);
+        let expected_target = workspace.join(".agents/skills/git-workflow/SKILL.md");
+        let key = normalize_path(&expected_target);
+        assert_eq!(map.get(&key).map(|s| s.as_str()), Some("# Git Workflow"));
         Ok(())
     }
 

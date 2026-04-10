@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.2.1)
+**Last updated:** 2026-04-10 (v13.2.2)
 
 <!-- {mission} -->
 
@@ -799,6 +799,21 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.2.2, fix merge command ignoring skills)
+
+- Fixed `merge` command not detecting changes in skill files (e.g. git-workflow)
+- Root cause: `find_merge_candidates()` explicitly skipped `category == "skill"` entries, and `build_target_source_map()` never included skill files
+- Removed skill exclusion from `find_merge_candidates()`; skills are now treated like any other tracked file
+- Added skill file mapping to `build_target_source_map()`: walks local skill source directories for top-level, agent, and language skills and maps each file to its installed workspace target
+- Uses `detect_all_installed_agents()` to cover multi-agent workspaces; top-level skills mapped to each agent's skill dir, falling back to cross-client dir when no agents detected
+- Added `insert_skill_sources()` helper: resolves skill base dir from placeholder, iterates skill definitions, skips URL-based sources (not cached locally)
+- Added `insert_skill_dir_recursive()` helper: recursively reads skill source directories and inserts file content into the target-source map
+- Added 4 new tests: recursive dir mapping, subdirectory handling, URL skip, local skill inclusion
+- Fixed merge ignoring untracked files (e.g. AGENTS.md customized before tracking, or skipped by init); merge now also checks files from the target-source map that exist on disk but are not in the FileTracker
+- For untracked files, merge compares current file SHA against template SHA directly (no original_sha needed)
+- Known limitation: ad-hoc CLI skills (`--skill user/repo`) have no template source in templates.yml, so they cannot be merge candidates
+- Version bump: 13.2.1 to 13.2.2 (PATCH - bug fix)
 
 ### 2026-04-10 (v13.2.1, config CLI option rename)
 
