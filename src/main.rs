@@ -69,15 +69,23 @@ enum Commands
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
-    /// Update global templates from source
-    Update
+    /// Manage global template catalog
+    Templates
     {
+        /// Download or update global templates from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show available agents, languages, and skills
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
         /// Path or URL to download/copy templates from
-        #[arg(short, long)]
+        #[arg(short, long, requires = "update")]
         from: Option<String>,
 
         /// Preview changes without applying them
-        #[arg(short = 'n', long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
     /// Purge all vibe-cop files from project
@@ -140,14 +148,10 @@ enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// List workspace status or available templates
-    List
+    /// Show workspace status
+    Status
     {
-        /// Show available agents, languages, and skills from global templates
-        #[arg(short, long, default_value = "false")]
-        global: bool,
-
-        /// Show managed file list (workspace mode only)
+        /// Show managed file list
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
@@ -455,34 +459,63 @@ fn main()
                 manager.update(&options)
             }
         }
-        | Commands::Update { from, dry_run } =>
+        | Commands::Templates { update, list, from, dry_run } =>
         {
-            let (source, is_configured, fallback) = resolve_source(from);
-
-            if dry_run == true
+            if update == false && list == false
             {
-                if is_configured == true
+                eprintln!("{} Must specify --update or --list", "✗".red());
+                eprintln!("{} Examples: vibe-cop templates --update", "→".blue());
+                eprintln!("{}          vibe-cop templates --list", "→".blue());
+                eprintln!("{}          vibe-cop templates --update --list", "→".blue());
+                std::process::exit(1);
+            }
+
+            let update_result = if update == true
+            {
+                let (source, is_configured, fallback) = resolve_source(from);
+
+                if dry_run == true
                 {
-                    println!("{} Using configured source", "→".blue());
+                    if is_configured == true
+                    {
+                        println!("{} Using configured source", "→".blue());
+                    }
+                    println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
+                    if let Some(ref fallback_url) = fallback
+                    {
+                        println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    }
+                    println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
+                    println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                    Ok(())
                 }
-                println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
-                if let Some(ref fallback_url) = fallback
+                else
                 {
-                    println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    if is_configured == true
+                    {
+                        println!("{} Using configured source", "→".blue());
+                    }
+                    println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+
+                    download_with_fallback(&manager, &source, fallback)
                 }
-                println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
-                println!("\n{} Dry run complete. No files were modified.", "✓".green());
-                Ok(())
             }
             else
             {
-                if is_configured == true
-                {
-                    println!("{} Using configured source", "→".blue());
-                }
-                println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+                Ok(())
+            };
 
-                download_with_fallback(&manager, &source, fallback)
+            if let Err(e) = update_result
+            {
+                Err(e)
+            }
+            else if list == true
+            {
+                manager.list_global()
+            }
+            else
+            {
+                Ok(())
             }
         }
         | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
@@ -508,7 +541,7 @@ fn main()
             Ok(())
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
-        | Commands::List { global, verbose } => manager.list(global, verbose),
+        | Commands::Status { verbose } => manager.status(verbose),
         | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
     };
 
