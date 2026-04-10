@@ -405,8 +405,7 @@ impl LlmClient
 
         let json: serde_json::Value = response.json()?;
 
-        let content =
-            json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))?;
+        let content = json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))?;
 
         let input_tokens = json["usage"]["input_tokens"].as_u64();
         let output_tokens = json["usage"]["output_tokens"].as_u64();
