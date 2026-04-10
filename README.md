@@ -864,24 +864,24 @@ Manage persistent configuration settings using Git-style dotted keys.
 **Usage:**
 
 ```bash
-vibe-cop config <key> <value>    # Set a configuration value
-vibe-cop config <key>            # Get a configuration value
-vibe-cop config --list           # List all configuration values
-vibe-cop config --unset <key>    # Remove a configuration value
+vibe-cop config --add <key> <value>  # Set a configuration value
+vibe-cop config <key>                # Get a configuration value
+vibe-cop config --list               # List all configuration values
+vibe-cop config --remove <key>       # Remove a configuration value
 ```
 
 **Options:**
 
-- `<key>` - Configuration key (e.g., source.url)
-- `<value>` - Value to set (omit to get current value)
-- `--list` - List all configuration values
-- `--unset <key>` - Remove a configuration key
+- `<key>` - Configuration key to get (e.g., source.url)
+- `--add <key> <value>` (`-a`) - Set a configuration value
+- `--list` (`-l`) - List all configuration values
+- `--remove <key>` (`-r`) - Remove a configuration key
 
 **Examples:**
 
 ```bash
 # Set custom template source
-vibe-cop config source.url https://github.com/myteam/templates/tree/main/templates
+vibe-cop config --add source.url https://github.com/myteam/templates/tree/main/templates
 
 # Get current source URL
 vibe-cop config source.url
@@ -890,10 +890,10 @@ vibe-cop config source.url
 vibe-cop config --list
 
 # Remove custom source (revert to default)
-vibe-cop config --unset source.url
+vibe-cop config --remove source.url
 
 # Set fallback source for resilience
-vibe-cop config source.fallback https://github.com/heikopanjas/vibe-cop/tree/develop/templates
+vibe-cop config --add source.fallback https://github.com/heikopanjas/vibe-cop/tree/develop/templates
 ```
 
 **Valid Configuration Keys:**

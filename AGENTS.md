@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.2.0)
+**Last updated:** 2026-04-10 (v13.2.1)
 
 <!-- {mission} -->
 
@@ -799,6 +799,14 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.2.1, config CLI option rename)
+
+- Replaced positional `<key> <value>` set syntax with `--add <key> <value>` (`-a`) flag
+- Renamed `--unset` (`-u`) to `--remove` (`-r`) for consistency
+- Updated `handle_config` function, CLI struct, dispatch, and inline help text
+- Updated README.md config command documentation and examples
+- Version bump: 13.2.0 to 13.2.1 (PATCH - CLI option rename)
 
 ### 2026-04-10 (v13.2.0, merge --list-models)
 

@@ -177,19 +177,20 @@ enum Commands
     /// Manage configuration
     Config
     {
-        /// Configuration key (e.g., source.url)
+        /// Configuration key to get (e.g., source.url)
         key: Option<String>,
 
-        /// Value to set (omit to get current value)
-        value: Option<String>,
+        /// Set a configuration value: --add <key> <value>
+        #[arg(short, long, num_args = 2, value_names = ["KEY", "VALUE"])]
+        add: Vec<String>,
 
         /// List all configuration values
         #[arg(short, long, default_value = "false")]
         list: bool,
 
-        /// Unset a configuration key
+        /// Remove a configuration key
         #[arg(short, long)]
-        unset: Option<String>
+        remove: Option<String>
     }
 }
 
@@ -288,7 +289,7 @@ fn resolve_mission_content(value: &str) -> Result<String>
 }
 
 /// Handle config command operations
-fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: Option<String>) -> Result<()>
+fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Option<String>) -> Result<()>
 {
     // Handle --list flag
     if list == true
@@ -299,7 +300,7 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         if values.is_empty() == true
         {
             println!("{} No configuration values set", "→".blue());
-            println!("{} Use 'vibe-cop config <key> <value>' to set a value", "→".blue());
+            println!("{} Use 'vibe-cop config --add <key> <value>' to set a value", "→".blue());
             println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
         }
         else
@@ -313,61 +314,54 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         return Ok(());
     }
 
-    // Handle --unset flag
-    if let Some(unset_key) = unset
+    // Handle --add flag
+    if add.len() == 2
     {
         let mut config = Config::load()?;
-        config.unset(&unset_key)?;
+        config.set(&add[0], &add[1])?;
         config.save()?;
-        println!("{} Unset {}", "✓".green(), unset_key.yellow());
+        println!("{} Set {} = {}", "✓".green(), add[0].yellow(), add[1].green());
         return Ok(());
     }
 
-    // Handle key/value operations
-    match (key, value)
+    // Handle --remove flag
+    if let Some(remove_key) = remove
     {
-        | (Some(k), Some(v)) =>
+        let mut config = Config::load()?;
+        config.unset(&remove_key)?;
+        config.save()?;
+        println!("{} Removed {}", "✓".green(), remove_key.yellow());
+        return Ok(());
+    }
+
+    // Handle get by key
+    if let Some(k) = key
+    {
+        let config = Config::load()?;
+        if let Some(v) = config.get(&k)
         {
-            // Set value
-            let mut config = Config::load()?;
-            config.set(&k, &v)?;
-            config.save()?;
-            println!("{} Set {} = {}", "✓".green(), k.yellow(), v.green());
+            println!("{}", v);
         }
-        | (Some(k), None) =>
+        else
         {
-            // Get value
-            let config = Config::load()?;
-            if let Some(v) = config.get(&k)
-            {
-                println!("{}", v);
-            }
-            else
-            {
-                println!("{} Key '{}' is not set", "→".blue(), k.yellow());
-            }
+            println!("{} Key '{}' is not set", "→".blue(), k.yellow());
         }
-        | (None, Some(_)) =>
-        {
-            return Err(anyhow::anyhow!("Must specify a key when setting a value"));
-        }
-        | (None, None) =>
-        {
-            // Show help
-            println!("{}", "vibe-cop config".bold());
-            println!();
-            println!("Usage:");
-            println!("  vibe-cop config <key> <value>  Set a configuration value");
-            println!("  vibe-cop config <key>          Get a configuration value");
-            println!("  vibe-cop config --list         List all configuration values");
-            println!("  vibe-cop config --unset <key>  Remove a configuration value");
-            println!();
-            println!("Valid keys:");
-            for key in Config::valid_keys()
-            {
-                println!("  • {}", key.yellow());
-            }
-        }
+        return Ok(());
+    }
+
+    // No flags or args: show help
+    println!("{}", "vibe-cop config".bold());
+    println!();
+    println!("Usage:");
+    println!("  vibe-cop config --add <key> <value>  Set a configuration value");
+    println!("  vibe-cop config <key>                Get a configuration value");
+    println!("  vibe-cop config --list               List all configuration values");
+    println!("  vibe-cop config --remove <key>       Remove a configuration value");
+    println!();
+    println!("Valid keys:");
+    for key in Config::valid_keys()
+    {
+        println!("  • {}", key.yellow());
     }
     Ok(())
 }
@@ -578,7 +572,7 @@ fn main()
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
         | Commands::Status { verbose } => manager.status(verbose),
-        | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
+        | Commands::Config { key, add, list, remove } => handle_config(key, add, list, remove)
     };
 
     if let Err(e) = result
