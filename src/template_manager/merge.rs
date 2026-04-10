@@ -48,6 +48,51 @@ with updated templates. Follow these rules strictly:
 
 impl TemplateManager
 {
+    /// Lists available models from the selected LLM provider
+    ///
+    /// Resolves the provider (CLI > config > env auto-detect), queries its
+    /// models API, and prints the results. The currently configured default
+    /// model is marked in the output.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - CLI override for LLM provider name
+    /// * `model` - CLI override for model name (used only to show the active default)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if provider resolution or the API call fails
+    pub fn list_models(&self, provider: Option<&str>, model: Option<&str>) -> Result<()>
+    {
+        let (provider_name, model_name) = Self::resolve_provider_and_model(provider, model)?;
+        let provider_enum = Provider::from_name(&provider_name)?;
+        let default_model = model_name.as_deref().unwrap_or(provider_enum.default_model());
+
+        let client = LlmClient::new(provider_enum, None)?;
+        let models = client.list_models()?;
+
+        if models.is_empty() == true
+        {
+            println!("{} No models found from {}", "→".blue(), provider_name.yellow());
+            return Ok(());
+        }
+
+        println!("{}", format!("Models available from {}:", provider_name).bold());
+        for m in &models
+        {
+            if m == default_model
+            {
+                println!("  {} {}", m.green(), "(default)".dimmed());
+            }
+            else
+            {
+                println!("  {}", m);
+            }
+        }
+
+        Ok(())
+    }
+
     /// AI-assisted merge of customized workspace files with updated templates
     ///
     /// For each tracked file that the user has modified AND whose template source

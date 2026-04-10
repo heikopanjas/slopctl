@@ -95,7 +95,7 @@ impl Provider
         }
     }
 
-    /// Returns the base API endpoint URL
+    /// Returns the base API endpoint URL for chat completions
     fn endpoint(&self) -> &'static str
     {
         match self
@@ -104,6 +104,18 @@ impl Provider
             | Self::Anthropic => "https://api.anthropic.com/v1/messages",
             | Self::Ollama => "http://localhost:11434/api/chat",
             | Self::Mistral => "https://api.mistral.ai/v1/chat/completions"
+        }
+    }
+
+    /// Returns the API endpoint URL for listing available models
+    pub fn models_endpoint(&self) -> &'static str
+    {
+        match self
+        {
+            | Self::OpenAi => "https://api.openai.com/v1/models",
+            | Self::Anthropic => "https://api.anthropic.com/v1/models",
+            | Self::Ollama => "http://localhost:11434/api/tags",
+            | Self::Mistral => "https://api.mistral.ai/v1/models"
         }
     }
 }
@@ -195,6 +207,98 @@ impl LlmClient
     pub fn model_name(&self) -> &str
     {
         &self.model
+    }
+
+    /// Queries the provider's API for available models
+    ///
+    /// Returns a sorted list of model identifier strings.
+    /// Each provider has a different response format:
+    /// - OpenAI / Mistral: `data[].id`
+    /// - Anthropic: `data[].id` (with `x-api-key` auth and `anthropic-version` header)
+    /// - Ollama: `models[].name`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API call fails or the response cannot be parsed
+    pub fn list_models(&self) -> Result<Vec<String>>
+    {
+        match self.provider
+        {
+            | Provider::Anthropic => self.list_models_anthropic(),
+            | Provider::Ollama => self.list_models_ollama(),
+            | _ => self.list_models_openai_compatible()
+        }
+    }
+
+    /// Lists models via the OpenAI-compatible `/v1/models` endpoint (OpenAI, Mistral)
+    fn list_models_openai_compatible(&self) -> Result<Vec<String>>
+    {
+        let mut request = self.http.get(self.provider.models_endpoint());
+
+        if let Some(ref key) = self.api_key
+        {
+            request = request.bearer_auth(key);
+        }
+
+        let response = request.send()?;
+        let status = response.status();
+
+        if status.is_success() == false
+        {
+            let error_body = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("{} API error ({}): {}", self.provider_name(), status, error_body));
+        }
+
+        let json: serde_json::Value = response.json()?;
+        let mut models: Vec<String> =
+            json["data"].as_array().map(|arr| arr.iter().filter_map(|m| m["id"].as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+
+        models.sort();
+        Ok(models)
+    }
+
+    /// Lists models via the Anthropic `/v1/models` endpoint
+    fn list_models_anthropic(&self) -> Result<Vec<String>>
+    {
+        let key = self.api_key.as_deref().ok_or_else(|| anyhow::anyhow!("Anthropic API key not set"))?;
+
+        let response =
+            self.http.get(self.provider.models_endpoint()).query(&[("limit", "1000")]).header("x-api-key", key).header("anthropic-version", "2023-06-01").send()?;
+
+        let status = response.status();
+
+        if status.is_success() == false
+        {
+            let error_body = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, error_body));
+        }
+
+        let json: serde_json::Value = response.json()?;
+        let mut models: Vec<String> =
+            json["data"].as_array().map(|arr| arr.iter().filter_map(|m| m["id"].as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+
+        models.sort();
+        Ok(models)
+    }
+
+    /// Lists models via the Ollama `/api/tags` endpoint
+    fn list_models_ollama(&self) -> Result<Vec<String>>
+    {
+        let response = self.http.get(self.provider.models_endpoint()).send()?;
+        let status = response.status();
+
+        if status.is_success() == false
+        {
+            let error_body = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("Ollama API error ({}): {}", status, error_body));
+        }
+
+        let json: serde_json::Value = response.json()?;
+        let mut models: Vec<String> =
+            json["models"].as_array().map(|arr| arr.iter().filter_map(|m| m["name"].as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+
+        models.sort();
+        Ok(models)
     }
 
     /// OpenAI-compatible chat completion (works for OpenAI, Ollama, Mistral)
@@ -465,6 +569,15 @@ mod tests
         {
             unsafe { env::set_var("MISTRAL_API_KEY", k) };
         }
+    }
+
+    #[test]
+    fn test_provider_models_endpoint()
+    {
+        assert_eq!(Provider::OpenAi.models_endpoint(), "https://api.openai.com/v1/models");
+        assert_eq!(Provider::Anthropic.models_endpoint(), "https://api.anthropic.com/v1/models");
+        assert_eq!(Provider::Ollama.models_endpoint(), "http://localhost:11434/api/tags");
+        assert_eq!(Provider::Mistral.models_endpoint(), "https://api.mistral.ai/v1/models");
     }
 
     /// Serializes tests that modify environment variables

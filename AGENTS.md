@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.1.0)
+**Last updated:** 2026-04-10 (v13.2.0)
 
 <!-- {mission} -->
 
@@ -799,6 +799,20 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.2.0, merge --list-models)
+
+- Added `--list-models` (`-L`) flag to the `merge` command for querying available models from the selected LLM provider
+- Added `Provider::models_endpoint()` returning the model listing URL per provider
+  - OpenAI: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Anthropic: `GET /v1/models` (`x-api-key` + `anthropic-version` headers, `data[].id`)
+  - Mistral: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Ollama: `GET /api/tags` (no auth, `models[].name`)
+- Added `LlmClient::list_models()` with three parsing paths: OpenAI-compatible, Anthropic, and Ollama
+- Added `TemplateManager::list_models()` encapsulating provider resolution and API call
+- Output lists models alphabetically; the active default model is marked with `(default)`
+- Added `test_provider_models_endpoint` unit test
+- Version bump: 13.1.0 to 13.2.0 (MINOR - new CLI flag)
 
 ### 2026-04-10 (v13.1.0, AI-assisted merge command)
 

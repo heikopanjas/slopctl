@@ -168,7 +168,11 @@ enum Commands
 
         /// Preview changes without calling the API
         #[arg(short = 'n', long, default_value = "false")]
-        dry_run: bool
+        dry_run: bool,
+
+        /// List available models from the selected provider
+        #[arg(short = 'L', long, default_value = "false")]
+        list_models: bool
     },
     /// Manage configuration
     Config
@@ -549,17 +553,22 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { provider, model, dry_run } =>
+        | Commands::Merge { provider, model, dry_run, list_models } =>
         {
-            if dry_run == true
+            if list_models == true
+            {
+                manager.list_models(provider.as_deref(), model.as_deref())
+            }
+            else if dry_run == true
             {
                 println!("{} Dry run: previewing merge candidates", "→".blue());
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run)
             }
             else
             {
                 println!("{} AI-assisted merge of customized files", "→".blue());
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run)
             }
-            manager.merge(provider.as_deref(), model.as_deref(), dry_run)
         }
         | Commands::Completions { shell } =>
         {
