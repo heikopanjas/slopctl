@@ -13,7 +13,7 @@ use crate::{
     bom::{self, TemplateConfig},
     file_tracker::{FileStatus, FileTracker},
     github,
-    llm::{ChatMessage, LlmClient, Provider},
+    llm::{ChatMessage, ChatResponse, LlmClient, Provider},
     template_engine::{self, TemplateEngine}
 };
 
@@ -107,11 +107,12 @@ impl TemplateManager
     /// * `model` - CLI override for model name (falls back to config, then provider default)
     /// * `dry_run` - If true, shows what would be merged without calling the LLM
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
+    /// * `verbose` - If true, prints token usage summary after merging
     ///
     /// # Errors
     ///
     /// Returns an error if provider resolution fails, LLM calls fail, or file I/O fails
-    pub fn merge(&self, provider: Option<&str>, model: Option<&str>, dry_run: bool, preview: bool) -> Result<()>
+    pub fn merge(&self, provider: Option<&str>, model: Option<&str>, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
     {
         let (provider_name, model_name) = Self::resolve_provider_and_model(provider, model)?;
         let provider_enum = Provider::from_name(&provider_name)?;
@@ -141,6 +142,10 @@ impl TemplateManager
             }
         );
         println!();
+
+        let mut total_input: u64 = 0;
+        let mut total_output: u64 = 0;
+        let mut truncated_count: u64 = 0;
 
         for candidate in &candidates
         {
@@ -173,9 +178,10 @@ impl TemplateManager
                 let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
                 let user_content = fs::read_to_string(&candidate.workspace_path)?;
                 let messages = build_merge_messages(&user_content, &candidate.template_content);
-                let merged = client.chat(&messages)?;
+                let response = client.chat(&messages)?;
 
-                fs::write(&sidecar, &merged)?;
+                accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
+                fs::write(&sidecar, &response.content)?;
                 println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
             }
             else
@@ -186,9 +192,10 @@ impl TemplateManager
                 let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
                 let user_content = fs::read_to_string(&candidate.workspace_path)?;
                 let messages = build_merge_messages(&user_content, &candidate.template_content);
-                let merged = client.chat(&messages)?;
+                let response = client.chat(&messages)?;
 
-                fs::write(&candidate.workspace_path, &merged)?;
+                accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
+                fs::write(&candidate.workspace_path, &response.content)?;
                 println!("{} merged {}", "✓".green(), candidate.display_name.yellow());
             }
         }
@@ -207,6 +214,29 @@ impl TemplateManager
         {
             println!();
             println!("{} Merge complete. Merged files replaced originals.", "✓".green());
+        }
+
+        if verbose == true && dry_run == false
+        {
+            let total = total_input + total_output;
+            println!("{} Tokens: {} input, {} output ({} total)", "→".blue(), format_number(total_input), format_number(total_output), format_number(total));
+
+            if truncated_count > 0
+            {
+                println!(
+                    "{} {} {} truncated (hit max_tokens limit)",
+                    "!".yellow(),
+                    truncated_count,
+                    if truncated_count == 1
+                    {
+                        "file was"
+                    }
+                    else
+                    {
+                        "files were"
+                    }
+                );
+            }
         }
 
         Ok(())
@@ -650,6 +680,40 @@ fn normalize_path(path: &Path) -> PathBuf
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Accumulates token counts and detects truncation from a chat response
+fn accumulate_usage(response: &ChatResponse, total_input: &mut u64, total_output: &mut u64, truncated_count: &mut u64)
+{
+    if let Some(input) = response.input_tokens
+    {
+        *total_input += input;
+    }
+    if let Some(output) = response.output_tokens
+    {
+        *total_output += output;
+    }
+    if let Some(ref reason) = response.stop_reason &&
+        matches!(reason.as_str(), "max_tokens" | "length")
+    {
+        *truncated_count += 1;
+    }
+}
+
+/// Formats a number with comma separators for display (e.g. 12345 → "12,345")
+fn format_number(n: u64) -> String
+{
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate()
+    {
+        if i > 0 && (s.len() - i) % 3 == 0
+        {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests
 {
@@ -854,5 +918,68 @@ mod tests
         assert!(result.contains("Build great things.") == true);
         assert!(result.contains("Be excellent.") == true);
         Ok(())
+    }
+
+    #[test]
+    fn test_format_number_no_commas()
+    {
+        assert_eq!(format_number(0), "0");
+        assert_eq!(format_number(1), "1");
+        assert_eq!(format_number(999), "999");
+    }
+
+    #[test]
+    fn test_format_number_with_commas()
+    {
+        assert_eq!(format_number(1_000), "1,000");
+        assert_eq!(format_number(12_345), "12,345");
+        assert_eq!(format_number(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn test_accumulate_usage_adds_tokens()
+    {
+        let mut total_input: u64 = 100;
+        let mut total_output: u64 = 50;
+        let mut truncated: u64 = 0;
+
+        let response = ChatResponse { content: String::new(), input_tokens: Some(200), output_tokens: Some(300), stop_reason: Some("end_turn".to_string()) };
+        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated);
+
+        assert_eq!(total_input, 300);
+        assert_eq!(total_output, 350);
+        assert_eq!(truncated, 0);
+    }
+
+    #[test]
+    fn test_accumulate_usage_detects_truncation()
+    {
+        let mut total_input: u64 = 0;
+        let mut total_output: u64 = 0;
+        let mut truncated: u64 = 0;
+
+        let response_max =
+            ChatResponse { content: String::new(), input_tokens: Some(100), output_tokens: Some(50), stop_reason: Some("max_tokens".to_string()) };
+        accumulate_usage(&response_max, &mut total_input, &mut total_output, &mut truncated);
+        assert_eq!(truncated, 1);
+
+        let response_len = ChatResponse { content: String::new(), input_tokens: Some(100), output_tokens: Some(50), stop_reason: Some("length".to_string()) };
+        accumulate_usage(&response_len, &mut total_input, &mut total_output, &mut truncated);
+        assert_eq!(truncated, 2);
+    }
+
+    #[test]
+    fn test_accumulate_usage_handles_none()
+    {
+        let mut total_input: u64 = 10;
+        let mut total_output: u64 = 20;
+        let mut truncated: u64 = 0;
+
+        let response = ChatResponse { content: String::new(), input_tokens: None, output_tokens: None, stop_reason: None };
+        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated);
+
+        assert_eq!(total_input, 10);
+        assert_eq!(total_output, 20);
+        assert_eq!(truncated, 0);
     }
 }

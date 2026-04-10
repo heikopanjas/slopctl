@@ -176,7 +176,11 @@ enum Commands
 
         /// List available models from the selected provider
         #[arg(short = 'L', long, default_value = "false")]
-        list_models: bool
+        list_models: bool,
+
+        /// Show token usage summary after merging
+        #[arg(short, long, default_value = "false")]
+        verbose: bool
     },
     /// Manage configuration
     Config
@@ -551,7 +555,7 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { provider, model, preview, dry_run, list_models } =>
+        | Commands::Merge { provider, model, preview, dry_run, list_models, verbose } =>
         {
             if list_models == true
             {
@@ -560,12 +564,12 @@ fn main()
             else if dry_run == true
             {
                 println!("{} Dry run: previewing merge candidates", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview)
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
             }
             else
             {
                 println!("{} AI-assisted merge of customized files", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview)
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
             }
         }
         | Commands::Completions { shell } =>

@@ -128,6 +128,20 @@ pub struct ChatMessage
     pub content: String
 }
 
+/// Response from a chat completion API call
+#[derive(Debug)]
+pub struct ChatResponse
+{
+    /// The assistant's response text
+    pub content:       String,
+    /// Number of input/prompt tokens consumed
+    pub input_tokens:  Option<u64>,
+    /// Number of output/completion tokens generated
+    pub output_tokens: Option<u64>,
+    /// Why the model stopped generating (e.g. "end_turn", "stop", "max_tokens", "length")
+    pub stop_reason:   Option<String>
+}
+
 /// Client for making LLM API calls
 pub struct LlmClient
 {
@@ -179,7 +193,7 @@ impl LlmClient
         Ok(Self { provider, model: model_name, api_key, http })
     }
 
-    /// Sends a chat completion request and returns the assistant response text
+    /// Sends a chat completion request and returns the response with usage metadata
     ///
     /// # Arguments
     ///
@@ -188,7 +202,7 @@ impl LlmClient
     /// # Errors
     ///
     /// Returns an error if the API call fails or the response cannot be parsed
-    pub fn chat(&self, messages: &[ChatMessage]) -> Result<String>
+    pub fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
     {
         match self.provider
         {
@@ -302,7 +316,7 @@ impl LlmClient
     }
 
     /// OpenAI-compatible chat completion (works for OpenAI, Ollama, Mistral)
-    fn chat_openai_compatible(&self, messages: &[ChatMessage]) -> Result<String>
+    fn chat_openai_compatible(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
     {
         let body = serde_json::json!({
             "model": self.model,
@@ -328,14 +342,34 @@ impl LlmClient
 
         let json: serde_json::Value = response.json()?;
 
-        json["choices"][0]["message"]["content"]
+        let content = json["choices"][0]["message"]["content"]
             .as_str()
             .map(|s| s.to_string())
-            .ok_or_else(|| anyhow::anyhow!("Unexpected {} API response format", self.provider_name()))
+            .ok_or_else(|| anyhow::anyhow!("Unexpected {} API response format", self.provider_name()))?;
+
+        let (input_tokens, output_tokens) = if self.provider == Provider::Ollama
+        {
+            (json["prompt_eval_count"].as_u64(), json["eval_count"].as_u64())
+        }
+        else
+        {
+            (json["usage"]["prompt_tokens"].as_u64(), json["usage"]["completion_tokens"].as_u64())
+        };
+
+        let stop_reason = if self.provider == Provider::Ollama
+        {
+            json["done_reason"].as_str().map(|s| s.to_string())
+        }
+        else
+        {
+            json["choices"][0]["finish_reason"].as_str().map(|s| s.to_string())
+        };
+
+        Ok(ChatResponse { content, input_tokens, output_tokens, stop_reason })
     }
 
     /// Anthropic Messages API (different request/response shape)
-    fn chat_anthropic(&self, messages: &[ChatMessage]) -> Result<String>
+    fn chat_anthropic(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
     {
         let system_msg = messages.iter().find(|m| m.role == "system").map(|m| m.content.as_str()).unwrap_or("");
 
@@ -371,7 +405,14 @@ impl LlmClient
 
         let json: serde_json::Value = response.json()?;
 
-        json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))
+        let content =
+            json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))?;
+
+        let input_tokens = json["usage"]["input_tokens"].as_u64();
+        let output_tokens = json["usage"]["output_tokens"].as_u64();
+        let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
+
+        Ok(ChatResponse { content, input_tokens, output_tokens, stop_reason })
     }
 }
 

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.2.3)
+**Last updated:** 2026-04-10 (v13.3.0)
 
 <!-- {mission} -->
 
@@ -799,6 +799,17 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.3.0, merge --verbose token usage)
+
+- Added `--verbose` (`-v`) flag to the `merge` command for token usage reporting
+- New `ChatResponse` struct in `llm.rs` returning content, input/output token counts, and stop reason
+- Updated `chat()`, `chat_openai_compatible()`, `chat_anthropic()` to return `ChatResponse` instead of `String`
+- Token extraction: Anthropic `usage.input_tokens`/`usage.output_tokens`/`stop_reason`; OpenAI/Mistral `usage.prompt_tokens`/`usage.completion_tokens`/`choices[0].finish_reason`; Ollama `prompt_eval_count`/`eval_count`/`done_reason`
+- Merge accumulates token counts across all files; prints summary with `--verbose`
+- Detects `max_tokens`/`length` stop reasons and warns about truncated files
+- Added `accumulate_usage()` and `format_number()` helpers with 5 new tests
+- Version bump: 13.2.3 to 13.3.0 (MINOR - new CLI flag)
 
 ### 2026-04-10 (v13.2.3, merge writes to original by default)
 
