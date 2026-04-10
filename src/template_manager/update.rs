@@ -42,7 +42,10 @@ impl TemplateManager
     /// - Template generation fails
     pub fn update(&self, options: &template_engine::UpdateOptions) -> Result<()>
     {
-        require!(self.has_global_templates() == true, Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop update' first to download templates.")));
+        require!(
+            self.has_global_templates() == true,
+            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
+        );
 
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
@@ -50,9 +53,9 @@ impl TemplateManager
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V4: vibe-cop config source.url https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v4"
+                "V1 templates are no longer supported. Migrate to V5: vibe-cop config source.url https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5"
             )),
-            | 2..=4 =>
+            | 2..=5 =>
             {
                 if options.lang.is_some() && options.agent.is_some()
                 {

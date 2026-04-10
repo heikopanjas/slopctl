@@ -212,7 +212,7 @@ impl TemplateManager
         if modified_count > 0
         {
             println!(
-                "  {} Skipped {} modified file{} - run 'vibe-cop install --force' to overwrite",
+                "  {} Skipped {} modified file{} - run 'vibe-cop init --force' to overwrite",
                 "!".yellow(),
                 modified_count,
                 if modified_count == 1
@@ -229,7 +229,7 @@ impl TemplateManager
         if dry_run == false && unmerged_count > 0
         {
             println!();
-            println!("{} Run 'vibe-cop install' to re-merge language sections into AGENTS.md", "→".blue());
+            println!("{} Run 'vibe-cop init' to re-merge language sections into AGENTS.md", "→".blue());
         }
 
         Ok(())
@@ -398,7 +398,7 @@ mod tests
 
         // Create a tracker entry for a file that doesn't exist on disk
         let mut tracker = FileTracker::new(&data_dir).unwrap();
-        tracker.record_installation(&target, "abc123".to_string(), 4, None, "main".to_string());
+        tracker.record_installation(&target, "abc123".to_string(), 4, None, "main".to_string(), &workspace);
         tracker.save().unwrap();
 
         // Reload and check
@@ -424,7 +424,7 @@ mod tests
 
         let sha = FileTracker::calculate_sha256(&target).unwrap();
         let mut tracker = FileTracker::new(&data_dir).unwrap();
-        tracker.record_installation(&target, sha, 4, None, "main".to_string());
+        tracker.record_installation(&target, sha, 4, None, "main".to_string(), &workspace);
         tracker.save().unwrap();
 
         let tracker2 = FileTracker::new(&data_dir).unwrap();

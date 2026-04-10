@@ -42,64 +42,72 @@ struct Cli
 #[derive(Subcommand)]
 enum Commands
 {
-    /// Install agent instructions and skills for a project
-    Install
+    /// Initialize agent instructions and skills for a project
+    Init
     {
         /// Programming language or framework (e.g., rust, c++, swift)
-        #[arg(long)]
+        #[arg(short, long)]
         lang: Option<String>,
 
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
-        #[arg(long)]
+        #[arg(short, long)]
         agent: Option<String>,
 
         /// Custom mission statement (use @filename to read from file)
-        #[arg(long)]
+        #[arg(short, long)]
         mission: Option<String>,
 
         /// Install skill(s) from GitHub or local path (repeatable)
-        #[arg(long)]
+        #[arg(short, long)]
         skill: Vec<String>,
 
         /// Force overwrite of local files without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
-    /// Update global templates from source
-    Update
+    /// Manage global template catalog
+    Templates
     {
+        /// Download or update global templates from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show available agents, languages, and skills
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
         /// Path or URL to download/copy templates from
-        #[arg(long)]
+        #[arg(short, long, requires = "update")]
         from: Option<String>,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
     /// Purge all vibe-cop files from project
     Purge
     {
         /// Force purge without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Remove agent-specific files or skills from current directory
     Remove
     {
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
-        #[arg(long)]
+        #[arg(short, long)]
         agent: Option<String>,
 
         /// Programming language or framework (e.g., rust, c++, swift)
-        #[arg(long)]
+        #[arg(short, long)]
         lang: Option<String>,
 
         /// Remove all agent-specific files and skills
@@ -107,15 +115,15 @@ enum Commands
         all: bool,
 
         /// Remove skill(s) by name (repeatable)
-        #[arg(long)]
+        #[arg(short, long)]
         skill: Vec<String>,
 
         /// Force removal without confirmation
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         force: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
     /// Generate shell completions
@@ -129,42 +137,73 @@ enum Commands
     Doctor
     {
         /// Automatically fix detected issues where possible
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         fix: bool,
 
         /// Preview changes without applying them
-        #[arg(long, default_value = "false")]
+        #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
         /// Print every checked file and its result
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// Show current project status
-    Status,
-    /// List available agents and languages
-    List,
+    /// Show workspace status
+    Status
+    {
+        /// Show managed file list
+        #[arg(short, long, default_value = "false")]
+        verbose: bool
+    },
+    /// AI-assisted merge of customized files with updated templates
+    Merge
+    {
+        /// LLM provider (openai, anthropic, ollama, mistral)
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Model to use for merging
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Write merged output to .merged sidecar files instead of replacing originals
+        #[arg(long, default_value = "false")]
+        preview: bool,
+
+        /// Show merge candidates without calling the LLM
+        #[arg(short = 'n', long, default_value = "false")]
+        dry_run: bool,
+
+        /// List available models from the selected provider
+        #[arg(short = 'L', long, default_value = "false")]
+        list_models: bool,
+
+        /// Show token usage summary after merging
+        #[arg(short, long, default_value = "false")]
+        verbose: bool
+    },
     /// Manage configuration
     Config
     {
-        /// Configuration key (e.g., source.url)
+        /// Configuration key to get (e.g., source.url)
         key: Option<String>,
 
-        /// Value to set (omit to get current value)
-        value: Option<String>,
+        /// Set a configuration value: --add <key> <value>
+        #[arg(short, long, num_args = 2, value_names = ["KEY", "VALUE"])]
+        add: Vec<String>,
 
         /// List all configuration values
-        #[arg(long, default_value = "false")]
+        #[arg(short, long, default_value = "false")]
         list: bool,
 
-        /// Unset a configuration key
-        #[arg(long)]
-        unset: Option<String>
+        /// Remove a configuration key
+        #[arg(short, long)]
+        remove: Option<String>
     }
 }
 
-/// Default template source URL (V4 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v4";
+/// Default template source URL (V5 templates - agents.md standard)
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -258,7 +297,7 @@ fn resolve_mission_content(value: &str) -> Result<String>
 }
 
 /// Handle config command operations
-fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: Option<String>) -> Result<()>
+fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Option<String>) -> Result<()>
 {
     // Handle --list flag
     if list == true
@@ -269,7 +308,7 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         if values.is_empty() == true
         {
             println!("{} No configuration values set", "→".blue());
-            println!("{} Use 'vibe-cop config <key> <value>' to set a value", "→".blue());
+            println!("{} Use 'vibe-cop config --add <key> <value>' to set a value", "→".blue());
             println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
         }
         else
@@ -283,61 +322,54 @@ fn handle_config(key: Option<String>, value: Option<String>, list: bool, unset: 
         return Ok(());
     }
 
-    // Handle --unset flag
-    if let Some(unset_key) = unset
+    // Handle --add flag
+    if add.len() == 2
     {
         let mut config = Config::load()?;
-        config.unset(&unset_key)?;
+        config.set(&add[0], &add[1])?;
         config.save()?;
-        println!("{} Unset {}", "✓".green(), unset_key.yellow());
+        println!("{} Set {} = {}", "✓".green(), add[0].yellow(), add[1].green());
         return Ok(());
     }
 
-    // Handle key/value operations
-    match (key, value)
+    // Handle --remove flag
+    if let Some(remove_key) = remove
     {
-        | (Some(k), Some(v)) =>
+        let mut config = Config::load()?;
+        config.unset(&remove_key)?;
+        config.save()?;
+        println!("{} Removed {}", "✓".green(), remove_key.yellow());
+        return Ok(());
+    }
+
+    // Handle get by key
+    if let Some(k) = key
+    {
+        let config = Config::load()?;
+        if let Some(v) = config.get(&k)
         {
-            // Set value
-            let mut config = Config::load()?;
-            config.set(&k, &v)?;
-            config.save()?;
-            println!("{} Set {} = {}", "✓".green(), k.yellow(), v.green());
+            println!("{}", v);
         }
-        | (Some(k), None) =>
+        else
         {
-            // Get value
-            let config = Config::load()?;
-            if let Some(v) = config.get(&k)
-            {
-                println!("{}", v);
-            }
-            else
-            {
-                println!("{} Key '{}' is not set", "→".blue(), k.yellow());
-            }
+            println!("{} Key '{}' is not set", "→".blue(), k.yellow());
         }
-        | (None, Some(_)) =>
-        {
-            return Err(anyhow::anyhow!("Must specify a key when setting a value"));
-        }
-        | (None, None) =>
-        {
-            // Show help
-            println!("{}", "vibe-cop config".bold());
-            println!();
-            println!("Usage:");
-            println!("  vibe-cop config <key> <value>  Set a configuration value");
-            println!("  vibe-cop config <key>          Get a configuration value");
-            println!("  vibe-cop config --list         List all configuration values");
-            println!("  vibe-cop config --unset <key>  Remove a configuration value");
-            println!();
-            println!("Valid keys:");
-            for key in Config::valid_keys()
-            {
-                println!("  • {}", key.yellow());
-            }
-        }
+        return Ok(());
+    }
+
+    // No flags or args: show help
+    println!("{}", "vibe-cop config".bold());
+    println!();
+    println!("Usage:");
+    println!("  vibe-cop config --add <key> <value>  Set a configuration value");
+    println!("  vibe-cop config <key>                Get a configuration value");
+    println!("  vibe-cop config --list               List all configuration values");
+    println!("  vibe-cop config --remove <key>       Remove a configuration value");
+    println!();
+    println!("Valid keys:");
+    for key in Config::valid_keys()
+    {
+        println!("  • {}", key.yellow());
     }
     Ok(())
 }
@@ -358,15 +390,15 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Install { lang, agent, mission, skill, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
         {
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
                 eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
-                eprintln!("{} Examples: vibe-cop install --lang rust", "→".blue());
-                eprintln!("{}          vibe-cop install --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop install --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop install --skill user/my-skill", "→".blue());
+                eprintln!("{} Examples: vibe-cop init --lang rust", "→".blue());
+                eprintln!("{}          vibe-cop init --agent cursor", "→".blue());
+                eprintln!("{}          vibe-cop init --lang rust --agent cursor", "→".blue());
+                eprintln!("{}          vibe-cop init --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
@@ -448,34 +480,63 @@ fn main()
                 manager.update(&options)
             }
         }
-        | Commands::Update { from, dry_run } =>
+        | Commands::Templates { update, list, from, dry_run } =>
         {
-            let (source, is_configured, fallback) = resolve_source(from);
-
-            if dry_run == true
+            if update == false && list == false
             {
-                if is_configured == true
+                eprintln!("{} Must specify --update or --list", "✗".red());
+                eprintln!("{} Examples: vibe-cop templates --update", "→".blue());
+                eprintln!("{}          vibe-cop templates --list", "→".blue());
+                eprintln!("{}          vibe-cop templates --update --list", "→".blue());
+                std::process::exit(1);
+            }
+
+            let update_result = if update == true
+            {
+                let (source, is_configured, fallback) = resolve_source(from);
+
+                if dry_run == true
                 {
-                    println!("{} Using configured source", "→".blue());
+                    if is_configured == true
+                    {
+                        println!("{} Using configured source", "→".blue());
+                    }
+                    println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
+                    if let Some(ref fallback_url) = fallback
+                    {
+                        println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    }
+                    println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
+                    println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                    Ok(())
                 }
-                println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
-                if let Some(ref fallback_url) = fallback
+                else
                 {
-                    println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    if is_configured == true
+                    {
+                        println!("{} Using configured source", "→".blue());
+                    }
+                    println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+
+                    download_with_fallback(&manager, &source, fallback)
                 }
-                println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
-                println!("\n{} Dry run complete. No files were modified.", "✓".green());
-                Ok(())
             }
             else
             {
-                if is_configured == true
-                {
-                    println!("{} Using configured source", "→".blue());
-                }
-                println!("{} Updating global templates from {}", "→".blue(), source.yellow());
+                Ok(())
+            };
 
-                download_with_fallback(&manager, &source, fallback)
+            if let Err(e) = update_result
+            {
+                Err(e)
+            }
+            else if list == true
+            {
+                manager.list_global()
+            }
+            else
+            {
+                Ok(())
             }
         }
         | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
@@ -494,6 +555,23 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
+        | Commands::Merge { provider, model, preview, dry_run, list_models, verbose } =>
+        {
+            if list_models == true
+            {
+                manager.list_models(provider.as_deref(), model.as_deref())
+            }
+            else if dry_run == true
+            {
+                println!("{} Dry run: previewing merge candidates", "→".blue());
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
+            }
+            else
+            {
+                println!("{} AI-assisted merge of customized files", "→".blue());
+                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
+            }
+        }
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();
@@ -501,9 +579,8 @@ fn main()
             Ok(())
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
-        | Commands::Status => manager.status(),
-        | Commands::List => manager.list(),
-        | Commands::Config { key, value, list, unset } => handle_config(key, value, list, unset)
+        | Commands::Status { verbose } => manager.status(verbose),
+        | Commands::Config { key, add, list, remove } => handle_config(key, add, list, remove)
     };
 
     if let Err(e) = result

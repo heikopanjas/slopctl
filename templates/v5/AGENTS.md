@@ -5,6 +5,13 @@
 
 <!-- {mission} -->
 
+## Session Protocol
+
+When starting a new session, read this entire file and confirm you have
+understood the project instructions before proceeding. Summarize the project
+purpose and key conventions briefly. Do not make changes until you have
+confirmed your understanding.
+
 <!-- {principles} -->
 
 <!-- {languages} -->

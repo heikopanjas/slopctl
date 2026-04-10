@@ -1,20 +1,23 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-02 (v11.9.0)
+**Last updated:** 2026-04-10 (v13.3.0)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-[Describe your project here - what it does, its purpose, and key features]
+vibe-cop is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
-- **Language:** [e.g., Python, TypeScript, JavaScript]
-- **Framework:** [e.g., React, Next.js, Django, FastAPI]
+- **Language:** Rust (Edition 2024, nightly toolchain)
+- **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
+- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
+- **Serialization:** serde + serde_yaml for templates.yml, serde_json for file tracker
 - **Version Control:** Git
-- **Package Manager:** [e.g., npm, pip, poetry, yarn]
-- **License:** [e.g., MIT, Apache 2.0]
+- **Package Manager:** Cargo
+- **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
+- **License:** MIT
 
 <!-- {principles} -->
 
@@ -66,17 +69,17 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 1. **Maintain Consistency**: Keep code style consistent across the codebase
 2. **Test First**: Write tests before implementing features when applicable
 3. **Document Changes**: Update documentation when changing functionality
-4. **Code Review**: [Describe your code review process]
+4. **Code Review**: Run `cargo fmt`, `cargo clippy`, and `cargo test` before committing
 5. **Date Changes**: Update the "Last updated" timestamp in this file when making changes
 6. **Log Updates**: Add entries to "Recent Updates & Decisions" section below
 
 ### Development Guidelines
 
-[Add project-specific development guidelines]
-
-- [Guideline 1]
-- [Guideline 2]
-- [Guideline 3]
+- Use debug builds (`cargo build`) during development; reserve release builds for CI and deployment
+- Branch model: `develop` is the active branch; `main` receives stable merges only
+- Always use `--dry-run` to verify CLI behavior before writing destructive tests
+- Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
+- One public struct or major component per source file; shared helpers go in `utils.rs`
 
 ### Security & Safety
 
@@ -84,25 +87,25 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
-- [Add project-specific security guidelines]
+- GitHub tokens for API access are read from environment only, never stored in config files
+- Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
 
-[Describe your testing approach]
+Unit tests are co-located with implementation in each source file under `#[cfg(test)] mod tests`.
 
-- Unit tests: [location and conventions]
-- Integration tests: [location and conventions]
-- Test coverage requirements: [if any]
-- Testing framework: [e.g., Jest, pytest, JUnit]
+- Unit tests: In-file `#[cfg(test)]` modules, named `test_<scenario>_<expected_outcome>`
+- Integration tests: Manual CLI verification with `--dry-run` flag
+- Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
+- CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
+- Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
 
 ### Documentation
 
-[Describe your documentation requirements]
-
-- Code comments: [when and how]
-- API documentation: [format and location]
-- README updates: [when required]
-- Changelog: [if maintained]
+- Code comments: `///` doc comments on all public APIs; `//` for non-obvious implementation details only
+- API documentation: Generated via `cargo doc`; doc comment structure uses `# Arguments`, `# Errors`, `# Examples` sections
+- README updates: Required when adding or changing CLI commands, flags, or user-visible behavior
+- Changelog: Maintained in the "Recent Updates & Decisions" section at the bottom of this file
 
 <!-- {languages} -->
 
@@ -797,6 +800,265 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-04-10 (v13.3.0, merge --verbose token usage)
+
+- Added `--verbose` (`-v`) flag to the `merge` command for token usage reporting
+- New `ChatResponse` struct in `llm.rs` returning content, input/output token counts, and stop reason
+- Updated `chat()`, `chat_openai_compatible()`, `chat_anthropic()` to return `ChatResponse` instead of `String`
+- Token extraction: Anthropic `usage.input_tokens`/`usage.output_tokens`/`stop_reason`; OpenAI/Mistral `usage.prompt_tokens`/`usage.completion_tokens`/`choices[0].finish_reason`; Ollama `prompt_eval_count`/`eval_count`/`done_reason`
+- Merge accumulates token counts across all files; prints summary with `--verbose`
+- Detects `max_tokens`/`length` stop reasons and warns about truncated files
+- Added `accumulate_usage()` and `format_number()` helpers with 5 new tests
+- Version bump: 13.2.3 to 13.3.0 (MINOR - new CLI flag)
+
+### 2026-04-10 (v13.2.3, merge writes to original by default)
+
+- Changed `merge` default behavior: merged content now replaces the original file directly
+- Previously, `merge` always wrote `.merged` sidecar files requiring manual review
+- Added `--preview` flag to opt into the old sidecar behavior when manual review is desired
+- Added HTTP timeouts to the LLM client: 30s connect, 5min read (prevents OS-level TCP timeout killing large requests)
+- Updated README.md merge command documentation with examples and new `--preview`/`--list-models` flags
+- Version bump: 13.2.2 to 13.2.3 (PATCH - behavioral fix)
+
+### 2026-04-10 (v13.2.2, fix merge command ignoring skills)
+
+- Fixed `merge` command not detecting changes in skill files (e.g. git-workflow)
+- Root cause: `find_merge_candidates()` explicitly skipped `category == "skill"` entries, and `build_target_source_map()` never included skill files
+- Removed skill exclusion from `find_merge_candidates()`; skills are now treated like any other tracked file
+- Added skill file mapping to `build_target_source_map()`: walks local skill source directories for top-level, agent, and language skills and maps each file to its installed workspace target
+- Uses `detect_all_installed_agents()` to cover multi-agent workspaces; top-level skills mapped to each agent's skill dir, falling back to cross-client dir when no agents detected
+- Added `insert_skill_sources()` helper: resolves skill base dir from placeholder, iterates skill definitions, skips URL-based sources (not cached locally)
+- Added `insert_skill_dir_recursive()` helper: recursively reads skill source directories and inserts file content into the target-source map
+- Added 4 new tests: recursive dir mapping, subdirectory handling, URL skip, local skill inclusion
+- Fixed merge ignoring untracked files (e.g. AGENTS.md customized before tracking, or skipped by init); merge now also checks files from the target-source map that exist on disk but are not in the FileTracker
+- For untracked files, merge compares current file SHA against template SHA directly (no original_sha needed)
+- Known limitation: ad-hoc CLI skills (`--skill user/repo`) have no template source in templates.yml, so they cannot be merge candidates
+- Version bump: 13.2.1 to 13.2.2 (PATCH - bug fix)
+
+### 2026-04-10 (v13.2.1, config CLI option rename)
+
+- Replaced positional `<key> <value>` set syntax with `--add <key> <value>` (`-a`) flag
+- Renamed `--unset` (`-u`) to `--remove` (`-r`) for consistency
+- Updated `handle_config` function, CLI struct, dispatch, and inline help text
+- Updated README.md config command documentation and examples
+- Version bump: 13.2.0 to 13.2.1 (PATCH - CLI option rename)
+
+### 2026-04-10 (v13.2.0, merge --list-models)
+
+- Added `--list-models` (`-L`) flag to the `merge` command for querying available models from the selected LLM provider
+- Added `Provider::models_endpoint()` returning the model listing URL per provider
+  - OpenAI: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Anthropic: `GET /v1/models` (`x-api-key` + `anthropic-version` headers, `data[].id`)
+  - Mistral: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Ollama: `GET /api/tags` (no auth, `models[].name`)
+- Added `LlmClient::list_models()` with three parsing paths: OpenAI-compatible, Anthropic, and Ollama
+- Added `TemplateManager::list_models()` encapsulating provider resolution and API call
+- Output lists models alphabetically; the active default model is marked with `(default)`
+- Added `test_provider_models_endpoint` unit test
+- Version bump: 13.1.0 to 13.2.0 (MINOR - new CLI flag)
+
+### 2026-04-10 (v13.1.0, AI-assisted merge command)
+
+- Implemented `merge` command: LLM-assisted merge of customized workspace files with updated templates
+- New `src/llm.rs`: LLM provider abstraction supporting OpenAI, Anthropic, Ollama, and Mistral
+- Auto-detection of LLM provider from environment API key variables
+  - Priority: CLI `--provider` > config `merge.provider` > env auto-detect > error
+  - Checks `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` in order
+  - Ollama not auto-detected (requires no key, would always match)
+  - `Provider` enum with `from_name()`, `default_model()`, `endpoint()`, API key env var lookup
+  - `LlmClient` struct with `chat()` method; OpenAI-compatible path for OpenAI/Ollama/Mistral, dedicated Anthropic Messages API path
+  - API keys read from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`); Ollama requires no key
+  - Temperature fixed at 0.0 for deterministic merge output
+- New `src/template_manager/merge.rs`: merge command logic
+  - Finds merge candidates: tracked files that are both user-modified AND have updated template sources
+  - Generates fresh AGENTS.md by re-merging base template with all fragments (principles, mission, languages, integration)
+  - Builds target-to-source map from templates.yml for non-main files (agent, language, integration entries)
+  - Writes `.merged` sidecar files; skips if sidecar already exists
+  - Dry-run mode shows candidates without calling the LLM
+- Extended `Config` with `merge.provider` and `merge.model` keys
+  - New `MergeConfig` struct in `config.rs` with `provider` and `model` fields
+  - Priority: CLI `--provider`/`--model` > config values > error (provider required)
+- Added `resolve_target()` public method on `TemplateEngine` (exposes placeholder resolution for merge module)
+- Wired merge dispatch in `main.rs`: passes CLI args to `TemplateManager::merge()`
+- Added 21 new tests across `llm.rs`, `merge.rs`, and `config.rs`
+- Version bump: 13.0.0 to 13.1.0 (MINOR - new feature)
+
+### 2026-04-10 (v13.0.0, Codex modernization, CLI rename, merge skeleton)
+
+- MAJOR version bump: 12.4.0 to 13.0.0 (breaking CLI rename, template changes)
+- Renamed `install` command to `init` across CLI, source, README, and user-facing strings
+- Removed stale Codex template files: `codex/CODEX.md` and `codex/prompts/init-session.md`
+- Codex reads AGENTS.md natively; redirect file and prompt are no longer needed
+- Codex agent entry in templates.yml is now empty (`codex: {}`)
+- Added Session Protocol section to AGENTS.md template for agents that read it directly
+- Added `merge` command skeleton with `--provider`, `--model`, `--dry-run` flags (not yet implemented)
+- Updated README.md: migration guide v12-to-v13, removed Codex directory from repo tree, added merge command docs
+- Updated ROADMAP.md with completed items and future considerations
+
+### 2026-04-10 (v12.4.0, CLI rework: templates and status commands)
+
+- Replaced `update` command with `templates` command that consolidates global template management
+- `templates --update` downloads/updates global templates (replaces `vibe-cop update`)
+- `templates --list` shows available agents, languages, and skills (replaces `vibe-cop list --global`)
+- Both flags can be combined: `templates --update --list` updates then shows the catalog
+- Running `vibe-cop templates` with neither flag prints an error with usage examples
+- `--from` and `--dry-run` now require `--update` (enforced by clap)
+- Renamed `list` command back to `status` (workspace-only; `--global` moved to `templates --list`)
+- Made `list_global()` public on `TemplateManager` for use by the templates command path
+- Updated all user-facing strings referencing `vibe-cop update` and `vibe-cop list` across codebase
+- Updated README.md CLI docs and examples
+- Version bump: 12.3.4 to 12.4.0 (MINOR - new commands, removed old commands)
+
+### 2026-04-10 (docs update, CI badge and AGENTS.md placeholders)
+
+- Added CI status badge to README.md linking to the Build and Test workflow on develop branch
+- Updated README.md footer version from v12.2.0 to v12.3.4
+- Filled in all placeholder sections in the project AGENTS.md with actual project information:
+  - Mission Statement: describes vibe-cop purpose and supported agents
+  - Technology Stack: Rust 2024, clap, reqwest, serde, GitHub Actions CI/CD, MIT license
+  - Development Guidelines: debug builds, branch model, dry-run testing, module organization
+  - Code Review: cargo fmt, clippy, and test before committing
+  - Security: environment-only token access, template marker protection
+  - Testing: in-file unit tests, CWD_LOCK mutex, cross-platform CI
+  - Documentation: doc comments, cargo doc, README update policy, changelog location
+
+### 2026-04-09 (v12.3.4, fix skill directories not downloaded during update)
+
+- Fixed `download_templates_from_url` not downloading skill directories from the remote repository
+- Root cause: download loops processed `files` entries for all sections but never iterated over `skills` entries
+- Local-path skills (e.g. `skills/rust-coding-conventions`) were missing from the global template cache after `update`, causing "Skill source not found" errors at install time
+- Added `collect_local_skill_sources()`: gathers deduplicated local-path skill sources from all config sections (top-level, agents, languages, shared); skips URL-based skills (fetched at install time)
+- Added `download_skill_directory()`: uses GitHub Contents API to download a skill directory tree into the global cache, preserving directory structure
+- Added `download_skill_entries()`: recursive helper for downloading nested skill directory contents
+- Added `Default` derive to `AgentConfig`, `LanguageConfig`, `SharedConfig` for test ergonomics
+- Added 5 unit tests: empty config, top-level skills, URL filtering, deduplication, all-sections collection
+- Version bump: 12.3.3 to 12.3.4 (PATCH - bug fix)
+
+### 2026-04-09 (v12.3.3, clippy collapsible-if fix)
+
+- Collapsed nested `if let` into a single let-chain in `template_engine.rs` update() agent config block
+- Resolves clippy `collapsible_if` warning using idiomatic Rust 2024 let-chain syntax
+- Version bump: 12.3.2 to 12.3.3 (PATCH - lint fix)
+
+### 2026-04-07 (v12.3.2, fix purge path dedup and skill discovery)
+
+- Fixed `purge` and `remove --all` attempting to delete the same file twice when it appeared in both BoM (relative path) and FileTracker (absolute path)
+- Root cause: BoM returns relative paths (e.g. `./.cursorrules`), FileTracker returns absolute paths; `sort()` + `dedup()` could not reconcile the two formats
+- BoM-sourced paths are now canonicalized to absolute paths before collection in both `purge.rs` and `remove.rs` (`--agent` and `--all` branches)
+- Added filesystem skill directory scanning to `purge` via `get_all_skill_search_dirs` + `collect_files_recursive`, matching the behavior already present in `list` (v12.2.1) and `remove --skill` (v11.6.0)
+- Previously, manually placed or untracked skills survived `purge`; they are now discovered and removed
+- Added 3 new purge tests: empty workspace dry-run, BoM/tracker deduplication, untracked skill discovery
+- Consolidated CWD_LOCK mutex from per-module statics in purge and remove tests to a single shared static in `template_manager/mod.rs`, preventing test race conditions on `set_current_dir`
+- Version bump: 12.3.1 to 12.3.2 (PATCH - bug fix)
+
+### 2026-04-06 (v12.3.1, remove falls back to FileTracker)
+
+- Made `remove --agent` and `remove --lang` fall back to FileTracker when the entry no longer exists in templates.yml
+- Previously, removing an agent/language that was deleted from templates.yml after installation returned a hard error, orphaning installed files
+- `remove --agent`: tries BoM first; if agent not found, queries FileTracker for category "agent" entries filtered by `path_belongs_to_agent`
+- `remove --lang`: tries templates.yml first; if language not found, queries FileTracker for entries where `meta.lang` matches, excluding "main" and "skill" categories
+- `remove --all`: now supplements BoM agent files with FileTracker-tracked agent entries, catching agents no longer in BoM
+- Removed hard `require!(config_file.exists())` guards; BoM loading is now optional/graceful
+- Renamed test `test_remove_lang_unknown_errors` to `test_remove_lang_unknown_no_error` (no longer an error)
+- Added 3 new tests: agent fallback to tracker, lang fallback to tracker, lang fallback excludes main/skill
+- Added CWD_LOCK mutex for test serialization (process-global `set_current_dir` safety)
+- Version bump: 12.3.0 to 12.3.1 (PATCH - bug fix)
+
+### 2026-04-06 (v12.3.0, validate agent and language before install)
+
+- Added early validation in `TemplateEngine::update()` that rejects unknown agent/language names before any work begins
+- Previously, unknown agent printed a soft warning and continued the install (main template, principles, integration still installed)
+- Unknown language was caught by `resolve_language_files` but only after principles/mission had already been processed
+- Both now fail immediately after loading templates.yml, listing available names in the error message
+- Removed the unreachable soft-warning `else` branch for unknown agents
+- Error format matches existing `remove --lang` pattern with newline-separated available list
+- Added 4 new tests: unknown agent rejected, unknown language rejected, known agent accepted, known language accepted
+- Version bump: 12.2.1 to 12.3.0 (MINOR - new validation behavior)
+
+### 2026-04-06 (v12.2.1, filesystem skill detection in list)
+
+- Enhanced `list` (workspace mode) to discover installed skills by scanning agent skill directories on disk
+- Previously relied solely on FileTracker, missing manually placed or externally installed skills
+- Uses `agent_defaults::get_all_skill_search_dirs` to find all skill directories for installed agents + cross-client dir
+- Enumerates subdirectories in each skill dir; merges with FileTracker entries as fallback
+- Added "No skills installed" message when no skills found (consistent with agents/language sections)
+- Fixed `continue` guard in skill detection loop to use combined conditions per coding conventions
+- Version bump: 12.2.0 to 12.2.1 (PATCH - improved skill detection)
+
+### 2026-04-06 (v12.2.0, agent directories)
+
+- Added `DirectoryEntry` struct with `target` field in `bom.rs`
+- Added `directories: Vec<DirectoryEntry>` to `AgentConfig` for agent-declared workspace directories
+- Agent directories created with `create_dir_all` during install
+- Dry-run output now shows directories that would be created
+- Updated `templates/v5/templates.yml`: cursor agent gets `directories` with `.cursor/plans`
+- Added 3 new tests: DirectoryEntry serde, AgentConfig directories defaults and parsing
+- Version bump: 12.1.1 to 12.2.0 (MINOR - new feature)
+
+### 2026-04-06 (v12.1.1, fix workspace scoping in FileTracker)
+
+- Fixed `list`, `purge`, `remove`, and `doctor` commands matching files from other workspaces when run from a parent directory (e.g. home)
+- Root cause: `get_workspace_entries` used `Path::starts_with` prefix matching, so `/Users/me` matched entries from `/Users/me/projects/app/`
+- Added `workspace: Option<String>` field to `FileMetadata` to record the exact workspace root at install time
+- Changed `record_installation()` to accept a `workspace: &Path` parameter and store its canonicalized path
+- Changed `get_workspace_entries()`, `get_workspace_entries_by_category()`, and `get_installed_language_for_workspace()` to exact-match on `meta.workspace` instead of `starts_with`
+- Legacy entries without workspace field (`None`) are silently skipped; they get a workspace assigned on next `install` or `update`
+- `workspace` field uses `serde(default, skip_serializing_if)` for backwards-compatible JSON serialization
+- Added 2 new tests: parent dir exclusion and legacy entry handling
+- Version bump: 12.1.0 to 12.1.1 (PATCH - bug fix)
+
+### 2026-04-06 (v12.1.0, merge list and status commands)
+
+- Removed `status` command; `list` now serves both roles
+- `list` (default): shows workspace state (global templates, AGENTS.md, installed agents/language/skills, managed files with `-v`)
+- `list --global` / `list -g`: shows available template catalog (agents, languages, skills from templates.yml)
+- Added `--global` (`-g`) and `--verbose` (`-v`) flags to `List` command
+- Enhanced `--global` view to show language/shared-group skill names inline under each language
+- Deleted `src/template_manager/status.rs`; moved logic into `list.rs` split across `list_workspace()` and `list_global()` helpers
+- Updated README.md references from `vibe-cop status` to `vibe-cop list`
+- Version bump: 12.0.0 to 12.1.0 (MINOR - merged commands, new --global flag)
+
+### 2026-04-06 (v12.0.0, template version V5)
+
+- MAJOR version bump: 11.11.0 to 12.0.0 (template format version change)
+- Bumped template version from 4 to 5
+- Renamed `templates/v4` directory to `templates/v5`
+- Updated default source URL, migration error message, and accepted version range (2..=5)
+- Updated `default_version()` return value and all related tests
+- Updated all V4/v4 references in README.md to V5/v5
+- No migration path from V4 provided
+
+### 2026-04-06 (v11.11.0, short CLI options)
+
+- Added short option aliases to all CLI flags across every command
+- install: `-l` (lang), `-a` (agent), `-m` (mission), `-s` (skill), `-f` (force), `-n` (dry-run)
+- update: `-f` (from), `-n` (dry-run)
+- purge: `-f` (force), `-n` (dry-run)
+- remove: `-a` (agent), `-l` (lang), `-s` (skill), `-f` (force), `-n` (dry-run); `--all` stays long-only (dangerous operation)
+- doctor: `-f` (fix), `-n` (dry-run), `-v` (verbose)
+- status: `-v` (verbose)
+- config: `-l` (list), `-u` (unset)
+- Version bump: 11.10.0 to 11.11.0 (MINOR - new CLI ergonomics)
+
+### 2026-04-06 (v11.10.0, status --verbose flag)
+
+- Managed file list in `status` command is now hidden by default; shown only with `--verbose`
+- Added `--verbose` flag to `Status` variant in `main.rs`
+- Changed `status()` signature to accept `verbose: bool`
+- Moved managed file collection and display into a `verbose`-gated block
+- Separated agent detection from file collection to avoid dead writes when non-verbose
+- Version bump: 11.9.0 to 11.10.0 (MINOR - new CLI option)
+
+### 2026-04-03 (templates-to-skills migration)
+
+- Converted all coding-convention files to skills to reduce AGENTS.md context pressure
+- Created `templates/v4/skills/` with 10 skill directories: `rust-coding-conventions`, `c-coding-conventions`, `c++-coding-conventions`, `swift-coding-conventions`, `rust-build-commands`, `cmake-build-commands`, `swift-build-commands`, `make-build-commands`, `git-workflow`, `semantic-versioning`
+- Removed all `$instructions` entries for coding-conventions and build-commands from `templates.yml`; replaced with `skills:` entries on their respective languages and shared groups
+- For `git-workflow` and `semantic-versioning` (Tier 3): kept slim anchor fragments (`git-workflow-summary.md`, `semantic-versioning-summary.md`) as `$instructions`; added full-detail skills to top-level `skills:` section
+- Added `make-build-commands` skill to top-level `skills:` section (was not previously in templates.yml)
+- AGENTS.md template now receives no language convention blocks; agents load conventions on demand via the skill system
+- Context window savings: ~81 KB from coding conventions alone removed from AGENTS.md per install
+
 ### 2026-04-02 (v11.9.0, language-to-language skill propagation)
 
 - Changed `resolve_language_skills` to propagate skills from included *languages* in addition to shared groups
@@ -1179,7 +1441,7 @@ After making ANY code changes:
 ### 2026-02-15
 
 - Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
-- Use for language-independent setup: `vibe-cop install --no-lang` or `--no-lang --agent cursor`
+- Use for language-independent setup: `vibe-cop init --no-lang` or `--no-lang --agent cursor`
 - Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
 - Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
 - When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)

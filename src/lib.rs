@@ -31,6 +31,7 @@ mod config;
 mod download_manager;
 mod file_tracker;
 pub mod github;
+pub mod llm;
 mod template_engine;
 mod template_manager;
 mod utils;
