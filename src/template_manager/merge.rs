@@ -144,10 +144,11 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Resolves the LLM provider and model from CLI args, config, or defaults
+    /// Resolves the LLM provider and model from CLI args, config, env, or error
     ///
-    /// Priority: CLI argument > config value > error (provider is required).
-    /// Model: CLI argument > config value > None (provider default used later).
+    /// Priority: CLI `--provider` > config `merge.provider` > auto-detect from
+    /// environment API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
+    /// Model: CLI `--model` > config `merge.model` > None (provider default used later).
     fn resolve_provider_and_model(cli_provider: Option<&str>, cli_model: Option<&str>) -> Result<(String, Option<String>)>
     {
         let config = Config::load().ok();
@@ -161,11 +162,16 @@ impl TemplateManager
         {
             p
         }
+        else if let Some(detected) = Provider::detect_from_env()
+        {
+            println!("{} Auto-detected provider from environment: {}", "→".blue(), detected.name().green());
+            detected.name().to_string()
+        }
         else
         {
             return Err(anyhow::anyhow!(
-                "No LLM provider specified.\nSet one with: vibe-cop config merge.provider openai\nOr pass --provider on the command line.\nSupported: openai, \
-                 anthropic, ollama, mistral"
+                "No LLM provider specified and none auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: \
+                 vibe-cop config merge.provider openai\nor pass --provider on the command line.\nSupported: openai, anthropic, ollama, mistral"
             ));
         };
 
@@ -509,13 +515,20 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_provider_missing_errors()
+    fn test_resolve_provider_auto_detects_from_env()
     {
+        // When no CLI or config provider is set, auto-detection kicks in.
+        // This test verifies the function succeeds or fails depending on env state;
+        // we test the explicit CLI override path separately above.
         let result = TemplateManager::resolve_provider_and_model(None, None);
-        // May succeed if config has merge.provider set, but in a clean env it should fail
-        // We test the CLI path explicitly here
-        if result.is_err() == true
+
+        if std::env::var("ANTHROPIC_API_KEY").is_ok() == true || std::env::var("OPENAI_API_KEY").is_ok() == true || std::env::var("MISTRAL_API_KEY").is_ok() == true
         {
+            assert!(result.is_ok() == true);
+        }
+        else
+        {
+            assert!(result.is_err() == true);
             assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
         }
     }

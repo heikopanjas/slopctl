@@ -50,6 +50,39 @@ impl Provider
         }
     }
 
+    /// Detects a provider by checking which API key environment variables are set
+    ///
+    /// Checks in order: Anthropic, OpenAI, Mistral. Returns the first provider
+    /// whose API key is present in the environment. Ollama is not auto-detected
+    /// because it requires no key (would always match).
+    pub fn detect_from_env() -> Option<Self>
+    {
+        let candidates = [Self::Anthropic, Self::OpenAi, Self::Mistral];
+
+        for provider in candidates
+        {
+            if let Some(env_var) = provider.api_key_env_var() &&
+                env::var(env_var).is_ok() == true
+            {
+                return Some(provider);
+            }
+        }
+
+        None
+    }
+
+    /// Returns the provider name as a lowercase string
+    pub fn name(&self) -> &'static str
+    {
+        match self
+        {
+            | Self::OpenAi => "openai",
+            | Self::Anthropic => "anthropic",
+            | Self::Ollama => "ollama",
+            | Self::Mistral => "mistral"
+        }
+    }
+
     /// Returns the default model for this provider
     pub fn default_model(&self) -> &'static str
     {
@@ -155,13 +188,7 @@ impl LlmClient
     /// Returns the provider name for display
     pub fn provider_name(&self) -> &str
     {
-        match self.provider
-        {
-            | Provider::OpenAi => "openai",
-            | Provider::Anthropic => "anthropic",
-            | Provider::Ollama => "ollama",
-            | Provider::Mistral => "mistral"
-        }
+        self.provider.name()
     }
 
     /// Returns the model name for display
@@ -325,7 +352,7 @@ mod tests
     #[test]
     fn test_llm_client_missing_api_key()
     {
-        // Temporarily unset any key to guarantee failure
+        let _lock = ENV_LOCK.lock().expect("env lock");
         let saved = env::var("OPENAI_API_KEY").ok();
         unsafe { env::remove_var("OPENAI_API_KEY") };
 
@@ -338,4 +365,108 @@ mod tests
             unsafe { env::set_var("OPENAI_API_KEY", key) };
         }
     }
+
+    #[test]
+    fn test_provider_name()
+    {
+        assert_eq!(Provider::OpenAi.name(), "openai");
+        assert_eq!(Provider::Anthropic.name(), "anthropic");
+        assert_eq!(Provider::Ollama.name(), "ollama");
+        assert_eq!(Provider::Mistral.name(), "mistral");
+    }
+
+    #[test]
+    fn test_detect_from_env_anthropic()
+    {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let saved_a = env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = env::var("OPENAI_API_KEY").ok();
+        let saved_m = env::var("MISTRAL_API_KEY").ok();
+
+        unsafe { env::set_var("ANTHROPIC_API_KEY", "test-key") };
+        unsafe { env::remove_var("OPENAI_API_KEY") };
+        unsafe { env::remove_var("MISTRAL_API_KEY") };
+
+        let detected = Provider::detect_from_env();
+        assert_eq!(detected, Some(Provider::Anthropic));
+
+        // Restore
+        unsafe { env::remove_var("ANTHROPIC_API_KEY") };
+        if let Some(k) = saved_a
+        {
+            unsafe { env::set_var("ANTHROPIC_API_KEY", k) };
+        }
+        if let Some(k) = saved_o
+        {
+            unsafe { env::set_var("OPENAI_API_KEY", k) };
+        }
+        if let Some(k) = saved_m
+        {
+            unsafe { env::set_var("MISTRAL_API_KEY", k) };
+        }
+    }
+
+    #[test]
+    fn test_detect_from_env_openai()
+    {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let saved_a = env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = env::var("OPENAI_API_KEY").ok();
+        let saved_m = env::var("MISTRAL_API_KEY").ok();
+
+        unsafe { env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { env::set_var("OPENAI_API_KEY", "test-key") };
+        unsafe { env::remove_var("MISTRAL_API_KEY") };
+
+        let detected = Provider::detect_from_env();
+        assert_eq!(detected, Some(Provider::OpenAi));
+
+        // Restore
+        unsafe { env::remove_var("OPENAI_API_KEY") };
+        if let Some(k) = saved_a
+        {
+            unsafe { env::set_var("ANTHROPIC_API_KEY", k) };
+        }
+        if let Some(k) = saved_o
+        {
+            unsafe { env::set_var("OPENAI_API_KEY", k) };
+        }
+        if let Some(k) = saved_m
+        {
+            unsafe { env::set_var("MISTRAL_API_KEY", k) };
+        }
+    }
+
+    #[test]
+    fn test_detect_from_env_none()
+    {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let saved_a = env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = env::var("OPENAI_API_KEY").ok();
+        let saved_m = env::var("MISTRAL_API_KEY").ok();
+
+        unsafe { env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { env::remove_var("OPENAI_API_KEY") };
+        unsafe { env::remove_var("MISTRAL_API_KEY") };
+
+        let detected = Provider::detect_from_env();
+        assert_eq!(detected, None);
+
+        // Restore
+        if let Some(k) = saved_a
+        {
+            unsafe { env::set_var("ANTHROPIC_API_KEY", k) };
+        }
+        if let Some(k) = saved_o
+        {
+            unsafe { env::set_var("OPENAI_API_KEY", k) };
+        }
+        if let Some(k) = saved_m
+        {
+            unsafe { env::set_var("MISTRAL_API_KEY", k) };
+        }
+    }
+
+    /// Serializes tests that modify environment variables
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

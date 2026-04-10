@@ -804,6 +804,10 @@ After making ANY code changes:
 
 - Implemented `merge` command: LLM-assisted merge of customized workspace files with updated templates
 - New `src/llm.rs`: LLM provider abstraction supporting OpenAI, Anthropic, Ollama, and Mistral
+- Auto-detection of LLM provider from environment API key variables
+  - Priority: CLI `--provider` > config `merge.provider` > env auto-detect > error
+  - Checks `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` in order
+  - Ollama not auto-detected (requires no key, would always match)
   - `Provider` enum with `from_name()`, `default_model()`, `endpoint()`, API key env var lookup
   - `LlmClient` struct with `chat()` method; OpenAI-compatible path for OpenAI/Ollama/Mistral, dedicated Anthropic Messages API path
   - API keys read from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`); Ollama requires no key
