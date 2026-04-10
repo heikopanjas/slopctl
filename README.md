@@ -22,6 +22,7 @@ vibe-cop is a command-line tool that helps you:
 - **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates or GitHub repos
 - **Independent skill loading** – Install skills standalone with `--skill user/repo` (no templates or agent required); uses cross-client `.agents/skills/` directory per agentskills.io spec
 - **Keep templates synchronized** – Update global templates from remote sources
+- **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
 - **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Compatible with Claude Code, Cursor, GitHub Copilot, and Codex
@@ -45,15 +46,16 @@ vibe-cop/
 │   ├── download_manager.rs     # DownloadManager for URL downloads
 │   ├── file_tracker.rs         # SHA-256 file tracking for modification detection
 │   ├── github.rs               # GitHub API integration (URL parsing, Contents API, downloads)
+│   ├── llm.rs                  # LLM provider abstraction (OpenAI, Anthropic, Ollama, Mistral)
 │   ├── template_engine.rs      # TemplateEngine struct, fragment merging, update logic
 │   ├── template_manager/       # TemplateManager implementation (directory module)
 │   │   ├── mod.rs              # Struct, constructor, and helpers
 │   │   ├── update.rs           # init/update command logic
+│   │   ├── merge.rs            # AI-assisted merge command logic
 │   │   ├── purge.rs            # Purge all vibe-cop files
 │   │   ├── remove.rs           # Remove agent/language/skill files
 │   │   ├── doctor.rs           # Workspace health checks and fixes
-│   │   ├── status.rs           # Show project status
-│   │   └── list.rs             # List available agents/languages
+│   │   └── list.rs             # List available agents/languages and workspace status
 │   └── utils.rs                # Utility functions
 ├── LICENSE                     # MIT license
 ├── README.md                   # You are here
@@ -65,7 +67,8 @@ vibe-cop/
 │       ├── claude/             # Claude-specific files (CLAUDE.md references AGENTS.md)
 │       ├── copilot/            # GitHub Copilot files
 │       ├── cursor/             # Cursor files
-│       └── ...                 # Language templates (coding conventions, build commands, etc.)
+│       ├── skills/             # Agent Skills (coding conventions, build commands, etc.)
+│       └── ...                 # Language config templates and skill hint fragments
 ├── CLAUDE.md                   # Claude-specific reference
 └── .github/
     └── copilot-instructions.md # GitHub Copilot reference
@@ -116,7 +119,7 @@ v13.0.0 is a major version bump with breaking changes:
 1. **`install` renamed back to `init`**: Update any scripts or aliases.
 2. **Codex templates modernized**: `CODEX.md` and `~/.codex/prompts/init-session.md` are no longer installed. Codex reads `AGENTS.md` natively.
 3. **Session Protocol**: The AGENTS.md template now includes a Session Protocol section for agents that read it directly.
-4. **New `merge` command**: Placeholder for upcoming AI-assisted merge (not yet implemented).
+4. **`merge` command**: AI-assisted merge of customized workspace files with updated templates (supports OpenAI, Anthropic, Ollama, Mistral).
 
 ```bash
 # Before (v12): vibe-cop install --lang rust --agent cursor
@@ -181,9 +184,10 @@ vibe-cop init --skill user/repo  # Install a skill only (no templates needed)
 With `--lang rust` this will:
 
 1. Copy main AGENTS.md template to your project
-2. Merge language-specific fragments (Rust conventions, build commands) into AGENTS.md
-3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
-4. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, and Codex)
+2. Merge skill hint fragments into AGENTS.md (tells agents about available coding skills)
+3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore)
+4. Install language skills (rust-coding-conventions, rust-build-commands) to `.agents/skills/`
+5. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, and Codex)
 
 Without `--lang`, you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
@@ -234,15 +238,18 @@ vibe-cop init --lang rust
    - Merges fragments at insertion points:
      - **Mission section**: mission-statement.md, technology-stack.md
      - **Principles section**: core-principles.md, best-practices.md
-     - **Languages section**: rust-coding-conventions.md, rust-build-commands.md (Rust specific)
-     - **Integration section**: git-workflow-conventions.md, semantic-versioning.md
+     - **Languages section**: skill hint fragment (tells agents about available skills)
+     - **Integration section**: git-workflow summary, semantic-versioning summary
    - Saves complete merged file to `./AGENTS.md`
 
 4. **Installs language config files**:
    - Copies `.rustfmt.toml` for Rust formatting
    - Copies `.editorconfig` for editor configuration
    - Copies `.gitignore` for Rust artifacts
-   - Copies `.gitattributes` for cross-platform compatibility
+
+5. **Installs language skills** (as Agent Skills to `.agents/skills/`):
+   - `rust-coding-conventions` — Rust coding standards and conventions
+   - `rust-build-commands` — Cargo build commands and workflows
 
 ### Step 3: Verify Installation
 
@@ -258,7 +265,11 @@ my-rust-project/
 ├── .rustfmt.toml                      # Rust formatting configuration
 ├── .editorconfig                      # Editor configuration
 ├── .gitignore                         # Git ignore file
-└── .gitattributes                     # Git attributes file
+└── .agents/skills/                    # Cross-client Agent Skills directory
+    ├── rust-coding-conventions/       # Rust coding standards skill
+    │   └── SKILL.md
+    └── rust-build-commands/           # Cargo build commands skill
+        └── SKILL.md
 ```
 
 ### Step 4: Start Coding with Any Agent
@@ -286,7 +297,7 @@ Please confirm you've read AGENTS.md and understand the project instructions.
 The agent should acknowledge the:
 
 - Commit protocol (no auto-commits)
-- Rust coding conventions
+- Available coding skills (Rust conventions, build commands)
 - Git workflow conventions
 - Build environment requirements
 
@@ -843,23 +854,32 @@ vibe-cop completions powershell > vibe-cop.ps1
 
 Merge customized workspace files with updated templates using AI assistance. By default, merged content replaces the original file directly. Use `--preview` to write `.merged` sidecar files for manual review instead.
 
+The provider can be specified via `--provider`, the `merge.provider` config key, or auto-detected from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` — checked in that order). The model can be set via `--model`, the `merge.model` config key, or the provider's default.
+
 **Usage:**
 
 ```bash
+vibe-cop merge                                    # Auto-detect provider from env
 vibe-cop merge --provider anthropic
 vibe-cop merge --provider openai --model gpt-4o
 vibe-cop merge --provider anthropic --preview
 vibe-cop merge --provider anthropic --dry-run
-vibe-cop merge --provider anthropic --list-models
+vibe-cop merge --provider anthropic --verbose
+vibe-cop merge --list-models
 ```
 
 **Options:**
 
-- `--provider` / `-p` - LLM provider (openai, anthropic, ollama, mistral)
-- `--model` / `-m` - Model to use for merging
+- `--provider` / `-p` - LLM provider (openai, anthropic, ollama, mistral). Falls back to config `merge.provider`, then auto-detection from environment API keys.
+- `--model` / `-m` - Model to use for merging. Falls back to config `merge.model`, then provider default.
 - `--preview` - Write `.merged` sidecar files instead of replacing originals
 - `--dry-run` / `-n` - Show merge candidates without calling the LLM
 - `--list-models` / `-L` - List available models from the selected provider
+- `--verbose` / `-v` - Show token usage summary after merging (input/output tokens, stop reason). Warns if any file was truncated due to max token limits.
+
+**Provider priority:** CLI `--provider` > config `merge.provider` > environment auto-detect > error
+
+**Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 
 ### `config` - Manage Configuration
 
@@ -898,12 +918,20 @@ vibe-cop config --remove source.url
 
 # Set fallback source for resilience
 vibe-cop config --add source.fallback https://github.com/heikopanjas/vibe-cop/tree/develop/templates
+
+# Set default LLM provider for merge
+vibe-cop config --add merge.provider anthropic
+
+# Set default model for merge
+vibe-cop config --add merge.model claude-sonnet-4-20250514
 ```
 
 **Valid Configuration Keys:**
 
 - `source.url` - Default template download URL (used by `templates --update` and `init` when `--from` not specified)
 - `source.fallback` - Fallback URL used when primary source fails or is unreachable
+- `merge.provider` - Default LLM provider for the `merge` command (openai, anthropic, ollama, mistral)
+- `merge.model` - Default model for the `merge` command (e.g., `gpt-4o`, `claude-sonnet-4-20250514`)
 
 **Configuration File Location:**
 
@@ -913,7 +941,7 @@ vibe-cop config --add source.fallback https://github.com/heikopanjas/vibe-cop/tr
 **Behavior:**
 
 - Configuration persists between sessions
-- `update` command uses `source.url` if set and `--from` not specified
+- `templates --update` command uses `source.url` if set and `--from` not specified
 - `init` command uses `source.url` when downloading missing global templates
 - If primary source fails and `source.fallback` is configured, automatically tries the fallback
 - Empty configuration file is valid (all defaults used)
@@ -944,12 +972,13 @@ One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AG
 
 Currently configured in `templates.yml`:
 
-- **C** - C programming language (fragments: `c-coding-conventions.md` and `cmake-build-commands.md` merged into AGENTS.md)
-- **C++** - C++ programming language (fragments: `c++-coding-conventions.md` and `cmake-build-commands.md` merged into AGENTS.md)
-- **Rust** - Rust programming language (fragments: `rust-coding-conventions.md` and `rust-build-commands.md` merged into AGENTS.md)
-- **Swift** - Swift programming language (fragments: `swift-coding-conventions.md` and `swift-build-commands.md` merged into AGENTS.md)
+- **C** - C programming language (skills: `c-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
+- **C++** - C++ programming language (skills: `c++-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
+- **Rust** - Rust programming language (skills: `rust-coding-conventions`, `rust-build-commands`; config files: `.rustfmt.toml`, `.editorconfig`, `.gitignore`)
+- **Swift** - Swift programming language (skills: `swift-coding-conventions`, `swift-build-commands`, `swift-concurrency-pro`; config files: `.swift-format`, `.editorconfig`, `.gitignore`)
+- **SwiftUI** - SwiftUI framework (includes all Swift skills and config files plus `swiftui-pro` skill)
 
-Additional language templates can be added to `templates.yml` configuration. Language-specific content is stored as fragments in the global templates directory and merged into AGENTS.md during init.
+Coding conventions and build commands are installed as [Agent Skills](https://agentskills.io) rather than fragments merged into AGENTS.md. A slim hint fragment is merged into AGENTS.md to inform agents that skills are available. Additional language templates can be added to `templates.yml` configuration.
 
 ## How It Works
 
@@ -998,7 +1027,7 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 - **Standalone mode**: `--skill` can be used without `--lang` or `--agent` — skills are installed to the cross-client `$workspace/.agents/skills/` directory without requiring global templates, AGENTS.md, or an agent. This follows the [agentskills.io](https://agentskills.io) cross-client interoperability spec.
 - GitHub skills are downloaded on-the-fly via the GitHub Contents API (no local cache)
 - Skills are tracked with the `"skill"` category in the file tracker for modification detection
-- The `templates --list` command shows available skills (including agent and language skill counts); `list` (default) shows installed skills
+- The `templates --list` command shows available skills (including agent and language skill counts); `status` shows installed skills
 - Removing an agent (`vibe-cop remove --agent <name>`) also removes its skills
 
 **Example per-agent skills in templates.yml:**
@@ -1099,9 +1128,9 @@ The `templates.yml` file defines the template structure with a version field and
 **Version Field:**
 
 - `version: 5` (default) - Agent, language, and shared group skill associations, composable languages
-- Missing version defaults to 4
+- Missing version defaults to 5
 - vibe-cop automatically detects the version from `templates.yml` and uses the appropriate template engine
-- The `list` command shows the installed template version
+- The `status` command shows the installed template version
 
 **Main Sections:**
 
@@ -1321,7 +1350,7 @@ languages:
 
 ### Template Management
 
-1. **First run**: `update` downloads `templates.yml` and all specified files from GitHub
+1. **First run**: `templates --update` downloads `templates.yml` and all specified files from GitHub
 2. **Local storage**: Templates are cached in platform-specific directory
 3. **Protection**: Template marker in AGENTS.md detects customization and prevents accidental overwrites
 4. **Updates**: Detect AGENTS.md customization and warn before overwriting
@@ -1335,16 +1364,16 @@ When you run `vibe-cop init --lang rust`:
 2. Loads `templates.yml` configuration and detects version
 3. Uses TemplateEngine for agents.md standard
 4. Downloads main AGENTS.md template
-5. Merges fragments (mission, principles, language, integration) into AGENTS.md at insertion points
-6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore, .gitattributes)
-7. Single AGENTS.md works with all agents
-8. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md), agent skills, and creates agent directories (e.g. `.cursor/plans`)
-9. Language-associated skills are installed to the cross-client `.agents/skills/` directory
+5. Merges fragments (mission, principles, skill hints, integration) into AGENTS.md at insertion points
+6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore)
+7. Installs language skills (e.g. rust-coding-conventions, rust-build-commands) to `.agents/skills/`
+8. Single AGENTS.md works with all agents
+9. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md), agent skills, and creates agent directories (e.g. `.cursor/plans`)
 10. You're ready to start coding with any agent
 
 **Without `--lang`** (language-independent setup):
 
-1. Same as above but skips language fragments and language config files
+1. Same as above but skips language skill hints, config files, and language skills
 2. AGENTS.md contains mission, principles, integration (e.g. git, versioning) only
 3. Requires `--agent` to specify which agent prompts to set up
 
@@ -1415,7 +1444,10 @@ To add a new language or agent template:
 - **Shell Completions:** clap_complete v4.5
 - **Terminal Colors:** owo-colors v4.1.0
 - **HTTP Client:** reqwest v0.12 (blocking, json)
-- **Serialization:** serde v1.0, serde_yaml v0.9
+- **Serialization:** serde v1.0, serde_yaml v0.9, serde_json v1.0
+- **Error Handling:** anyhow v1.0
+- **Hashing:** sha2 v0.10
+- **Timestamps:** chrono v0.4
 - **Directory Paths:** dirs v5.0
 - **Temp Files:** tempfile v3.13
 - **Man Pages:** clap_mangen v0.2 (build dependency)
@@ -1432,7 +1464,7 @@ To add a new language or agent template:
 vibe-cop detects customization via template marker removal and skips AGENTS.md when updating. Use `--force` to override.
 
 **Can I use my own template repository?**
-Yes! Use the `--from` option with the `update` command to specify a local path or GitHub URL.
+Yes! Use the `--from` option with the `templates --update` command to specify a local path or GitHub URL.
 
 **Why AGENTS.md as single source of truth?**
 Centralized updates prevent drift and make it easier to maintain consistency across sessions.
@@ -1513,4 +1545,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: April 10, 2026 (v13.0.0)
+Last updated: April 10, 2026 (v13.3.0)
