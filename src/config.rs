@@ -17,7 +17,9 @@ use crate::Result;
 pub struct Config
 {
     #[serde(default)]
-    pub source: SourceConfig
+    pub source: SourceConfig,
+    #[serde(default)]
+    pub merge:  MergeConfig
 }
 
 /// Source-related configuration
@@ -28,6 +30,18 @@ pub struct SourceConfig
     pub url:      Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>
+}
+
+/// Merge-related configuration for AI-assisted merging
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct MergeConfig
+{
+    /// LLM provider name (openai, anthropic, ollama, mistral)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Model identifier (e.g. gpt-4o, claude-sonnet-4-20250514, llama3)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model:    Option<String>
 }
 
 impl Config
@@ -94,6 +108,8 @@ impl Config
         {
             | "source.url" => self.source.url.clone(),
             | "source.fallback" => self.source.fallback.clone(),
+            | "merge.provider" => self.merge.provider.clone(),
+            | "merge.model" => self.merge.model.clone(),
             | _ => None
         }
     }
@@ -113,6 +129,16 @@ impl Config
             | "source.fallback" =>
             {
                 self.source.fallback = Some(value.to_string());
+                Ok(())
+            }
+            | "merge.provider" =>
+            {
+                self.merge.provider = Some(value.to_string());
+                Ok(())
+            }
+            | "merge.model" =>
+            {
+                self.merge.model = Some(value.to_string());
                 Ok(())
             }
             | _ => Err(anyhow::anyhow!("Unknown config key: {}", key))
@@ -136,6 +162,16 @@ impl Config
                 self.source.fallback = None;
                 Ok(())
             }
+            | "merge.provider" =>
+            {
+                self.merge.provider = None;
+                Ok(())
+            }
+            | "merge.model" =>
+            {
+                self.merge.model = None;
+                Ok(())
+            }
             | _ => Err(anyhow::anyhow!("Unknown config key: {}", key))
         }
     }
@@ -157,13 +193,23 @@ impl Config
             values.insert("source.fallback".to_string(), fallback.clone());
         }
 
+        if let Some(provider) = &self.merge.provider
+        {
+            values.insert("merge.provider".to_string(), provider.clone());
+        }
+
+        if let Some(model) = &self.merge.model
+        {
+            values.insert("merge.model".to_string(), model.clone());
+        }
+
         values
     }
 
     /// Get list of all valid config keys
     pub fn valid_keys() -> Vec<&'static str>
     {
-        vec!["source.url", "source.fallback"]
+        vec!["source.url", "source.fallback", "merge.provider", "merge.model"]
     }
 }
 
@@ -270,7 +316,48 @@ mod tests
     fn test_config_valid_keys()
     {
         let keys = Config::valid_keys();
-        assert_eq!(keys, vec!["source.url", "source.fallback"]);
+        assert_eq!(keys, vec!["source.url", "source.fallback", "merge.provider", "merge.model"]);
+    }
+
+    #[test]
+    fn test_config_get_set_merge_provider() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("merge.provider", "openai")?;
+        assert_eq!(config.get("merge.provider").ok_or_else(|| anyhow::anyhow!("merge.provider not set"))?, "openai");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_get_set_merge_model() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("merge.model", "gpt-4o")?;
+        assert_eq!(config.get("merge.model").ok_or_else(|| anyhow::anyhow!("merge.model not set"))?, "gpt-4o");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_unset_merge_provider() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("merge.provider", "anthropic")?;
+        config.unset("merge.provider")?;
+        assert!(config.get("merge.provider").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_list_includes_merge() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("merge.provider", "openai")?;
+        config.set("merge.model", "gpt-4o")?;
+
+        let values = config.list();
+        assert_eq!(values.get("merge.provider").ok_or_else(|| anyhow::anyhow!("merge.provider not in list"))?, "openai");
+        assert_eq!(values.get("merge.model").ok_or_else(|| anyhow::anyhow!("merge.model not in list"))?, "gpt-4o");
+        Ok(())
     }
 
     #[test]

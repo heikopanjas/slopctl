@@ -2,6 +2,7 @@
 
 mod doctor;
 mod list;
+mod merge;
 mod purge;
 mod remove;
 mod update;

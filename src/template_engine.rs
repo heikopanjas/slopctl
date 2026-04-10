@@ -169,6 +169,21 @@ impl<'a> TemplateEngine<'a>
         self.config_dir
     }
 
+    /// Resolves a target path string containing placeholder variables
+    ///
+    /// Public wrapper around `resolve_placeholder` for use by the merge command
+    /// and other modules that need to map templates.yml targets to workspace paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Target path string (may contain `$workspace` or `$userprofile`)
+    /// * `workspace` - Workspace directory path
+    /// * `userprofile` - User profile directory path
+    pub fn resolve_target(&self, target: &str, workspace: &Path, userprofile: &Path) -> PathBuf
+    {
+        self.resolve_placeholder(target, workspace, userprofile)
+    }
+
     /// Resolves placeholder variables in target paths
     ///
     /// Replaces `$workspace` with the workspace directory path

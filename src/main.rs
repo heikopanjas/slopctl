@@ -549,11 +549,17 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { .. } =>
+        | Commands::Merge { provider, model, dry_run } =>
         {
-            eprintln!("{} The merge command is not yet implemented", "!".yellow());
-            eprintln!("{} This feature will use AI to merge customized files with updated templates", "→".blue());
-            Ok(())
+            if dry_run == true
+            {
+                println!("{} Dry run: previewing merge candidates", "→".blue());
+            }
+            else
+            {
+                println!("{} AI-assisted merge of customized files", "→".blue());
+            }
+            manager.merge(provider.as_deref(), model.as_deref(), dry_run)
         }
         | Commands::Completions { shell } =>
         {
