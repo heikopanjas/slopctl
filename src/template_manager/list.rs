@@ -228,7 +228,7 @@ impl TemplateManager
             {
                 println!("{}", "Managed Files:".bold());
                 println!("  {} No vibe-cop files found in current directory", "○".yellow());
-                println!("  {} Run 'vibe-cop install --lang <lang> --agent <agent>' to set up", "→".blue());
+                println!("  {} Run 'vibe-cop init --lang <lang> --agent <agent>' to set up", "→".blue());
             }
         }
 
@@ -403,7 +403,7 @@ impl TemplateManager
         }
 
         println!();
-        println!("{} Use 'vibe-cop install --lang <lang> --agent <agent>' to install", "→".blue());
+        println!("{} Use 'vibe-cop init --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
     }

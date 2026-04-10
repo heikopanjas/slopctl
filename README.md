@@ -48,7 +48,7 @@ vibe-cop/
 │   ├── template_engine.rs      # TemplateEngine struct, fragment merging, update logic
 │   ├── template_manager/       # TemplateManager implementation (directory module)
 │   │   ├── mod.rs              # Struct, constructor, and helpers
-│   │   ├── update.rs           # install/update command logic
+│   │   ├── update.rs           # init/update command logic
 │   │   ├── purge.rs            # Purge all vibe-cop files
 │   │   ├── remove.rs           # Remove agent/language/skill files
 │   │   ├── doctor.rs           # Workspace health checks and fixes
@@ -64,7 +64,6 @@ vibe-cop/
 │       ├── AGENTS.md           # Single instruction file for all agents
 │       ├── claude/             # Claude-specific files (CLAUDE.md references AGENTS.md)
 │       ├── copilot/            # GitHub Copilot files
-│       ├── codex/              # Codex files
 │       ├── cursor/             # Cursor files
 │       └── ...                 # Language templates (coding conventions, build commands, etc.)
 ├── CLAUDE.md                   # Claude-specific reference
@@ -92,7 +91,7 @@ vibe-cop uses the V5 template format following the [agents.md](https://agents.md
 - [Agent Skills](https://agentskills.io) support: define skills per agent, per language, or as top-level entries
 - Shared file groups (`shared` section) and composable languages (`includes`) for reuse across languages
 - Skills associated with agents, languages, or shared groups — skills propagate via `includes` (from shared groups and from included languages)
-- Simpler initialization: `vibe-cop install --lang rust` or omit `--lang` for language-independent setup
+- Simpler initialization: `vibe-cop init --lang rust` or omit `--lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Independent skill loading: `--skill` works standalone (no templates, no agent required) or combined with `--lang`/`--agent`
@@ -103,9 +102,25 @@ vibe-cop uses the V5 template format following the [agents.md](https://agents.md
 
 ```bash
 vibe-cop templates --update            # Downloads V5 templates
-vibe-cop install --lang rust           # With language conventions
-vibe-cop install --agent cursor        # Agent only (AGENTS.md + agent prompts, no language files)
-vibe-cop install --skill user/repo     # Install a skill (standalone, to .agents/skills/)
+vibe-cop init --lang rust           # With language conventions
+vibe-cop init --agent cursor        # Agent only (AGENTS.md + agent prompts, no language files)
+vibe-cop init --skill user/repo     # Install a skill (standalone, to .agents/skills/)
+```
+
+### Migration from v12 to v13
+
+**Upgrading from v12.x to v13.0.0:**
+
+v13.0.0 is a major version bump with breaking changes:
+
+1. **`install` renamed back to `init`**: Update any scripts or aliases.
+2. **Codex templates modernized**: `CODEX.md` and `~/.codex/prompts/init-session.md` are no longer installed. Codex reads `AGENTS.md` natively.
+3. **Session Protocol**: The AGENTS.md template now includes a Session Protocol section for agents that read it directly.
+4. **New `merge` command**: Placeholder for upcoming AI-assisted merge (not yet implemented).
+
+```bash
+# Before (v12): vibe-cop install --lang rust --agent cursor
+# After  (v13): vibe-cop init --lang rust --agent cursor
 ```
 
 ### Migration from v8 to v9
@@ -114,28 +129,23 @@ vibe-cop install --skill user/repo     # Install a skill (standalone, to .agents
 
 ```bash
 vibe-cop templates --update        # Gets V5 templates
-vibe-cop install --lang rust       # Initialize with V5
+vibe-cop init --lang rust          # Initialize with V5
 ```
 
 ### Migration from v7 to v8
 
 **Upgrading from v7.x to v8.0.0:**
 
-v8.0.0 is a major version bump with one breaking change: **the `init` command has been renamed to `install`**. Update any scripts or aliases accordingly.
-
-```bash
-# Before (v7):  vibe-cop init --lang rust --agent cursor
-# After  (v8):  vibe-cop install --lang rust --agent cursor
-```
+v8.0.0 renamed `init` to `install` (reversed in v13.0.0 back to `init`).
 
 **New features in v8.0.0:**
 
-- `--skill` flag: Install skills from GitHub repos or local paths (`--skill user/repo`, `--skill https://github.com/...`, `--skill ./path`)
+- `--skill` flag: Install skills from GitHub repos or local paths
 - GitHub URL support in templates.yml `source` fields (full URLs only, no shorthand)
 - Top-level `skills` section in templates.yml for agent-agnostic skills
 - `agent_defaults.rs`: built-in registry of agent paths (instructions, prompts, skills)
 - `github.rs`: GitHub Contents API integration for on-the-fly downloads
-- Automatic agent detection when `--agent` is not specified (for template-based install; `--skill` alone needs no agent)
+- Automatic agent detection when `--agent` is not specified
 - `UpdateOptions` struct now carries all parameters through the call chain
 
 ## Installation
@@ -163,9 +173,9 @@ vibe-cop templates --update
 
 # 2. Initialize your project (choose one style)
 cd your-project
-vibe-cop install --lang rust         # With Rust conventions and config files
-vibe-cop install --agent cursor     # Agent prompts + skills (AGENTS.md without language files)
-vibe-cop install --skill user/repo  # Install a skill only (no templates needed)
+vibe-cop init --lang rust         # With Rust conventions and config files
+vibe-cop init --agent cursor     # Agent prompts + skills (AGENTS.md without language files)
+vibe-cop init --skill user/repo  # Install a skill only (no templates needed)
 ```
 
 With `--lang rust` this will:
@@ -187,7 +197,7 @@ vibe-cop templates --update --from /path/to/templates
 vibe-cop templates --update --from https://github.com/user/repo/tree/branch/templates
 
 # Then initialize the project
-vibe-cop install --lang c++ --agent claude
+vibe-cop init --lang c++ --agent claude
 ```
 
 **Note:** The custom source must include a `templates.yml` file that defines the template structure.
@@ -206,7 +216,7 @@ cd my-rust-project
 ### Step 2: Initialize with vibe-cop
 
 ```bash
-vibe-cop install --lang rust
+vibe-cop init --lang rust
 ```
 
 **What happens:**
@@ -304,7 +314,7 @@ If templates are updated upstream:
 vibe-cop templates --update
 
 # Then reinitialize the project (will skip customized AGENTS.md unless --force)
-vibe-cop install --lang rust
+vibe-cop init --lang rust
 ```
 
 vibe-cop will:
@@ -317,7 +327,7 @@ vibe-cop will:
 **Scenario: Modified AGENTS.md locally**
 
 ```bash
-$ vibe-cop install --lang rust
+$ vibe-cop init --lang rust
 ! Local AGENTS.md has been customized and will be skipped
 → Other files will still be updated
 → Use --force to overwrite AGENTS.md
@@ -329,7 +339,7 @@ $ vibe-cop install --lang rust
 git diff AGENTS.md              # Review changes
 git add AGENTS.md
 git commit -m "docs: customize project instructions"
-vibe-cop install --lang rust --force
+vibe-cop init --lang rust --force
 ```
 
 **Scenario: Clean up project templates**
@@ -361,7 +371,7 @@ vibe-cop remove --agent claude
 vibe-cop remove --lang rust
 
 # Then install C++ config files
-vibe-cop install --lang c++
+vibe-cop init --lang c++
 ```
 
 **Scenario: Diagnose and fix workspace issues**
@@ -374,21 +384,21 @@ vibe-cop doctor --verbose
 vibe-cop doctor --fix
 
 # Re-merge language sections after fixing an unmerged AGENTS.md
-vibe-cop install --lang rust
+vibe-cop init --lang rust
 ```
 
 **Scenario: Switch from Cursor to Claude (keep Rust setup)**
 
 ```bash
 # You have Rust + Cursor; want to add Claude prompts
-vibe-cop install --agent claude
+vibe-cop init --agent claude
 # Uses existing Rust language; adds Claude prompts only
 ```
 
 **Scenario: Language-independent project (e.g. docs-only repo)**
 
 ```bash
-vibe-cop install --agent cursor
+vibe-cop init --agent cursor
 # AGENTS.md with mission, principles, integration + agent prompts—no .rustfmt.toml, no coding-conventions
 ```
 
@@ -399,12 +409,12 @@ vibe-cop install --agent cursor
 vibe-cop templates --update --from https://github.com/yourteam/templates/tree/main/templates
 
 # Then initialize
-vibe-cop install --lang rust
+vibe-cop init --lang rust
 ```
 
 ### Tips for Success
 
-1. **Initialize early**: Run `vibe-cop install` at project start before adding code
+1. **Initialize early**: Run `vibe-cop init` at project start before adding code
 2. **Commit instructions**: Add AGENTS.md and agent files to version control
 3. **Team consistency**: All team members should use same template source
 4. **Customize carefully**: Modify AGENTS.md as needed, but track changes in git
@@ -471,11 +481,11 @@ vibe-cop templates --update --list
 - Overwrites existing global templates with new versions
 - Does NOT modify any files in the current project directory
 
-**Note:** Run `update` first to download templates before using `install` to set up a project.
+**Note:** Run `templates --update` first to download templates before using `init` to set up a project.
 
-### `install` - Install Agent Instructions and Skills
+### `init` - Initialize Agent Instructions and Skills
 
-Install instruction files and skills for AI coding agents in your project.
+Initialize instruction files and skills for AI coding agents in your project.
 
 **Usage:**
 
@@ -483,13 +493,13 @@ Install instruction files and skills for AI coding agents in your project.
 # Specify at least one of --lang, --agent, or --skill
 
 # With language conventions
-vibe-cop install --lang <language> [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+vibe-cop init --lang <language> [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
 
 # Agent only (preserves existing language, or language-independent if fresh)
-vibe-cop install --agent <agent> [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+vibe-cop init --agent <agent> [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
 
 # Install skills only (standalone, no templates or agent required)
-vibe-cop install --skill <url> [--skill <url>]... [--force] [--dry-run]
+vibe-cop init --skill <url> [--skill <url>]... [--force] [--dry-run]
 ```
 
 **Options:**
@@ -505,44 +515,44 @@ vibe-cop install --skill <url> [--skill <url>]... [--force] [--dry-run]
 
 ```bash
 # Initialize Rust project (works with all agents)
-vibe-cop install --lang rust
+vibe-cop init --lang rust
 
 # Initialize C++ project
-vibe-cop install --lang c++
+vibe-cop init --lang c++
 
 # Agent only (AGENTS.md + agent prompts, no language files)
-vibe-cop install --agent cursor
+vibe-cop init --agent cursor
 
 # Switch from Cursor to Claude (keeps existing language e.g. Rust)
-vibe-cop install --agent claude
+vibe-cop init --agent claude
 
 # Initialize with custom mission statement (inline)
-vibe-cop install --lang rust --mission "A CLI tool for managing AI agent instructions"
+vibe-cop init --lang rust --mission "A CLI tool for managing AI agent instructions"
 
 # Initialize with mission statement from file (multi-line support)
-vibe-cop install --lang rust --mission @mission.md
+vibe-cop init --lang rust --mission @mission.md
 
 # Force overwrite existing local files
-vibe-cop install --lang swift --force
+vibe-cop init --lang swift --force
 
 # Install a skill standalone (to .agents/skills/ cross-client directory)
-vibe-cop install --skill user/my-skill
+vibe-cop init --skill user/my-skill
 
 # Install multiple skills standalone
-vibe-cop install --skill user/skill-a --skill user/skill-b
+vibe-cop init --skill user/skill-a --skill user/skill-b
 
 # Install a skill with a specific agent (to agent-specific directory, e.g. .cursor/skills/)
-vibe-cop install --agent cursor --skill user/my-skill
+vibe-cop init --agent cursor --skill user/my-skill
 
 # Install a skill from a full GitHub URL
-vibe-cop install --skill https://github.com/user/skills/tree/main/create-rule
+vibe-cop init --skill https://github.com/user/skills/tree/main/create-rule
 
 # Install a skill from a local path
-vibe-cop install --skill ./path/to/skill
-vibe-cop install --skill ~/skills/my-skill
+vibe-cop init --skill ./path/to/skill
+vibe-cop init --skill ~/skills/my-skill
 
 # Preview what would be created/modified
-vibe-cop install --lang rust --dry-run
+vibe-cop init --lang rust --dry-run
 ```
 
 **Behavior:**
@@ -709,9 +719,9 @@ vibe-cop doctor [--fix] [--dry-run] [--verbose]
 
 **What `--fix` repairs:**
 
-- **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `vibe-cop install` to reinstall.
-- **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `vibe-cop install` afterward for a full re-merge with language sections.
-- **Modified** — No automatic fix; shown as informational. Use `vibe-cop install --force` to overwrite if intended.
+- **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `vibe-cop init` to reinstall.
+- **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `vibe-cop init` afterward for a full re-merge with language sections.
+- **Modified** — No automatic fix; shown as informational. Use `vibe-cop init --force` to overwrite if intended.
 
 **Examples:**
 
@@ -829,6 +839,24 @@ vibe-cop completions fish > ~/.config/fish/completions/vibe-cop.fish
 vibe-cop completions powershell > vibe-cop.ps1
 ```
 
+### `merge` - AI-Assisted Merge (Not Yet Implemented)
+
+Merge customized workspace files with updated templates using AI assistance.
+
+**Usage:**
+
+```bash
+vibe-cop merge [--provider <provider>] [--model <model>] [--dry-run]
+```
+
+**Options:**
+
+- `--provider` / `-p` - LLM provider (openai, anthropic, ollama, mistral)
+- `--model` / `-m` - Model to use for merging
+- `--dry-run` / `-n` - Preview what would be merged without calling the API
+
+**Status:** This command is reserved for a future release. Running it currently prints a notice that the feature is not yet implemented.
+
 ### `config` - Manage Configuration
 
 Manage persistent configuration settings using Git-style dotted keys.
@@ -870,7 +898,7 @@ vibe-cop config source.fallback https://github.com/heikopanjas/vibe-cop/tree/dev
 
 **Valid Configuration Keys:**
 
-- `source.url` - Default template download URL (used by `update` and `install` when `--from` not specified)
+- `source.url` - Default template download URL (used by `templates --update` and `init` when `--from` not specified)
 - `source.fallback` - Fallback URL used when primary source fails or is unreachable
 
 **Configuration File Location:**
@@ -882,7 +910,7 @@ vibe-cop config source.fallback https://github.com/heikopanjas/vibe-cop/tree/dev
 
 - Configuration persists between sessions
 - `update` command uses `source.url` if set and `--from` not specified
-- `install` command uses `source.url` when downloading missing global templates
+- `init` command uses `source.url` when downloading missing global templates
 - If primary source fails and `source.fallback` is configured, automatically tries the fallback
 - Empty configuration file is valid (all defaults used)
 
@@ -952,7 +980,7 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 2. **Per-language in templates.yml** – Using `name`/`source` under `languages.<name>.skills` (installed to cross-client `.agents/skills/`)
 3. **Per-shared group in templates.yml** – Using `name`/`source` under `shared.<name>.skills` (propagated to including languages via `includes`)
 4. **Top-level in templates.yml** – Agent-agnostic skills under the `skills` section (installed to agent-specific or cross-client directory)
-5. **Ad-hoc via CLI** – Using `--skill user/repo`, `--skill https://github.com/...`, or `--skill ./local/path` on the `install` command
+5. **Ad-hoc via CLI** – Using `--skill user/repo`, `--skill https://github.com/...`, or `--skill ./local/path` on the `init` command
 
 **How skills work:**
 
@@ -1026,21 +1054,21 @@ skills:
 
 ```bash
 # Standalone (cross-client .agents/skills/ directory)
-vibe-cop install --skill user/my-skill
+vibe-cop init --skill user/my-skill
 
 # With agent (agent-specific directory, e.g. .cursor/skills/)
-vibe-cop install --agent cursor --skill user/my-skill
+vibe-cop init --agent cursor --skill user/my-skill
 
 # From full GitHub URL
-vibe-cop install --skill https://github.com/user/skills/tree/main/create-rule
+vibe-cop init --skill https://github.com/user/skills/tree/main/create-rule
 
 # From local path
-vibe-cop install --skill ./my-local-skill
+vibe-cop init --skill ./my-local-skill
 ```
 
 ### Agent Directories
 
-Agents can declare workspace directories that should be created during `install`. This is useful for directories that the agent expects to exist but that are not tracked by version control — for example, Cursor's `.cursor/plans` directory for storing agent-generated plans.
+Agents can declare workspace directories that should be created during `init`. This is useful for directories that the agent expects to exist but that are not tracked by version control — for example, Cursor's `.cursor/plans` directory for storing agent-generated plans.
 
 **Example in templates.yml:**
 
@@ -1054,7 +1082,7 @@ agents:
       - target: '$workspace/.cursor/plans'
 ```
 
-When a user runs `vibe-cop install --agent cursor`, the `.cursor/plans` directory is created in the workspace alongside the usual instruction and prompt files. If the directory already exists, the step is silently skipped. Directories are also shown in `--dry-run` output.
+When a user runs `vibe-cop init --agent cursor`, the `.cursor/plans` directory is created in the workspace alongside the usual instruction and prompt files. If the directory already exists, the step is silently skipped. Directories are also shown in `--dry-run` output.
 
 Each entry in `directories` has a single field:
 
@@ -1074,7 +1102,7 @@ The `templates.yml` file defines the template structure with a version field and
 **Main Sections:**
 
 1. **main**: Main AGENTS.md instruction file (primary source of truth)
-2. **agents**: Agent-specific files with `instructions`, `prompts`, `skills` (name + source), and `directories` (workspace paths to create during install)
+2. **agents**: Agent-specific files with `instructions`, `prompts`, `skills` (name + source), and `directories` (workspace paths to create during init)
 3. **shared**: Reusable file groups with `files` and optional `skills` (skills propagate to including languages via `includes`)
 4. **languages**: Language-specific coding standards fragments (merged into AGENTS.md), with optional `includes` and `skills`
 5. **integration**: Tool/workflow integration fragments (merged into AGENTS.md, e.g., git workflows)
@@ -1206,7 +1234,7 @@ languages:
         target: '$instructions'
 ```
 
-When a user runs `vibe-cop install --lang c++`, they get:
+When a user runs `vibe-cop init --lang c++`, they get:
 
 - `cmake-build-commands.md` merged into AGENTS.md (from the cmake shared group)
 - `cpp-coding-conventions.md` merged into AGENTS.md (own file)
@@ -1238,7 +1266,7 @@ languages:
         source: 'https://github.com/user/swift-skills/tree/main/swiftui-components'
 ```
 
-When a user runs `vibe-cop install --lang swiftui`, they get everything from `swift` first, then `swiftui`'s own additions on top:
+When a user runs `vibe-cop init --lang swiftui`, they get everything from `swift` first, then `swiftui`'s own additions on top:
 
 | What gets installed | Source |
 |---|---|
@@ -1283,7 +1311,7 @@ languages:
 |---|---|
 | **Shared groups propagate skills** | `includes: [my-shared]` → inherits both files and skills from the shared group |
 | **Languages propagate skills** | `includes: [swift]` → inherits both files and skills from `swift` |
-| **No duplicate disk targets** | Two entries targeting the same `$workspace/` path cause an error at install time; `$instructions` fragments are exempt |
+| **No duplicate disk targets** | Two entries targeting the same `$workspace/` path cause an error at init time; `$instructions` fragments are exempt |
 | **Cycle detection** | Circular includes (e.g. `a` includes `b` includes `a`) are caught and reported as an error |
 | **Mixing both kinds** | A language can include a mix of shared groups and other languages: `includes: [cmake, swift]` |
 
@@ -1297,7 +1325,7 @@ languages:
 
 ### Project Initialization
 
-When you run `vibe-cop install --lang rust`:
+When you run `vibe-cop init --lang rust`:
 
 1. Checks if global templates exist (downloads V5 by default if needed)
 2. Loads `templates.yml` configuration and detects version
@@ -1314,7 +1342,7 @@ When you run `vibe-cop install --lang rust`:
 
 1. Same as above but skips language fragments and language config files
 2. AGENTS.md contains mission, principles, integration (e.g. git, versioning) only
-3. Requires `--agent` to specify which agent prompts to install
+3. Requires `--agent` to specify which agent prompts to set up
 
 **With `--agent` only** (switch agent, preserve language):
 
@@ -1329,7 +1357,7 @@ The resulting AGENTS.md contains the complete merged content with all relevant s
 vibe-cop detects if you've customized AGENTS.md by checking for the template marker:
 
 ```bash
-$ vibe-cop install --lang c++ --agent claude
+$ vibe-cop init --lang c++ --agent claude
 ! Local AGENTS.md has been customized and will be skipped
 → Other files will still be updated
 → Use --force to overwrite AGENTS.md
@@ -1351,7 +1379,7 @@ vibe-cop templates --update --from /path/to/your/templates
 vibe-cop templates --update --from https://github.com/yourname/your-templates/tree/main/templates
 
 # Then initialize your project
-vibe-cop install --lang c++ --agent claude
+vibe-cop init --lang c++ --agent claude
 ```
 
 **Note:** Your custom template repository must include a `templates.yml` file that defines the template structure and file mappings.
@@ -1363,7 +1391,7 @@ vibe-cop install --lang c++ --agent claude
    - Linux: `~/.local/share/vibe-cop/templates/`
    - Windows: `%LOCALAPPDATA%\vibe-cop\templates\`
 2. Edit the templates as needed
-3. Run `vibe-cop install` to apply changes to your projects
+3. Run `vibe-cop init` to apply changes to your projects
 
 ### Creating New Templates
 
@@ -1409,7 +1437,7 @@ Centralized updates prevent drift and make it easier to maintain consistency acr
 Yes! MIT license allows commercial use. Attribution appreciated but not required.
 
 **How do I update templates?**
-Run `vibe-cop templates --update` to download the latest global templates, then `vibe-cop install` to apply to your project.
+Run `vibe-cop templates --update` to download the latest global templates, then `vibe-cop init` to apply to your project.
 
 **How do I remove local templates?**
 Run `vibe-cop purge` to remove all agent files and AGENTS.md, or `vibe-cop remove --all` to keep AGENTS.md.
@@ -1421,25 +1449,25 @@ Run `vibe-cop remove --lang <language>` (e.g. `vibe-cop remove --lang rust`). Th
 Run `vibe-cop doctor` to list issues, or `vibe-cop doctor --fix` to repair them automatically. Issues detected: missing tracked files (stale tracker entries), unmerged AGENTS.md templates, and modified files (informational). Use `--verbose` to see the result for every tracked file.
 
 **How do I preview changes before applying?**
-Use the `--dry-run` flag on any command: `vibe-cop install --lang rust --dry-run` or `vibe-cop install --agent cursor --dry-run`
+Use the `--dry-run` flag on any command: `vibe-cop init --lang rust --dry-run` or `vibe-cop init --agent cursor --dry-run`
 
 **How do I customize the mission statement?**
-Use the `--mission` option with `install`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
+Use the `--mission` option with `init`. For inline text: `--mission "Your mission here"`. For multi-line content from a file: `--mission @mission.md`. The custom mission replaces the default template placeholder in AGENTS.md.
 
 **What template version should I use?**
 V5 (default) is recommended. It follows the agents.md standard with agent/language skill associations, shared file groups, and composable languages. Run `vibe-cop status` to see the installed template version.
 
 **What if I don't specify --lang?**
-Omitting `--lang` gives you AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific coding conventions or config files (.rustfmt.toml, .editorconfig, etc.). Good for documentation repositories, multi-language projects, or when you prefer a minimal setup. Just use `--agent` alone: `vibe-cop install --agent cursor`.
+Omitting `--lang` gives you AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific coding conventions or config files (.rustfmt.toml, .editorconfig, etc.). Good for documentation repositories, multi-language projects, or when you prefer a minimal setup. Just use `--agent` alone: `vibe-cop init --agent cursor`.
 
 **How do I switch agents without changing the language?**
-Run `vibe-cop install --agent <new-agent>`. vibe-cop detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
+Run `vibe-cop init --agent <new-agent>`. vibe-cop detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
 
 **What are Agent Skills?**
 [Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills can be defined in `templates.yml` (per-agent, per-language, or top-level) or installed ad-hoc using `--skill user/repo`. Skills are downloaded on-the-fly and tracked like other template files.
 
 **How do I install a skill?**
-Use the `--skill` flag: `vibe-cop install --skill user/my-skill`. This installs to the cross-client `.agents/skills/` directory without needing templates or an agent. To install to an agent-specific directory, add `--agent`: `vibe-cop install --agent cursor --skill user/my-skill`. You can also use full GitHub URLs (`--skill https://github.com/user/repo/tree/main/path`) or local paths (`--skill ./my-skill`, `--skill ~/skills/my-skill`).
+Use the `--skill` flag: `vibe-cop init --skill user/my-skill`. This installs to the cross-client `.agents/skills/` directory without needing templates or an agent. To install to an agent-specific directory, add `--agent`: `vibe-cop init --agent cursor --skill user/my-skill`. You can also use full GitHub URLs (`--skill https://github.com/user/repo/tree/main/path`) or local paths (`--skill ./my-skill`, `--skill ~/skills/my-skill`).
 
 **Where are skills installed?**
 It depends on how you invoke `--skill`:
@@ -1465,7 +1493,7 @@ cargo build
 cargo test
 
 # Run the application
-cargo run -- install --lang rust
+cargo run -- init --lang rust
 
 # Build in release mode (optimized, generates man pages)
 cargo build --release
@@ -1481,4 +1509,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: April 10, 2026 (v12.3.4)
+Last updated: April 10, 2026 (v13.0.0)

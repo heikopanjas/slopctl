@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v12.4.0)
+**Last updated:** 2026-04-10 (v13.0.0)
 
 <!-- {mission} -->
 
@@ -800,6 +800,18 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-04-10 (v13.0.0, Codex modernization, CLI rename, merge skeleton)
+
+- MAJOR version bump: 12.4.0 to 13.0.0 (breaking CLI rename, template changes)
+- Renamed `install` command to `init` across CLI, source, README, and user-facing strings
+- Removed stale Codex template files: `codex/CODEX.md` and `codex/prompts/init-session.md`
+- Codex reads AGENTS.md natively; redirect file and prompt are no longer needed
+- Codex agent entry in templates.yml is now empty (`codex: {}`)
+- Added Session Protocol section to AGENTS.md template for agents that read it directly
+- Added `merge` command skeleton with `--provider`, `--model`, `--dry-run` flags (not yet implemented)
+- Updated README.md: migration guide v12-to-v13, removed Codex directory from repo tree, added merge command docs
+- Updated ROADMAP.md with completed items and future considerations
+
 ### 2026-04-10 (v12.4.0, CLI rework: templates and status commands)
 
 - Replaced `update` command with `templates` command that consolidates global template management
@@ -1346,7 +1358,7 @@ After making ANY code changes:
 ### 2026-02-15
 
 - Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
-- Use for language-independent setup: `vibe-cop install --no-lang` or `--no-lang --agent cursor`
+- Use for language-independent setup: `vibe-cop init --no-lang` or `--no-lang --agent cursor`
 - Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
 - Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
 - When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)

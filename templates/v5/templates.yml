@@ -55,13 +55,7 @@ agents:
       - source: copilot/prompts/init-session.prompt.md
         target: '$workspace/.github/prompts/init-session.prompt.md'
 
-  codex:
-    instructions:
-      - source: codex/CODEX.md
-        target: '$workspace/CODEX.md'
-    prompts:
-      - source: codex/prompts/init-session.md
-        target: '$userprofile/.codex/prompts/init-session.md'
+  codex: {}
 
   cursor:
     instructions:

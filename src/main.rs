@@ -42,8 +42,8 @@ struct Cli
 #[derive(Subcommand)]
 enum Commands
 {
-    /// Install agent instructions and skills for a project
-    Install
+    /// Initialize agent instructions and skills for a project
+    Init
     {
         /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(short, long)]
@@ -154,6 +154,21 @@ enum Commands
         /// Show managed file list
         #[arg(short, long, default_value = "false")]
         verbose: bool
+    },
+    /// AI-assisted merge of customized files with updated templates
+    Merge
+    {
+        /// LLM provider (openai, anthropic, ollama, mistral)
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Model to use for merging
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Preview changes without calling the API
+        #[arg(short = 'n', long, default_value = "false")]
+        dry_run: bool
     },
     /// Manage configuration
     Config
@@ -369,15 +384,15 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Install { lang, agent, mission, skill, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
         {
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
                 eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
-                eprintln!("{} Examples: vibe-cop install --lang rust", "→".blue());
-                eprintln!("{}          vibe-cop install --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop install --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop install --skill user/my-skill", "→".blue());
+                eprintln!("{} Examples: vibe-cop init --lang rust", "→".blue());
+                eprintln!("{}          vibe-cop init --agent cursor", "→".blue());
+                eprintln!("{}          vibe-cop init --lang rust --agent cursor", "→".blue());
+                eprintln!("{}          vibe-cop init --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
@@ -533,6 +548,12 @@ fn main()
             {
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
+        }
+        | Commands::Merge { .. } =>
+        {
+            eprintln!("{} The merge command is not yet implemented", "!".yellow());
+            eprintln!("{} This feature will use AI to merge customized files with updated templates", "→".blue());
+            Ok(())
         }
         | Commands::Completions { shell } =>
         {
