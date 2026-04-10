@@ -42,7 +42,10 @@ impl TemplateManager
     /// - Template generation fails
     pub fn update(&self, options: &template_engine::UpdateOptions) -> Result<()>
     {
-        require!(self.has_global_templates() == true, Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop update' first to download templates.")));
+        require!(
+            self.has_global_templates() == true,
+            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
+        );
 
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;

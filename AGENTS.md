@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v12.3.4)
+**Last updated:** 2026-04-10 (v12.4.0)
 
 <!-- {mission} -->
 
@@ -799,6 +799,20 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v12.4.0, CLI rework: templates and status commands)
+
+- Replaced `update` command with `templates` command that consolidates global template management
+- `templates --update` downloads/updates global templates (replaces `vibe-cop update`)
+- `templates --list` shows available agents, languages, and skills (replaces `vibe-cop list --global`)
+- Both flags can be combined: `templates --update --list` updates then shows the catalog
+- Running `vibe-cop templates` with neither flag prints an error with usage examples
+- `--from` and `--dry-run` now require `--update` (enforced by clap)
+- Renamed `list` command back to `status` (workspace-only; `--global` moved to `templates --list`)
+- Made `list_global()` public on `TemplateManager` for use by the templates command path
+- Updated all user-facing strings referencing `vibe-cop update` and `vibe-cop list` across codebase
+- Updated README.md CLI docs and examples
+- Version bump: 12.3.4 to 12.4.0 (MINOR - new commands, removed old commands)
 
 ### 2026-04-10 (docs update, CI badge and AGENTS.md placeholders)
 

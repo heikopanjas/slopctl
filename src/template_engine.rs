@@ -259,7 +259,7 @@ impl<'a> TemplateEngine<'a>
 
         require!(
             self.config_dir.exists() == true && templates_yml_path.exists() == true,
-            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop update' first to download templates."))
+            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
         );
 
         let config = load_template_config(self.config_dir)?;

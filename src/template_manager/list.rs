@@ -14,39 +14,25 @@ use crate::{
 
 impl TemplateManager
 {
-    /// List workspace status or available templates
+    /// Show workspace status
     ///
-    /// With `global == false` (default), shows workspace state:
+    /// Displays the current state of vibe-cop in the project:
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
     /// - Installed skills (filesystem scan of agent skill dirs + FileTracker fallback)
     /// - All vibe-cop managed files in current directory (verbose only)
     ///
-    /// With `global == true`, shows the available template catalog:
-    /// - Available agents with install status and skill counts
-    /// - Available languages with includes, resolved skill names
-    /// - Top-level skills from templates.yml
-    /// - Ad-hoc installed skills from FileTracker
-    ///
     /// # Arguments
     ///
-    /// * `global` - When true, shows available templates catalog instead of workspace state
-    /// * `verbose` - When true (workspace mode only), prints the full list of managed files
+    /// * `verbose` - When true, prints the full list of managed files
     ///
     /// # Errors
     ///
     /// Returns an error if the current directory cannot be determined or templates.yml cannot be loaded
-    pub fn list(&self, global: bool, verbose: bool) -> Result<()>
+    pub fn status(&self, verbose: bool) -> Result<()>
     {
-        if global == true
-        {
-            self.list_global()
-        }
-        else
-        {
-            self.list_workspace(verbose)
-        }
+        self.list_workspace(verbose)
     }
 
     /// Show workspace state (default mode)
@@ -54,7 +40,7 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
 
-        println!("{}", "vibe-cop list".bold());
+        println!("{}", "vibe-cop status".bold());
         println!();
 
         // Global templates status
@@ -85,7 +71,7 @@ impl TemplateManager
         else
         {
             println!("  {} Not installed", "✗".red());
-            println!("  {} Run 'vibe-cop update' to download templates", "→".blue());
+            println!("  {} Run 'vibe-cop templates --update' to download templates", "→".blue());
         }
 
         println!();
@@ -249,16 +235,26 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Show available templates catalog (--global mode)
-    fn list_global(&self) -> Result<()>
+    /// Show available templates catalog
+    ///
+    /// Shows the available template catalog:
+    /// - Available agents with install status and skill counts
+    /// - Available languages with includes, resolved skill names
+    /// - Top-level skills from templates.yml
+    /// - Ad-hoc installed skills from FileTracker
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if global templates are not installed or templates.yml cannot be loaded
+    pub fn list_global(&self) -> Result<()>
     {
-        println!("{}", "vibe-cop list --global".bold());
+        println!("{}", "vibe-cop templates --list".bold());
         println!();
 
         if self.has_global_templates() == false
         {
             println!("{} Global templates not installed", "✗".red());
-            println!("{} Run 'vibe-cop update' to download templates", "→".blue());
+            println!("{} Run 'vibe-cop templates --update' to download templates", "→".blue());
             return Ok(());
         }
 
