@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.2.2)
+**Last updated:** 2026-04-10 (v13.2.3)
 
 <!-- {mission} -->
 
@@ -799,6 +799,15 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.2.3, merge writes to original by default)
+
+- Changed `merge` default behavior: merged content now replaces the original file directly
+- Previously, `merge` always wrote `.merged` sidecar files requiring manual review
+- Added `--preview` flag to opt into the old sidecar behavior when manual review is desired
+- Added HTTP timeouts to the LLM client: 30s connect, 5min read (prevents OS-level TCP timeout killing large requests)
+- Updated README.md merge command documentation with examples and new `--preview`/`--list-models` flags
+- Version bump: 13.2.2 to 13.2.3 (PATCH - behavioral fix)
 
 ### 2026-04-10 (v13.2.2, fix merge command ignoring skills)
 

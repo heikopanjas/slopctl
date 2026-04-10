@@ -97,19 +97,21 @@ impl TemplateManager
     /// AI-assisted merge of customized workspace files with updated templates
     ///
     /// For each tracked file that the user has modified AND whose template source
-    /// has changed since installation, calls an LLM to produce a merged version
-    /// and writes it as a `.merged` sidecar file.
+    /// has changed since installation, calls an LLM to produce a merged version.
+    /// By default, the merged content replaces the original file. With `preview`,
+    /// a `.merged` sidecar file is written instead for manual review.
     ///
     /// # Arguments
     ///
     /// * `provider` - CLI override for LLM provider name (falls back to config)
     /// * `model` - CLI override for model name (falls back to config, then provider default)
     /// * `dry_run` - If true, shows what would be merged without calling the LLM
+    /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
     ///
     /// # Errors
     ///
     /// Returns an error if provider resolution fails, LLM calls fail, or file I/O fails
-    pub fn merge(&self, provider: Option<&str>, model: Option<&str>, dry_run: bool) -> Result<()>
+    pub fn merge(&self, provider: Option<&str>, model: Option<&str>, dry_run: bool, preview: bool) -> Result<()>
     {
         let (provider_name, model_name) = Self::resolve_provider_and_model(provider, model)?;
         let provider_enum = Provider::from_name(&provider_name)?;
@@ -142,38 +144,53 @@ impl TemplateManager
 
         for candidate in &candidates
         {
-            let sidecar = sidecar_path(&candidate.workspace_path);
-            let rel_sidecar = sidecar.strip_prefix(std::env::current_dir().unwrap_or_default()).unwrap_or(&sidecar);
-
-            if sidecar.exists() == true
-            {
-                println!(
-                    "  {} {} {} {}",
-                    "!".yellow(),
-                    "Skipped:".yellow(),
-                    candidate.display_name.yellow(),
-                    format!("(.merged already exists: {})", rel_sidecar.display()).dimmed()
-                );
-                continue;
-            }
-
             if dry_run == true
             {
                 println!("  {} Would merge: {}", "→".blue(), candidate.display_name.yellow());
                 continue;
             }
 
-            print!("  {} Merging {}... ", "→".blue(), candidate.display_name.yellow());
-            std::io::Write::flush(&mut std::io::stdout())?;
+            if preview == true
+            {
+                let sidecar = sidecar_path(&candidate.workspace_path);
+                let rel_sidecar = sidecar.strip_prefix(std::env::current_dir().unwrap_or_default()).unwrap_or(&sidecar);
 
-            let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
-            let user_content = fs::read_to_string(&candidate.workspace_path)?;
+                if sidecar.exists() == true
+                {
+                    println!(
+                        "  {} {} {} {}",
+                        "!".yellow(),
+                        "Skipped:".yellow(),
+                        candidate.display_name.yellow(),
+                        format!("(.merged already exists: {})", rel_sidecar.display()).dimmed()
+                    );
+                    continue;
+                }
 
-            let messages = build_merge_messages(&user_content, &candidate.template_content);
-            let merged = client.chat(&messages)?;
+                print!("  {} Merging {}... ", "→".blue(), candidate.display_name.yellow());
+                std::io::Write::flush(&mut std::io::stdout())?;
 
-            fs::write(&sidecar, &merged)?;
-            println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
+                let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
+                let user_content = fs::read_to_string(&candidate.workspace_path)?;
+                let messages = build_merge_messages(&user_content, &candidate.template_content);
+                let merged = client.chat(&messages)?;
+
+                fs::write(&sidecar, &merged)?;
+                println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
+            }
+            else
+            {
+                print!("  {} Merging {}... ", "→".blue(), candidate.display_name.yellow());
+                std::io::Write::flush(&mut std::io::stdout())?;
+
+                let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
+                let user_content = fs::read_to_string(&candidate.workspace_path)?;
+                let messages = build_merge_messages(&user_content, &candidate.template_content);
+                let merged = client.chat(&messages)?;
+
+                fs::write(&candidate.workspace_path, &merged)?;
+                println!("{} merged {}", "✓".green(), candidate.display_name.yellow());
+            }
         }
 
         if dry_run == true
@@ -181,10 +198,15 @@ impl TemplateManager
             println!();
             println!("{} Dry run complete. No files were modified.", "✓".green());
         }
-        else
+        else if preview == true
         {
             println!();
             println!("{} Review .merged files, then replace originals when satisfied", "→".blue());
+        }
+        else
+        {
+            println!();
+            println!("{} Merge complete. Merged files replaced originals.", "✓".green());
         }
 
         Ok(())
@@ -241,9 +263,8 @@ impl TemplateManager
     ///
     /// A file is a merge candidate when either:
     /// - It is tracked, user-modified, AND the template source has also changed
-    /// - It exists on disk but is untracked, and its content differs from the
-    ///   current template (e.g. AGENTS.md was customized before tracking began,
-    ///   or was skipped by init because it was already customized)
+    /// - It exists on disk but is untracked, and its content differs from the current template (e.g. AGENTS.md was customized before tracking began, or was skipped by
+    ///   init because it was already customized)
     fn find_merge_candidates(&self) -> Result<Vec<MergeCandidate>>
     {
         let workspace = std::env::current_dir()?;
