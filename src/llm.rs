@@ -1,0 +1,341 @@
+//! LLM provider abstraction for AI-assisted operations
+//!
+//! Supports OpenAI, Anthropic, Ollama, and Mistral as backend providers.
+//! API keys are read from environment variables; Ollama requires no key.
+
+use std::env;
+
+use serde::{Deserialize, Serialize};
+
+use crate::Result;
+
+/// Supported LLM providers
+#[derive(Debug, Clone, PartialEq)]
+pub enum Provider
+{
+    OpenAi,
+    Anthropic,
+    Ollama,
+    Mistral
+}
+
+impl Provider
+{
+    /// Parses a provider name string into a `Provider` enum value
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider name is not recognized
+    pub fn from_name(name: &str) -> Result<Self>
+    {
+        match name.to_lowercase().as_str()
+        {
+            | "openai" => Ok(Self::OpenAi),
+            | "anthropic" => Ok(Self::Anthropic),
+            | "ollama" => Ok(Self::Ollama),
+            | "mistral" => Ok(Self::Mistral),
+            | _ => Err(anyhow::anyhow!("Unknown provider: {}\nSupported: openai, anthropic, ollama, mistral", name))
+        }
+    }
+
+    /// Returns the environment variable name that holds the API key for this provider
+    fn api_key_env_var(&self) -> Option<&'static str>
+    {
+        match self
+        {
+            | Self::OpenAi => Some("OPENAI_API_KEY"),
+            | Self::Anthropic => Some("ANTHROPIC_API_KEY"),
+            | Self::Ollama => None,
+            | Self::Mistral => Some("MISTRAL_API_KEY")
+        }
+    }
+
+    /// Returns the default model for this provider
+    pub fn default_model(&self) -> &'static str
+    {
+        match self
+        {
+            | Self::OpenAi => "gpt-4o",
+            | Self::Anthropic => "claude-sonnet-4-20250514",
+            | Self::Ollama => "llama3",
+            | Self::Mistral => "mistral-large-latest"
+        }
+    }
+
+    /// Returns the base API endpoint URL
+    fn endpoint(&self) -> &'static str
+    {
+        match self
+        {
+            | Self::OpenAi => "https://api.openai.com/v1/chat/completions",
+            | Self::Anthropic => "https://api.anthropic.com/v1/messages",
+            | Self::Ollama => "http://localhost:11434/api/chat",
+            | Self::Mistral => "https://api.mistral.ai/v1/chat/completions"
+        }
+    }
+}
+
+/// A message in the chat completion request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage
+{
+    pub role:    String,
+    pub content: String
+}
+
+/// Client for making LLM API calls
+pub struct LlmClient
+{
+    provider: Provider,
+    model:    String,
+    api_key:  Option<String>,
+    http:     reqwest::blocking::Client
+}
+
+impl std::fmt::Debug for LlmClient
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    {
+        f.debug_struct("LlmClient").field("provider", &self.provider).field("model", &self.model).finish()
+    }
+}
+
+impl LlmClient
+{
+    /// Creates a new LLM client for the given provider and model
+    ///
+    /// Reads the API key from the appropriate environment variable.
+    /// Ollama does not require an API key.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The LLM provider to use
+    /// * `model` - Optional model override; uses provider default if None
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a required API key is not set in the environment
+    pub fn new(provider: Provider, model: Option<&str>) -> Result<Self>
+    {
+        let api_key = if let Some(env_var) = provider.api_key_env_var()
+        {
+            let key = env::var(env_var).map_err(|_| anyhow::anyhow!("{} environment variable not set\nSet it with: export {}=<your-key>", env_var, env_var))?;
+            Some(key)
+        }
+        else
+        {
+            None
+        };
+
+        let model_name = model.unwrap_or(provider.default_model()).to_string();
+
+        let http = reqwest::blocking::Client::builder().user_agent("vibe-cop").build()?;
+
+        Ok(Self { provider, model: model_name, api_key, http })
+    }
+
+    /// Sends a chat completion request and returns the assistant response text
+    ///
+    /// # Arguments
+    ///
+    /// * `messages` - The conversation messages (system + user)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API call fails or the response cannot be parsed
+    pub fn chat(&self, messages: &[ChatMessage]) -> Result<String>
+    {
+        match self.provider
+        {
+            | Provider::Anthropic => self.chat_anthropic(messages),
+            | _ => self.chat_openai_compatible(messages)
+        }
+    }
+
+    /// Returns the provider name for display
+    pub fn provider_name(&self) -> &str
+    {
+        match self.provider
+        {
+            | Provider::OpenAi => "openai",
+            | Provider::Anthropic => "anthropic",
+            | Provider::Ollama => "ollama",
+            | Provider::Mistral => "mistral"
+        }
+    }
+
+    /// Returns the model name for display
+    pub fn model_name(&self) -> &str
+    {
+        &self.model
+    }
+
+    /// OpenAI-compatible chat completion (works for OpenAI, Ollama, Mistral)
+    fn chat_openai_compatible(&self, messages: &[ChatMessage]) -> Result<String>
+    {
+        let body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.0
+        });
+
+        let mut request = self.http.post(self.provider.endpoint()).json(&body);
+
+        if let Some(ref key) = self.api_key
+        {
+            request = request.bearer_auth(key);
+        }
+
+        let response = request.send()?;
+        let status = response.status();
+
+        if status.is_success() == false
+        {
+            let error_body = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("{} API error ({}): {}", self.provider_name(), status, error_body));
+        }
+
+        let json: serde_json::Value = response.json()?;
+
+        json["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow::anyhow!("Unexpected {} API response format", self.provider_name()))
+    }
+
+    /// Anthropic Messages API (different request/response shape)
+    fn chat_anthropic(&self, messages: &[ChatMessage]) -> Result<String>
+    {
+        let system_msg = messages.iter().find(|m| m.role == "system").map(|m| m.content.as_str()).unwrap_or("");
+
+        let api_messages: Vec<serde_json::Value> =
+            messages.iter().filter(|m| m.role != "system").map(|m| serde_json::json!({"role": m.role, "content": m.content})).collect();
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "max_tokens": 16384,
+            "system": system_msg,
+            "messages": api_messages,
+            "temperature": 0.0
+        });
+
+        let key = self.api_key.as_deref().ok_or_else(|| anyhow::anyhow!("Anthropic API key not set"))?;
+
+        let response = self
+            .http
+            .post(self.provider.endpoint())
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()?;
+
+        let status = response.status();
+
+        if status.is_success() == false
+        {
+            let error_body = response.text().unwrap_or_default();
+            return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, error_body));
+        }
+
+        let json: serde_json::Value = response.json()?;
+
+        json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn test_provider_from_name_valid()
+    {
+        assert_eq!(Provider::from_name("openai").expect("parse"), Provider::OpenAi);
+        assert_eq!(Provider::from_name("OpenAI").expect("parse"), Provider::OpenAi);
+        assert_eq!(Provider::from_name("anthropic").expect("parse"), Provider::Anthropic);
+        assert_eq!(Provider::from_name("ollama").expect("parse"), Provider::Ollama);
+        assert_eq!(Provider::from_name("mistral").expect("parse"), Provider::Mistral);
+        assert_eq!(Provider::from_name("MISTRAL").expect("parse"), Provider::Mistral);
+    }
+
+    #[test]
+    fn test_provider_from_name_invalid()
+    {
+        let err = Provider::from_name("grok").unwrap_err();
+        assert!(err.to_string().contains("Unknown provider") == true);
+    }
+
+    #[test]
+    fn test_provider_default_model()
+    {
+        assert_eq!(Provider::OpenAi.default_model(), "gpt-4o");
+        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-20250514");
+        assert_eq!(Provider::Ollama.default_model(), "llama3");
+        assert_eq!(Provider::Mistral.default_model(), "mistral-large-latest");
+    }
+
+    #[test]
+    fn test_provider_api_key_env_var()
+    {
+        assert_eq!(Provider::OpenAi.api_key_env_var(), Some("OPENAI_API_KEY"));
+        assert_eq!(Provider::Anthropic.api_key_env_var(), Some("ANTHROPIC_API_KEY"));
+        assert_eq!(Provider::Ollama.api_key_env_var(), None);
+        assert_eq!(Provider::Mistral.api_key_env_var(), Some("MISTRAL_API_KEY"));
+    }
+
+    #[test]
+    fn test_provider_endpoint()
+    {
+        assert!(Provider::OpenAi.endpoint().contains("openai.com") == true);
+        assert!(Provider::Anthropic.endpoint().contains("anthropic.com") == true);
+        assert!(Provider::Ollama.endpoint().contains("localhost") == true);
+        assert!(Provider::Mistral.endpoint().contains("mistral.ai") == true);
+    }
+
+    #[test]
+    fn test_chat_message_serde() -> anyhow::Result<()>
+    {
+        let msg = ChatMessage { role: "user".to_string(), content: "hello".to_string() };
+        let json = serde_json::to_string(&msg)?;
+        let parsed: ChatMessage = serde_json::from_str(&json)?;
+        assert_eq!(parsed.role, "user");
+        assert_eq!(parsed.content, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn test_llm_client_new_ollama_no_key_required() -> anyhow::Result<()>
+    {
+        let client = LlmClient::new(Provider::Ollama, None)?;
+        assert_eq!(client.provider_name(), "ollama");
+        assert_eq!(client.model_name(), "llama3");
+        Ok(())
+    }
+
+    #[test]
+    fn test_llm_client_new_with_model_override() -> anyhow::Result<()>
+    {
+        let client = LlmClient::new(Provider::Ollama, Some("codellama"))?;
+        assert_eq!(client.model_name(), "codellama");
+        Ok(())
+    }
+
+    #[test]
+    fn test_llm_client_missing_api_key()
+    {
+        // Temporarily unset any key to guarantee failure
+        let saved = env::var("OPENAI_API_KEY").ok();
+        unsafe { env::remove_var("OPENAI_API_KEY") };
+
+        let result = LlmClient::new(Provider::OpenAi, None);
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("OPENAI_API_KEY") == true);
+
+        if let Some(key) = saved
+        {
+            unsafe { env::set_var("OPENAI_API_KEY", key) };
+        }
+    }
+}

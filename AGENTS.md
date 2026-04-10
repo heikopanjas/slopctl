@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.0.0)
+**Last updated:** 2026-04-10 (v13.1.0)
 
 <!-- {mission} -->
 
@@ -799,6 +799,28 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (v13.1.0, AI-assisted merge command)
+
+- Implemented `merge` command: LLM-assisted merge of customized workspace files with updated templates
+- New `src/llm.rs`: LLM provider abstraction supporting OpenAI, Anthropic, Ollama, and Mistral
+  - `Provider` enum with `from_name()`, `default_model()`, `endpoint()`, API key env var lookup
+  - `LlmClient` struct with `chat()` method; OpenAI-compatible path for OpenAI/Ollama/Mistral, dedicated Anthropic Messages API path
+  - API keys read from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`); Ollama requires no key
+  - Temperature fixed at 0.0 for deterministic merge output
+- New `src/template_manager/merge.rs`: merge command logic
+  - Finds merge candidates: tracked files that are both user-modified AND have updated template sources
+  - Generates fresh AGENTS.md by re-merging base template with all fragments (principles, mission, languages, integration)
+  - Builds target-to-source map from templates.yml for non-main files (agent, language, integration entries)
+  - Writes `.merged` sidecar files; skips if sidecar already exists
+  - Dry-run mode shows candidates without calling the LLM
+- Extended `Config` with `merge.provider` and `merge.model` keys
+  - New `MergeConfig` struct in `config.rs` with `provider` and `model` fields
+  - Priority: CLI `--provider`/`--model` > config values > error (provider required)
+- Added `resolve_target()` public method on `TemplateEngine` (exposes placeholder resolution for merge module)
+- Wired merge dispatch in `main.rs`: passes CLI args to `TemplateManager::merge()`
+- Added 21 new tests across `llm.rs`, `merge.rs`, and `config.rs`
+- Version bump: 13.0.0 to 13.1.0 (MINOR - new feature)
 
 ### 2026-04-10 (v13.0.0, Codex modernization, CLI rename, merge skeleton)
 
