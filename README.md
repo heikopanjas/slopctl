@@ -2,6 +2,7 @@
 
 **A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude Code, Cursor, GitHub Copilot, and Codex) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
+[![Build and Test](https://github.com/heikopanjas/vibe-cop/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/heikopanjas/vibe-cop/actions/workflows/build.yml)
 ![MIT License](https://img.shields.io/badge/-MIT%20License-000000?style=flat-square&logo=opensource&logoColor=white)
 ![CLI](https://img.shields.io/badge/-CLI-000000?style=flat-square&logo=zsh&logoColor=white)
 ![Rust](https://img.shields.io/badge/-Rust-000000?style=flat-square&logo=rust&logoColor=white)
@@ -1502,4 +1503,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: April 6, 2026 (v12.2.0)
+Last updated: April 10, 2026 (v12.3.4)

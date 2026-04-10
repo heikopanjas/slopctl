@@ -1,20 +1,23 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-09 (v12.3.4)
+**Last updated:** 2026-04-10 (v12.3.4)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-[Describe your project here - what it does, its purpose, and key features]
+vibe-cop is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
-- **Language:** [e.g., Python, TypeScript, JavaScript]
-- **Framework:** [e.g., React, Next.js, Django, FastAPI]
+- **Language:** Rust (Edition 2024, nightly toolchain)
+- **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
+- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
+- **Serialization:** serde + serde_yaml for templates.yml, serde_json for file tracker
 - **Version Control:** Git
-- **Package Manager:** [e.g., npm, pip, poetry, yarn]
-- **License:** [e.g., MIT, Apache 2.0]
+- **Package Manager:** Cargo
+- **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
+- **License:** MIT
 
 <!-- {principles} -->
 
@@ -66,17 +69,17 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 1. **Maintain Consistency**: Keep code style consistent across the codebase
 2. **Test First**: Write tests before implementing features when applicable
 3. **Document Changes**: Update documentation when changing functionality
-4. **Code Review**: [Describe your code review process]
+4. **Code Review**: Run `cargo fmt`, `cargo clippy`, and `cargo test` before committing
 5. **Date Changes**: Update the "Last updated" timestamp in this file when making changes
 6. **Log Updates**: Add entries to "Recent Updates & Decisions" section below
 
 ### Development Guidelines
 
-[Add project-specific development guidelines]
-
-- [Guideline 1]
-- [Guideline 2]
-- [Guideline 3]
+- Use debug builds (`cargo build`) during development; reserve release builds for CI and deployment
+- Branch model: `develop` is the active branch; `main` receives stable merges only
+- Always use `--dry-run` to verify CLI behavior before writing destructive tests
+- Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
+- One public struct or major component per source file; shared helpers go in `utils.rs`
 
 ### Security & Safety
 
@@ -84,25 +87,25 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
-- [Add project-specific security guidelines]
+- GitHub tokens for API access are read from environment only, never stored in config files
+- Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
 
-[Describe your testing approach]
+Unit tests are co-located with implementation in each source file under `#[cfg(test)] mod tests`.
 
-- Unit tests: [location and conventions]
-- Integration tests: [location and conventions]
-- Test coverage requirements: [if any]
-- Testing framework: [e.g., Jest, pytest, JUnit]
+- Unit tests: In-file `#[cfg(test)]` modules, named `test_<scenario>_<expected_outcome>`
+- Integration tests: Manual CLI verification with `--dry-run` flag
+- Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
+- CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
+- Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
 
 ### Documentation
 
-[Describe your documentation requirements]
-
-- Code comments: [when and how]
-- API documentation: [format and location]
-- README updates: [when required]
-- Changelog: [if maintained]
+- Code comments: `///` doc comments on all public APIs; `//` for non-obvious implementation details only
+- API documentation: Generated via `cargo doc`; doc comment structure uses `# Arguments`, `# Errors`, `# Examples` sections
+- README updates: Required when adding or changing CLI commands, flags, or user-visible behavior
+- Changelog: Maintained in the "Recent Updates & Decisions" section at the bottom of this file
 
 <!-- {languages} -->
 
@@ -796,6 +799,19 @@ After making ANY code changes:
 ---
 
 ## Recent Updates & Decisions
+
+### 2026-04-10 (docs update, CI badge and AGENTS.md placeholders)
+
+- Added CI status badge to README.md linking to the Build and Test workflow on develop branch
+- Updated README.md footer version from v12.2.0 to v12.3.4
+- Filled in all placeholder sections in the project AGENTS.md with actual project information:
+  - Mission Statement: describes vibe-cop purpose and supported agents
+  - Technology Stack: Rust 2024, clap, reqwest, serde, GitHub Actions CI/CD, MIT license
+  - Development Guidelines: debug builds, branch model, dry-run testing, module organization
+  - Code Review: cargo fmt, clippy, and test before committing
+  - Security: environment-only token access, template marker protection
+  - Testing: in-file unit tests, CWD_LOCK mutex, cross-platform CI
+  - Documentation: doc comments, cargo doc, README update policy, changelog location
 
 ### 2026-04-09 (v12.3.4, fix skill directories not downloaded during update)
 
