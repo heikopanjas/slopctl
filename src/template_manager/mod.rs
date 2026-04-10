@@ -2,9 +2,9 @@
 
 mod doctor;
 mod list;
+mod merge;
 mod purge;
 mod remove;
-mod status;
 mod update;
 
 use std::{
@@ -117,6 +117,11 @@ impl TemplateManager
         None
     }
 }
+
+/// Serializes tests that call `std::env::set_current_dir` (process-global state).
+/// Shared across all `template_manager` submodule tests.
+#[cfg(test)]
+pub(crate) static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests

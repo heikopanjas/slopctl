@@ -169,6 +169,21 @@ impl<'a> TemplateEngine<'a>
         self.config_dir
     }
 
+    /// Resolves a target path string containing placeholder variables
+    ///
+    /// Public wrapper around `resolve_placeholder` for use by the merge command
+    /// and other modules that need to map templates.yml targets to workspace paths.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Target path string (may contain `$workspace` or `$userprofile`)
+    /// * `workspace` - Workspace directory path
+    /// * `userprofile` - User profile directory path
+    pub fn resolve_target(&self, target: &str, workspace: &Path, userprofile: &Path) -> PathBuf
+    {
+        self.resolve_placeholder(target, workspace, userprofile)
+    }
+
     /// Resolves placeholder variables in target paths
     ///
     /// Replaces `$workspace` with the workspace directory path
@@ -259,10 +274,34 @@ impl<'a> TemplateEngine<'a>
 
         require!(
             self.config_dir.exists() == true && templates_yml_path.exists() == true,
-            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop update' first to download templates."))
+            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
         );
 
         let config = load_template_config(self.config_dir)?;
+
+        if let Some(agent_name) = options.agent &&
+            config.agents.contains_key(agent_name) == false
+        {
+            let mut available: Vec<&String> = config.agents.keys().collect();
+            available.sort();
+            return Err(anyhow::anyhow!(
+                "Agent '{}' not found in templates.yml.\nAvailable agents: {}",
+                agent_name,
+                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+
+        if let Some(lang) = options.lang &&
+            config.languages.contains_key(lang) == false
+        {
+            let mut available: Vec<&String> = config.languages.keys().collect();
+            available.sort();
+            return Err(anyhow::anyhow!(
+                "Language '{}' not found in templates.yml.\nAvailable languages: {}",
+                lang,
+                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
 
         let workspace = std::env::current_dir()?;
         let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
@@ -348,32 +387,34 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
-        if let Some(agent_name) = options.agent
-        {
-            if let Some(agent_config) = config.agents.get(agent_name)
-            {
-                for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
-                {
-                    let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
-                    {
-                        | Ok(p) => p,
-                        | Err(e) =>
-                        {
-                            println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
-                            continue;
-                        }
-                    };
+        let mut directories_to_create: Vec<PathBuf> = Vec::new();
 
-                    if source_path.exists()
+        if let Some(agent_name) = options.agent &&
+            let Some(agent_config) = config.agents.get(agent_name)
+        {
+            for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
+            {
+                let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
+                {
+                    | Ok(p) => p,
+                    | Err(e) =>
                     {
-                        let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                        files_to_copy.push((source_path, target_path));
+                        println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
+                        continue;
                     }
+                };
+
+                if source_path.exists()
+                {
+                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                    files_to_copy.push((source_path, target_path));
                 }
             }
-            else
+
+            for dir_entry in &agent_config.directories
             {
-                println!("{} Agent '{}' not found in templates.yml", "!".yellow(), agent_name.yellow());
+                let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
+                directories_to_create.push(dir_path);
             }
         }
 
@@ -437,13 +478,19 @@ impl<'a> TemplateEngine<'a>
 
         if options.dry_run == true
         {
-            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy);
+            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy, &directories_to_create);
             return Ok(());
         }
 
-        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker)?;
+        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options)?;
+        for dir_path in &directories_to_create
+        {
+            fs::create_dir_all(dir_path)?;
+            println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
+        }
+
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options, &workspace)?;
 
         match copy_result
         {
@@ -542,15 +589,16 @@ impl<'a> TemplateEngine<'a>
         Ok(())
     }
 
-    /// Shows dry-run preview of files that would be created/modified
+    /// Shows dry-run preview of files and directories
     ///
     /// # Arguments
     ///
     /// * `ctx` - Template context for main AGENTS.md
     /// * `skip_agents_md` - Whether AGENTS.md is customized and should be skipped
     /// * `options` - Update options containing force and dry_run settings
-    /// * `files_to_copy` - List of (source, target) file pairs
-    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)])
+    /// * `files_to_copy` - List of (source, target) file tuples
+    /// * `directories` - List of directory paths
+    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)], directories: &[PathBuf])
     {
         println!("\n{} Files that would be created/modified:", "→".blue());
 
@@ -579,6 +627,22 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
+        if directories.is_empty() == false
+        {
+            println!("\n{} Directories that would be created:", "→".blue());
+            for dir_path in directories
+            {
+                if dir_path.exists() == true
+                {
+                    println!("  {} {} (exists)", "○".yellow(), dir_path.display());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), dir_path.display());
+                }
+            }
+        }
+
         println!("\n{} Dry run complete. No files were modified.", "✓".green());
     }
 
@@ -597,7 +661,9 @@ impl<'a> TemplateEngine<'a>
     /// # Errors
     ///
     /// Returns an error if file operations fail
-    fn handle_main_template(&self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker) -> Result<()>
+    fn handle_main_template(
+        &self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker, workspace: &Path
+    ) -> Result<()>
     {
         if skip_agents_md && options.force == false
         {
@@ -622,7 +688,7 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string());
+        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string(), workspace);
 
         Ok(())
     }
@@ -649,7 +715,7 @@ impl<'a> TemplateEngine<'a>
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
+        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions, workspace: &Path
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
@@ -747,7 +813,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string());
+                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string(), workspace);
             }
         }
 
@@ -916,7 +982,7 @@ impl<'a> TemplateEngine<'a>
 
         println!("{} Copying skill files", "→".blue());
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options, &workspace)?;
 
         match copy_result
         {
@@ -1115,10 +1181,10 @@ mod tests
     fn test_load_template_config_valid() -> anyhow::Result<()>
     {
         let dir = tempfile::TempDir::new()?;
-        fs::write(dir.path().join("templates.yml"), "version: 4\nlanguages: {}")?;
+        fs::write(dir.path().join("templates.yml"), "version: 5\nlanguages: {}")?;
 
         let config = load_template_config(dir.path())?;
-        assert_eq!(config.version, 4);
+        assert_eq!(config.version, 5);
         Ok(())
     }
 
@@ -1416,7 +1482,7 @@ mod tests
         let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.")?;
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 5 };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1443,7 +1509,7 @@ mod tests
             source,
             target: target.clone(),
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
-            template_version: 4
+            template_version: 5
         };
         let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
@@ -1464,7 +1530,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1484,7 +1550,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1504,7 +1570,7 @@ mod tests
         let target = dir.path().join("output/AGENTS.md");
 
         let engine = TemplateEngine::new(dir.path());
-        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 4 };
+        let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
@@ -1683,6 +1749,112 @@ mod tests
         let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
 
         engine.install_skills_only(&options)?;
+        Ok(())
+    }
+
+    /// Write a minimal templates.yml with known agents and languages
+    fn write_minimal_templates_yml(dir: &std::path::Path) -> anyhow::Result<()>
+    {
+        let yml = r#"version: 5
+main:
+  source: AGENTS.md
+  target: '$workspace/AGENTS.md'
+agents:
+  cursor:
+    instructions:
+      - source: cursor/cursorrules
+        target: '$workspace/.cursorrules'
+  claude:
+    instructions:
+      - source: claude/CLAUDE.md
+        target: '$workspace/CLAUDE.md'
+languages:
+  rust:
+    files:
+      - source: rust-format.toml
+        target: '$workspace/.rustfmt.toml'
+  swift:
+    files:
+      - source: swift-format.json
+        target: '$workspace/.swift-format'
+"#;
+        fs::write(dir.join("templates.yml"), yml)?;
+        fs::write(dir.join("AGENTS.md"), TEMPLATE_BASE)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_rejects_unknown_agent() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: None, agent: Some("nonexistent"), mission: None, skills: &skills, force: false, dry_run: false };
+
+        let result = engine.update(&options);
+        assert!(result.is_err() == true);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found in templates.yml") == true);
+        assert!(err.contains("nonexistent") == true);
+        assert!(err.contains("cursor") == true);
+        assert!(err.contains("claude") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_rejects_unknown_language() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: Some("nonexistent"), agent: None, mission: None, skills: &skills, force: false, dry_run: false };
+
+        let result = engine.update(&options);
+        assert!(result.is_err() == true);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found in templates.yml") == true);
+        assert!(err.contains("nonexistent") == true);
+        assert!(err.contains("rust") == true);
+        assert!(err.contains("swift") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_accepts_known_agent() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        fs::create_dir_all(config_dir.path().join("cursor"))?;
+        fs::write(config_dir.path().join("cursor/cursorrules"), "test")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: None, agent: Some("cursor"), mission: None, skills: &skills, force: false, dry_run: true };
+
+        let result = engine.update(&options);
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_accepts_known_language() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        write_minimal_templates_yml(config_dir.path())?;
+
+        fs::write(config_dir.path().join("rust-format.toml"), "max_width = 100")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec![];
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &skills, force: false, dry_run: true };
+
+        let result = engine.update(&options);
+        assert!(result.is_ok() == true);
         Ok(())
     }
 }
