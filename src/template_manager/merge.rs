@@ -43,22 +43,19 @@ struct MergeCandidate
 
 /// System prompt instructing the LLM how to perform the merge
 const MERGE_SYSTEM_PROMPT: &str = "\
-You are a file merge assistant that combines user-customized configuration files \
-with updated templates. Follow these rules strictly:
+You are a file merge assistant that combines user-customized configuration files with updated templates. Follow these rules strictly:
 
-1. PRESERVE all user customizations: added sections, modified content, custom notes, \
-   project-specific information, and any user-authored text.
-2. INCORPORATE all new content from the updated template: new sections, updated \
-   instructions, structural changes, and new conventions.
-3. When both files define the same section, prefer the user's version but integrate \
-   any genuinely new information from the template.
+1. PRESERVE all user customizations: added sections, modified content, custom notes, project-specific information, and any user-authored text. The merged output must \
+                                   be ADDITIVE — never shorter than the user's current file unless removing an exact duplicate.
+2. INCORPORATE all new content from the updated template: new sections, updated instructions, structural changes, and new conventions.
+3. When both files define the same section, prefer the user's version but integrate any genuinely new information from the template.
 4. Maintain the overall document structure and formatting of the user's file.
-5. Do NOT add commentary, explanations, or merge markers. Output ONLY the merged \
-   file content, ready to save.
-6. If the template introduces a new section that the user's file does not have, \
-   insert it in a natural location that matches the template's ordering.
-7. Do NOT remove any user content unless it directly contradicts a template change \
-   (in which case prefer the template's factual updates but keep user customizations).";
+5. Do NOT add commentary, explanations, or merge markers. Output ONLY the merged file content, ready to save.
+6. If the template introduces a new section that the user's file does not have, insert it in a natural location that matches the template's ordering.
+7. Do NOT remove any user content unless it directly contradicts a template change (in which case prefer the template's factual updates but keep user customizations).
+8. CRITICAL: Changelog, history, and log sections (such as 'Recent Updates & Decisions') must be preserved IN FULL. Every single entry must appear in the output \
+                                   exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or \
+                                   condensed.";
 
 impl TemplateManager
 {
