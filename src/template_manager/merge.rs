@@ -247,7 +247,7 @@ impl TemplateManager
     /// Priority: CLI `--provider` > config `merge.provider` > auto-detect from
     /// environment API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
     /// Model: CLI `--model` > config `merge.model` > None (provider default used later).
-    fn resolve_provider_and_model(cli_provider: Option<&str>, cli_model: Option<&str>) -> Result<(String, Option<String>)>
+    pub(super) fn resolve_provider_and_model(cli_provider: Option<&str>, cli_model: Option<&str>) -> Result<(String, Option<String>)>
     {
         let config = Config::load().ok();
 
@@ -262,7 +262,6 @@ impl TemplateManager
         }
         else if let Some(detected) = Provider::detect_from_env()
         {
-            println!("{} Auto-detected provider from environment: {}", "→".blue(), detected.name().green());
             detected.name().to_string()
         }
         else
@@ -285,6 +284,11 @@ impl TemplateManager
         {
             None
         };
+
+        let effective_model = model.clone().unwrap_or_else(|| {
+            Provider::from_name(&provider).map(|p| p.default_model().to_string()).unwrap_or_default()
+        });
+        println!("{} Using provider: {} ({})", "→".blue(), provider.green(), effective_model.yellow());
 
         Ok((provider, model))
     }

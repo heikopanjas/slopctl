@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.0.0)
+**Last updated:** 2026-04-18 (v15.1.0)
 
 <!-- {mission} -->
 
@@ -1479,6 +1479,22 @@ After making ANY code changes:
 - Established core coding standards and conventions
 - Created agent-specific reference files
 - Defined repository structure and governance principles
+
+### 2026-04-18 (v15.1.0, smart features for init and doctor)
+
+- Added --smart flag to init command: generates mission statement from workspace context using LLM
+- Added --smart flag to doctor command: AI-assisted linting of AGENTS.md for contradictions, stale references, and unclear instructions
+- New src/template_manager/smart.rs: collect_workspace_context, generate_smart_mission, smart_doctor, parse_smart_issues
+- collect_workspace_context gathers directory listing, README.md (2000 chars), and project manifest (500 chars)
+- Smart mission generation uses LLM to produce a 2-4 sentence mission paragraph; skipped in dry-run mode
+- Smart doctor sends AGENTS.md to LLM and parses JSON array of issues with three kinds: contradiction, stale_reference, unclear_instruction
+- JSON parsing is tolerant of surrounding prose in LLM responses
+- init --smart and init --mission are mutually exclusive (enforced by clap conflicts_with)
+- Provider/model resolution reuses merge command priority chain: CLI > config merge.provider/merge.model > env auto-detect
+- resolve_provider_and_model changed to pub(super) for access from smart.rs sibling module
+- doctor() restructured to remove early returns; smart analysis always runs at the end when --smart is set
+- Added 8 new tests in smart.rs covering context collection, JSON parsing, edge cases
+- Version bump: 15.0.0 to 15.1.0 (MINOR - new CLI flags)
 
 ### 2026-04-18 (v15.0.0, rebrand to slopctl)
 

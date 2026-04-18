@@ -54,7 +54,7 @@ enum Commands
         agent: Option<String>,
 
         /// Custom mission statement (use @filename to read from file)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "smart")]
         mission: Option<String>,
 
         /// Install skill(s) from GitHub or local path (repeatable)
@@ -67,7 +67,11 @@ enum Commands
 
         /// Preview changes without applying them
         #[arg(short = 'n', long, default_value = "false")]
-        dry_run: bool
+        dry_run: bool,
+
+        /// Use an LLM to auto-generate the mission statement from workspace context
+        #[arg(long, default_value = "false")]
+        smart: bool
     },
     /// Manage global template catalog
     Templates
@@ -146,7 +150,11 @@ enum Commands
 
         /// Print every checked file and its result
         #[arg(short, long, default_value = "false")]
-        verbose: bool
+        verbose: bool,
+
+        /// Use an LLM to lint AGENTS.md for contradictions, stale references, and unclear instructions
+        #[arg(long, default_value = "false")]
+        smart: bool
     },
     /// Show workspace status
     Status
@@ -390,7 +398,7 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, skill, force, dry_run, smart } =>
         {
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
@@ -404,7 +412,24 @@ fn main()
 
             let skill_only = lang.is_none() == true && agent.is_none() == true;
 
-            let resolved_mission = if let Some(ref mission_value) = mission
+            let resolved_mission = if smart == true && dry_run == true
+            {
+                println!("{} Dry run: would generate mission statement with AI", "→".blue());
+                None
+            }
+            else if smart == true
+            {
+                match manager.generate_smart_mission(None, None)
+                {
+                    | Ok(generated) => Some(generated),
+                    | Err(e) =>
+                    {
+                        eprintln!("{} {}", "✗".red(), e.to_string().red());
+                        std::process::exit(1);
+                    }
+                }
+            }
+            else if let Some(ref mission_value) = mission
             {
                 match resolve_mission_content(mission_value)
                 {
@@ -578,7 +603,7 @@ fn main()
             generate(shell, &mut Cli::command(), "slopctl", &mut io::stdout());
             Ok(())
         }
-        | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
+        | Commands::Doctor { fix, dry_run, verbose, smart } => manager.doctor(fix, dry_run, verbose, smart),
         | Commands::Status { verbose } => manager.status(verbose),
         | Commands::Config { key, add, list, remove } => handle_config(key, add, list, remove)
     };
