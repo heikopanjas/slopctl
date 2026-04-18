@@ -93,7 +93,7 @@ impl Provider
         match self
         {
             | Self::OpenAi => "gpt-4o",
-            | Self::Anthropic => "claude-sonnet-4-20250514",
+            | Self::Anthropic => "claude-sonnet-4-6",
             | Self::Ollama => "llama3",
             | Self::Mistral => "mistral-large-latest"
         }
@@ -440,7 +440,6 @@ impl LlmClient
             "max_tokens": 32768,
             "system": system_msg,
             "messages": api_messages,
-            "temperature": 0.0,
             "stream": true
         });
 
@@ -536,7 +535,7 @@ mod tests
     fn test_provider_default_model()
     {
         assert_eq!(Provider::OpenAi.default_model(), "gpt-4o");
-        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-20250514");
+        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-6");
         assert_eq!(Provider::Ollama.default_model(), "llama3");
         assert_eq!(Provider::Mistral.default_model(), "mistral-large-latest");
     }

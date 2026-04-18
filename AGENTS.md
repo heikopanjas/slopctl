@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.4.2)
+**Last updated:** 2026-04-18 (v15.4.3)
 
 <!-- {mission} -->
 
@@ -810,6 +810,15 @@ After making ANY code changes:
 <!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-18 (v15.4.3, fix Anthropic API temperature rejection on newer models)
+
+- Removed `temperature: 0.0` from the Anthropic Messages API request body in `stream_anthropic()`
+- Anthropic deprecated sampling parameters (`temperature`, `top_p`, `top_k`) starting with Claude Opus 4.7; any explicit value returns a 400 error
+- No replacement parameter exists; Anthropic recommends using prompting to guide model behavior instead
+- OpenAI-compatible path (`stream_openai_compatible`) retains `temperature: 0.0` since OpenAI, Mistral, and Ollama still support it
+- Updated Anthropic default model from `claude-sonnet-4-20250514` to `claude-sonnet-4-6`
+- Version bump: 15.4.2 to 15.4.3 (PATCH - bug fix)
 
 ### 2026-04-18 (v15.4.2, protect userprofile skill directories from filesystem scans)
 
