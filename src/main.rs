@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use slopctl::{Config, Result, TemplateManager, UpdateOptions};
+use slopctl::{Config, MergeOptions, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -146,7 +146,11 @@ enum Commands
 
         /// Print every checked file and its result
         #[arg(short, long, default_value = "false")]
-        verbose: bool
+        verbose: bool,
+
+        /// Use an LLM to lint AGENTS.md for contradictions, stale references, and unclear instructions
+        #[arg(long, default_value = "false")]
+        smart: bool
     },
     /// Show workspace status
     Status
@@ -158,13 +162,21 @@ enum Commands
     /// AI-assisted merge of customized files with updated templates
     Merge
     {
-        /// LLM provider (openai, anthropic, ollama, mistral)
+        /// Programming language or framework (e.g., rust, c++, swift)
         #[arg(short, long)]
-        provider: Option<String>,
+        lang: Option<String>,
 
-        /// Model to use for merging
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
         #[arg(short, long)]
-        model: Option<String>,
+        agent: Option<String>,
+
+        /// Custom mission statement (use @filename to read from file)
+        #[arg(short, long)]
+        mission: Option<String>,
+
+        /// Include skill(s) from GitHub or local path (repeatable)
+        #[arg(short, long)]
+        skill: Vec<String>,
 
         /// Write merged output to .merged sidecar files instead of replacing originals
         #[arg(long, default_value = "false")]
@@ -174,13 +186,16 @@ enum Commands
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
-        /// List available models from the selected provider
-        #[arg(short = 'L', long, default_value = "false")]
-        list_models: bool,
-
         /// Show token usage summary after merging
         #[arg(short, long, default_value = "false")]
         verbose: bool
+    },
+    /// List available models from an LLM provider
+    ListModels
+    {
+        /// LLM provider to query (overrides config and auto-detected provider)
+        #[arg(short, long)]
+        provider: Option<String>
     },
     /// Manage configuration
     Config
@@ -555,30 +570,45 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { provider, model, preview, dry_run, list_models, verbose } =>
+        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, verbose } =>
         {
-            if list_models == true
+            let resolved_mission = if let Some(ref mission_value) = mission
             {
-                manager.list_models(provider.as_deref(), model.as_deref())
+                match resolve_mission_content(mission_value)
+                {
+                    | Ok(content) => Some(content),
+                    | Err(e) =>
+                    {
+                        eprintln!("{} {}", "✗".red(), e.to_string().red());
+                        std::process::exit(1);
+                    }
+                }
             }
-            else if dry_run == true
+            else
+            {
+                None
+            };
+
+            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
+
+            if dry_run == true
             {
                 println!("{} Dry run: previewing merge candidates", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
             }
             else
             {
                 println!("{} AI-assisted merge of customized files", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
             }
+            manager.merge(&merge_options, dry_run, preview, verbose)
         }
+        | Commands::ListModels { provider } => manager.list_models(provider.as_deref()),
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();
             generate(shell, &mut Cli::command(), "slopctl", &mut io::stdout());
             Ok(())
         }
-        | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),
+        | Commands::Doctor { fix, dry_run, verbose, smart } => manager.doctor(fix, dry_run, verbose, smart),
         | Commands::Status { verbose } => manager.status(verbose),
         | Commands::Config { key, add, list, remove } => handle_config(key, add, list, remove)
     };
