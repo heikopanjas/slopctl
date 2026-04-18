@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.2.0)
+**Last updated:** 2026-04-18 (v15.3.0)
 
 <!-- {mission} -->
 
@@ -1479,6 +1479,24 @@ After making ANY code changes:
 - Established core coding standards and conventions
 - Created agent-specific reference files
 - Defined repository structure and governance principles
+
+### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
+
+- Redesigned merge command to follow the same file-resolution pipeline as init (DRY)
+- Extracted `resolve_all_files()` from `TemplateEngine::update()` into a reusable public method; both init and merge now call it
+- Added `ResolvedFiles` struct grouping `TemplateContext`, files-to-copy, and directories-to-create
+- Added `build_target_content_map()` on `TemplateEngine` that resolves all files and reads sources into `HashMap<PathBuf, String>`
+- Moved `generate_fresh_main()` from merge.rs into template_engine.rs as an associated function (pure template logic)
+- Refactored `merge_fragments()` to delegate content generation to `generate_fresh_main()`, eliminating duplicate fragment-merging code
+- Added `normalize_path()` as a public function in template_engine.rs
+- Merge now classifies files into three categories: New (write directly), Unchanged (skip), Diverged (LLM merge)
+- New files are created without LLM involvement; only diverged files are sent to the AI
+- LLM provider resolution is deferred until diverged files are actually found (no API key needed for new-only merges)
+- Deleted ~400 lines of duplicated code from merge.rs: build_target_source_map, find_merge_candidates, generate_fresh_main, insert_source_content, insert_skill_sources, insert_skill_dir_recursive, resolve_target, normalize_path, sha256_string
+- Added `categorize_path()` helper for FileTracker category detection during merge
+- Added 8 new tests: classify_files (new, unchanged, diverged, mixed, sorted), categorize_path (main, skill, integration, agent, language), plural helper
+- All written files (New + Diverged) are now recorded in FileTracker during merge
+- Version bump: 15.2.0 to 15.3.0 (MINOR - behavioral redesign of merge command)
 
 ### 2026-04-18 (v15.2.0, init/merge redesign: AI-free init, AI-powered merge)
 
