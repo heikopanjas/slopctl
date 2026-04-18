@@ -251,7 +251,7 @@ impl TemplateManager
         println!("{}", "Smart Analysis:".bold());
         println!();
 
-        match self.smart_doctor(None, None)
+        match self.smart_doctor()
         {
             | Ok(smart_issues) =>
             {

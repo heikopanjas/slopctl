@@ -63,9 +63,9 @@ impl TemplateManager
     /// # Errors
     ///
     /// Returns an error if provider resolution or the API call fails
-    pub fn list_models(&self, provider: Option<&str>, model: Option<&str>) -> Result<()>
+    pub fn list_models(&self) -> Result<()>
     {
-        let (provider_name, model_name) = Self::resolve_provider_and_model(provider, model)?;
+        let (provider_name, model_name) = Self::resolve_provider_and_model()?;
         let provider_enum = Provider::from_name(&provider_name)?;
         let default_model = model_name.as_deref().unwrap_or(provider_enum.default_model());
 
@@ -112,9 +112,9 @@ impl TemplateManager
     /// # Errors
     ///
     /// Returns an error if provider resolution fails, LLM calls fail, or file I/O fails
-    pub fn merge(&self, provider: Option<&str>, model: Option<&str>, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
+    pub fn merge(&self, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
     {
-        let (provider_name, model_name) = Self::resolve_provider_and_model(provider, model)?;
+        let (provider_name, model_name) = Self::resolve_provider_and_model()?;
         let provider_enum = Provider::from_name(&provider_name)?;
 
         println!("{} Using {} / {}", "→".blue(), provider_name.green(), model_name.as_deref().unwrap_or(provider_enum.default_model()).green());
@@ -247,15 +247,11 @@ impl TemplateManager
     /// Priority: CLI `--provider` > config `merge.provider` > auto-detect from
     /// environment API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
     /// Model: CLI `--model` > config `merge.model` > None (provider default used later).
-    pub(super) fn resolve_provider_and_model(cli_provider: Option<&str>, cli_model: Option<&str>) -> Result<(String, Option<String>)>
+    pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
     {
         let config = Config::load().ok();
 
-        let provider = if let Some(p) = cli_provider
-        {
-            p.to_string()
-        }
-        else if let Some(ref c) = config &&
+        let provider = if let Some(ref c) = config &&
             let Some(p) = c.get("merge.provider")
         {
             p
@@ -267,16 +263,12 @@ impl TemplateManager
         else
         {
             return Err(anyhow::anyhow!(
-                "No LLM provider specified and none auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: \
-                 slopctl config merge.provider openai\nor pass --provider on the command line.\nSupported: openai, anthropic, ollama, mistral"
+                "No LLM provider configured or auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: slopctl \
+                 config --add merge.provider openai\nSupported: openai, anthropic, ollama, mistral"
             ));
         };
 
-        let model = if let Some(m) = cli_model
-        {
-            Some(m.to_string())
-        }
-        else if let Some(ref c) = config
+        let model = if let Some(ref c) = config
         {
             c.get("merge.model")
         }
@@ -285,9 +277,7 @@ impl TemplateManager
             None
         };
 
-        let effective_model = model.clone().unwrap_or_else(|| {
-            Provider::from_name(&provider).map(|p| p.default_model().to_string()).unwrap_or_default()
-        });
+        let effective_model = model.clone().unwrap_or_else(|| Provider::from_name(&provider).map(|p| p.default_model().to_string()).unwrap_or_default());
         println!("{} Using provider: {} ({})", "→".blue(), provider.green(), effective_model.yellow());
 
         Ok((provider, model))
@@ -750,21 +740,9 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_provider_cli_overrides_config() -> anyhow::Result<()>
-    {
-        let (provider, model) = TemplateManager::resolve_provider_and_model(Some("anthropic"), Some("claude-haiku"))?;
-        assert_eq!(provider, "anthropic");
-        assert_eq!(model, Some("claude-haiku".to_string()));
-        Ok(())
-    }
-
-    #[test]
     fn test_resolve_provider_auto_detects_from_env()
     {
-        // When no CLI or config provider is set, auto-detection kicks in.
-        // This test verifies the function succeeds or fails depending on env state;
-        // we test the explicit CLI override path separately above.
-        let result = TemplateManager::resolve_provider_and_model(None, None);
+        let result = TemplateManager::resolve_provider_and_model();
 
         if std::env::var("ANTHROPIC_API_KEY").is_ok() == true || std::env::var("OPENAI_API_KEY").is_ok() == true || std::env::var("MISTRAL_API_KEY").is_ok() == true
         {
