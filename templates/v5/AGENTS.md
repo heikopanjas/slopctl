@@ -20,6 +20,8 @@ confirmed your understanding.
 
 ---
 
+<!-- {changelog} -->
+
 ## Recent Updates & Decisions
 
 ### 2025-10-05

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.3.0)
+**Last updated:** 2026-04-18 (v15.4.0)
 
 <!-- {mission} -->
 
@@ -798,7 +798,25 @@ After making ANY code changes:
 
 ---
 
+<!-- {changelog} -->
+
 ## Recent Updates & Decisions
+
+### 2026-04-18 (v15.4.0, merge command optimization: streaming, changelog marker, partial recovery)
+
+- Added `<!-- {changelog} -->` marker to AGENTS.md template and user file to split template-managed content from user-owned changelog
+- `classify_files()` now splits at the changelog marker: only the template half is compared, so changelog-only diffs are classified as `Unchanged` (no LLM call)
+- When the template half differs, only it is sent to the LLM; the user's changelog is re-attached verbatim after merge, preventing truncation
+- Replaced blocking `chat()` with streaming `chat_stream()` on `LlmClient`: tokens arrive incrementally via SSE
+- Per-provider SSE parsing: OpenAI/Mistral (`data: {...}` lines with `stream_options.include_usage`), Anthropic (`content_block_delta`/`message_delta` events), Ollama (newline-delimited JSON with `done: true`)
+- `chat()` reimplemented as a thin wrapper around `chat_stream()` with a no-op callback (DRY)
+- Added `max_tokens: 32768` to all providers (was missing for OpenAI/Mistral, was 16384 for Anthropic)
+- Live progress display during merge: character count and elapsed time updated on each streaming chunk
+- Partial file recovery: `.partial` sidecar written during streaming; on success it is deleted, on error or truncation it is preserved for user inspection
+- Truncation detection: if `stop_reason` indicates `max_tokens`/`length`, the `.partial` file is kept and the target is not overwritten
+- Hoisted `LlmClient` construction out of the per-file loop; single client reuses TCP connection pool across all diverged files
+- Added 7 new tests: `partial_path`, `split_at_changelog` (present/absent), `reassemble` (with/without changelog), `classify_files_changelog_only_diff_is_unchanged`, `classify_files_template_half_differs_is_diverged`
+- Version bump: 15.3.0 to 15.4.0 (MINOR - streaming LLM, changelog marker optimization, partial recovery)
 
 ### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
 
