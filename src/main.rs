@@ -186,13 +186,16 @@ enum Commands
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
-        /// List available models from the selected provider
-        #[arg(short = 'L', long, default_value = "false")]
-        list_models: bool,
-
         /// Show token usage summary after merging
         #[arg(short, long, default_value = "false")]
         verbose: bool
+    },
+    /// List available models from an LLM provider
+    ListModels
+    {
+        /// LLM provider to query (overrides config and auto-detected provider)
+        #[arg(short, long)]
+        provider: Option<String>
     },
     /// Manage configuration
     Config
@@ -567,44 +570,38 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, list_models, verbose } =>
+        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, verbose } =>
         {
-            if list_models == true
+            let resolved_mission = if let Some(ref mission_value) = mission
             {
-                manager.list_models()
+                match resolve_mission_content(mission_value)
+                {
+                    | Ok(content) => Some(content),
+                    | Err(e) =>
+                    {
+                        eprintln!("{} {}", "✗".red(), e.to_string().red());
+                        std::process::exit(1);
+                    }
+                }
             }
             else
             {
-                let resolved_mission = if let Some(ref mission_value) = mission
-                {
-                    match resolve_mission_content(mission_value)
-                    {
-                        | Ok(content) => Some(content),
-                        | Err(e) =>
-                        {
-                            eprintln!("{} {}", "✗".red(), e.to_string().red());
-                            std::process::exit(1);
-                        }
-                    }
-                }
-                else
-                {
-                    None
-                };
+                None
+            };
 
-                let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
+            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
 
-                if dry_run == true
-                {
-                    println!("{} Dry run: previewing merge candidates", "→".blue());
-                }
-                else
-                {
-                    println!("{} AI-assisted merge of customized files", "→".blue());
-                }
-                manager.merge(&merge_options, dry_run, preview, verbose)
+            if dry_run == true
+            {
+                println!("{} Dry run: previewing merge candidates", "→".blue());
             }
+            else
+            {
+                println!("{} AI-assisted merge of customized files", "→".blue());
+            }
+            manager.merge(&merge_options, dry_run, preview, verbose)
         }
+        | Commands::ListModels { provider } => manager.list_models(provider.as_deref()),
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();

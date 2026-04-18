@@ -64,21 +64,32 @@ impl TemplateManager
 {
     /// Lists available models from the selected LLM provider
     ///
-    /// Resolves the provider (CLI > config > env auto-detect), queries its
-    /// models API, and prints the results. The currently configured default
-    /// model is marked in the output.
+    /// When `provider_override` is supplied it is used directly; otherwise the
+    /// provider is resolved from config (`merge.provider`) or env auto-detect.
+    /// The currently configured default model is marked in the output.
     ///
     /// # Arguments
     ///
-    /// * `provider` - CLI override for LLM provider name
-    /// * `model` - CLI override for model name (used only to show the active default)
+    /// * `provider_override` - Optional CLI-supplied provider name (overrides config/env)
     ///
     /// # Errors
     ///
     /// Returns an error if provider resolution or the API call fails
-    pub fn list_models(&self) -> Result<()>
+    pub fn list_models(&self, provider_override: Option<&str>) -> Result<()>
     {
-        let (provider_name, model_name) = Self::resolve_provider_and_model()?;
+        let (provider_name, model_name) = if let Some(p) = provider_override
+        {
+            let config = Config::load().ok();
+            let model = config.as_ref().and_then(|c| c.get("merge.model"));
+            let provider_enum = Provider::from_name(p)?;
+            let effective_model = model.clone().unwrap_or_else(|| provider_enum.default_model().to_string());
+            println!("{} Using provider: {} ({})", "→".blue(), p.green(), effective_model.yellow());
+            (p.to_string(), model)
+        }
+        else
+        {
+            Self::resolve_provider_and_model()?
+        };
         let provider_enum = Provider::from_name(&provider_name)?;
         let default_model = model_name.as_deref().unwrap_or(provider_enum.default_model());
 
@@ -132,8 +143,6 @@ impl TemplateManager
     {
         let (provider_name, model_name) = Self::resolve_provider_and_model()?;
         let provider_enum = Provider::from_name(&provider_name)?;
-
-        println!("{} Using {} / {}", "→".blue(), provider_name.green(), model_name.as_deref().unwrap_or(provider_enum.default_model()).green());
 
         let candidates = self.find_merge_candidates(options)?;
 
