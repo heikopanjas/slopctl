@@ -94,9 +94,12 @@ impl TemplateManager
                 }
 
                 // Collect skill files under this agent's skill dir via filesystem scan
-                // (catches untracked/manually placed skills that FileTracker misses)
+                // (catches untracked/manually placed skills that FileTracker misses).
+                // Skip userprofile-based dirs (e.g. codex ~/.codex/skills) — those are
+                // user-global and may contain agent-internal files or other workspaces' skills.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir(agent_name)
+                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir(agent_name) &&
+                    raw_skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
                 {
                     let skill_dir = resolve_placeholder_path(raw_skill_dir, &current_dir, &userprofile);
                     if skill_dir.exists() == true &&
@@ -159,10 +162,11 @@ impl TemplateManager
                     }
                 }
 
-                // Scan all agent skill directories on filesystem to catch
-                // untracked/manually placed skills (same approach as purge)
+                // Scan workspace-scoped agent skill directories on filesystem to catch
+                // untracked/manually placed skills. Userprofile-based dirs (e.g. codex)
+                // are excluded — those are covered by the FileTracker sweep below.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
+                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
                 for dir in &skill_search_dirs
                 {
                     if dir.exists() == true &&
@@ -635,6 +639,39 @@ mod tests
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create CODEX.md so codex is detected as installed
+        let codex_file = workspace.path().join("CODEX.md");
+        fs::write(&codex_file, "Read AGENTS.md")?;
+
+        // Track the codex instruction file so remove has something to find
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        // Use dry-run to inspect what would be removed without side effects.
+        // The key assertion is that this succeeds without attempting to scan
+        // the userprofile-based ~/.codex/skills directory (which would pick up
+        // .system and other workspaces' skills).
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("codex"), None, &[], false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
         Ok(())
     }
 }

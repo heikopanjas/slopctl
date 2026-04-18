@@ -148,6 +148,44 @@ pub fn get_all_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<Pa
     dirs
 }
 
+/// Return only workspace-scoped skill directories safe for filesystem scanning
+///
+/// Like `get_all_skill_search_dirs` but excludes `$userprofile`-based skill
+/// directories (e.g. codex's `~/.codex/skills`). Those directories are
+/// user-global and may contain agent-internal files (like `.system/`) or
+/// skills installed for other workspaces. Use `FileTracker` to manage
+/// userprofile skills instead.
+///
+/// # Arguments
+///
+/// * `workspace` - Absolute path to the project workspace root
+/// * `userprofile` - Absolute path to the user home directory
+pub fn get_workspace_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<PathBuf>
+{
+    let mut dirs: Vec<PathBuf> = detect_all_installed_agents(workspace)
+        .iter()
+        .filter_map(|agent| {
+            let raw = get_skill_dir(agent)?;
+            if raw.starts_with(PLACEHOLDER_WORKSPACE) == true
+            {
+                Some(resolve_placeholder_path(raw, workspace, userprofile))
+            }
+            else
+            {
+                None
+            }
+        })
+        .collect();
+
+    let cross_client = resolve_placeholder_path(CROSS_CLIENT_SKILL_DIR, workspace, userprofile);
+    if dirs.contains(&cross_client) == false
+    {
+        dirs.push(cross_client);
+    }
+
+    dirs
+}
+
 /// Detect which agent is installed in a workspace by checking for known files
 ///
 /// Scans the workspace for agent-specific instruction files.
@@ -336,6 +374,29 @@ mod tests
         assert_eq!(dirs.len(), 2);
         assert!(dirs.contains(&workspace.join(".cursor/skills")) == true);
         assert!(dirs.contains(&workspace.join(".agents/skills")) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_skill_search_dirs_excludes_codex() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let workspace = temp_dir.path();
+        let home = std::path::PathBuf::from("/home/user");
+
+        std::fs::write(workspace.join(".cursorrules"), b"test")?;
+        std::fs::write(workspace.join("CODEX.md"), b"test")?;
+
+        let all_dirs = get_all_skill_search_dirs(workspace, &home);
+        let ws_dirs = get_workspace_skill_search_dirs(workspace, &home);
+
+        // all_dirs includes codex's userprofile skill dir
+        assert!(all_dirs.contains(&home.join(".codex/skills")) == true);
+        // workspace-only dirs exclude it
+        assert!(ws_dirs.contains(&home.join(".codex/skills")) == false);
+        // workspace-scoped dirs are still present
+        assert!(ws_dirs.contains(&workspace.join(".cursor/skills")) == true);
+        assert!(ws_dirs.contains(&workspace.join(".agents/skills")) == true);
         Ok(())
     }
 

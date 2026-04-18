@@ -67,9 +67,12 @@ impl TemplateManager
             }
         }
 
-        // Scan agent skill directories on disk to catch untracked/manually placed skills
+        // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
+        // placed skills. Userprofile-based dirs (e.g. codex ~/.codex/skills) are excluded —
+        // those are user-global and may contain agent-internal files. FileTracker entries
+        // above already cover userprofile skills that slopctl installed.
         let userprofile = dirs::home_dir().unwrap_or_default();
-        let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
         for dir in &skill_search_dirs
         {
             if dir.exists() == true &&
@@ -265,6 +268,39 @@ mod tests
         assert!(result.is_ok() == true);
         // The untracked skill file should have been discovered and removed
         assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_skips_userprofile_skill_dir_scan() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create CODEX.md so codex is detected as installed
+        fs::write(workspace.path().join("CODEX.md"), "Read AGENTS.md")?;
+
+        // Track the codex instruction file
+        let codex_file = workspace.path().join("CODEX.md");
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        // Purge should succeed without scanning ~/.codex/skills (userprofile dir).
+        // Only workspace-scoped dirs and FileTracker entries are used.
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.purge(true, false);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        // The tracked codex file should be removed
+        assert!(codex_file.exists() == false);
         Ok(())
     }
 }

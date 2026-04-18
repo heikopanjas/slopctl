@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.4.1)
+**Last updated:** 2026-04-18 (v15.4.2)
 
 <!-- {mission} -->
 
@@ -18,6 +18,13 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
 - **License:** MIT
+
+## Session Protocol
+
+When starting a new session, read this entire file and confirm you have
+understood the project instructions before proceeding. Summarize the project
+purpose and key conventions briefly. Do not make changes until you have
+confirmed your understanding.
 
 <!-- {principles} -->
 
@@ -634,6 +641,7 @@ Whenever asked to commit changes:
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - Commit the changes
+- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 This is **CRITICAL**!
 
@@ -793,6 +801,7 @@ After making ANY code changes:
 2. Update the version in `Cargo.toml` accordingly
 3. Include the version change in the same commit as the code change
 4. Mention version bump in commit message footer if significant
+5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
 
 **Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
 
@@ -801,6 +810,16 @@ After making ANY code changes:
 <!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-18 (v15.4.2, protect userprofile skill directories from filesystem scans)
+
+- Fixed `remove`, `purge`, and `list` commands scanning userprofile-based skill directories (e.g. codex `~/.codex/skills`), which picked up agent-internal files (`.system/`) and skills belonging to other workspaces
+- Added `get_workspace_skill_search_dirs()` to `agent_defaults.rs`: returns only `$workspace`-prefixed skill directories, excluding `$userprofile`-based ones (currently codex)
+- `remove --agent`, `remove --all`, `purge`, and `list` now use the workspace-only function for filesystem scanning; FileTracker continues to cover userprofile skills that slopctl installed
+- `remove --agent` additionally checks the `$workspace` prefix before scanning an agent's skill dir
+- `remove --skill` still uses `get_all_skill_search_dirs` since it targets a specific skill name (safe)
+- Added 3 new tests: `get_workspace_skill_search_dirs_excludes_codex`, `remove_agent_codex_skips_userprofile_skill_scan`, `purge_skips_userprofile_skill_dir_scan`
+- Version bump: 15.4.1 to 15.4.2 (PATCH - bug fix)
 
 ### 2026-04-18 (v15.4.1, fix remove command not discovering untracked agent skills)
 
