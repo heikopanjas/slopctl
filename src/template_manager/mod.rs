@@ -5,6 +5,7 @@ mod list;
 mod merge;
 mod purge;
 mod remove;
+mod smart;
 mod update;
 
 use std::{
