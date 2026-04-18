@@ -15,7 +15,7 @@ use crate::{
 
 impl TemplateManager
 {
-    /// Purges all vibe-cop files from the current directory
+    /// Purges all slopctl files from the current directory
     ///
     /// Removes all agent-specific files and AGENTS.md from the current directory.
     /// Global templates in the local data directory are never affected.
@@ -108,7 +108,7 @@ impl TemplateManager
 
         if files_to_purge.is_empty() == true && agents_md_skipped == false
         {
-            println!("{} No vibe-cop files found to purge", "→".blue());
+            println!("{} No slopctl files found to purge", "→".blue());
             return Ok(());
         }
 
@@ -132,7 +132,7 @@ impl TemplateManager
         }
 
         // Ask for confirmation unless force is true
-        if force == false && confirm_action(&format!("{} Are you sure you want to purge all vibe-cop files? (y/N): ", "?".yellow()))? == false
+        if force == false && confirm_action(&format!("{} Are you sure you want to purge all slopctl files? (y/N): ", "?".yellow()))? == false
         {
             println!("{} Operation cancelled", "→".blue());
             return Ok(());
@@ -166,7 +166,7 @@ impl TemplateManager
 
         if purged_count == 0
         {
-            println!("{} No vibe-cop files found to purge", "→".blue());
+            println!("{} No slopctl files found to purge", "→".blue());
         }
         else
         {

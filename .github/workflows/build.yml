@@ -22,13 +22,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Create templates archive
-        run: zip -r vibe-cop-templates.zip templates/
+        run: zip -r slopctl-templates.zip templates/
 
       - name: Upload templates as artifact
         uses: actions/upload-artifact@v6
         with:
-          name: vibe-cop-templates-temp
-          path: vibe-cop-templates.zip
+          name: slopctl-templates-temp
+          path: slopctl-templates.zip
           if-no-files-found: error
 
   build:
@@ -113,16 +113,16 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp target/debug/vibe-cop
-          codesign --verify --verbose target/debug/vibe-cop
+          codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp target/debug/slopctl
+          codesign --verify --verbose target/debug/slopctl
 
-          zip -j vibe-cop-notarize.zip target/debug/vibe-cop
-          xcrun notarytool submit vibe-cop-notarize.zip \
+          zip -j slopctl-notarize.zip target/debug/slopctl
+          xcrun notarytool submit slopctl-notarize.zip \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --wait
-          rm vibe-cop-notarize.zip
+          rm slopctl-notarize.zip
 
       - name: Clean up keychain
         if: always() && steps.signing.outputs.available == 'true'
@@ -131,25 +131,25 @@ jobs:
       - name: Download templates archive
         uses: actions/download-artifact@v7
         with:
-          name: vibe-cop-templates-temp
+          name: slopctl-templates-temp
           path: .
 
       - name: Bundle binary with templates (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/debug/vibe-cop.exe, vibe-cop-templates.zip -DestinationPath vibe-cop-${{ matrix.os }}.zip
+          Compress-Archive -Path target/debug/slopctl.exe, slopctl-templates.zip -DestinationPath slopctl-${{ matrix.os }}.zip
 
       - name: Bundle binary with templates (Unix)
         if: matrix.os != 'windows-latest'
         run: |
-          zip -j vibe-cop-${{ matrix.os }}.zip target/debug/vibe-cop vibe-cop-templates.zip
+          zip -j slopctl-${{ matrix.os }}.zip target/debug/slopctl slopctl-templates.zip
 
       - name: Upload bundled artifact
         uses: actions/upload-artifact@v6
         with:
-          name: vibe-cop-${{ matrix.os }}
-          path: vibe-cop-${{ matrix.os }}.zip
+          name: slopctl-${{ matrix.os }}
+          path: slopctl-${{ matrix.os }}.zip
           if-no-files-found: error
 
   release:
@@ -174,9 +174,9 @@ jobs:
 
       - name: Rename bundled artifacts for release
         run: |
-          mv artifacts/vibe-cop-ubuntu-latest/vibe-cop-ubuntu-latest.zip artifacts/vibe-cop-ubuntu-latest/vibe-cop-linux.zip
-          mv artifacts/vibe-cop-macos-latest/vibe-cop-macos-latest.zip artifacts/vibe-cop-macos-latest/vibe-cop-macos.zip
-          mv artifacts/vibe-cop-windows-latest/vibe-cop-windows-latest.zip artifacts/vibe-cop-windows-latest/vibe-cop-windows.zip
+          mv artifacts/slopctl-ubuntu-latest/slopctl-ubuntu-latest.zip artifacts/slopctl-ubuntu-latest/slopctl-linux.zip
+          mv artifacts/slopctl-macos-latest/slopctl-macos-latest.zip artifacts/slopctl-macos-latest/slopctl-macos.zip
+          mv artifacts/slopctl-windows-latest/slopctl-windows-latest.zip artifacts/slopctl-windows-latest/slopctl-windows.zip
 
       - name: Generate build info
         id: build_info
@@ -191,7 +191,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: R${{ steps.build_info.outputs.version }}_BUILD_${{ github.run_number }}_${{ steps.build_info.outputs.date_compact }}
-          name: vibe-cop-build-${{ github.run_number }}-${{ steps.build_info.outputs.date_compact }}
+          name: slopctl-build-${{ github.run_number }}-${{ steps.build_info.outputs.date_compact }}
           prerelease: true
           draft: false
           make_latest: true
@@ -204,7 +204,7 @@ jobs:
 
             This is an automated development build. Use at your own risk.
           files: |
-            artifacts/vibe-cop-ubuntu-latest/vibe-cop-linux.zip
-            artifacts/vibe-cop-macos-latest/vibe-cop-macos.zip
-            artifacts/vibe-cop-windows-latest/vibe-cop-windows.zip
-            artifacts/vibe-cop-templates-temp/vibe-cop-templates.zip
+            artifacts/slopctl-ubuntu-latest/slopctl-linux.zip
+            artifacts/slopctl-macos-latest/slopctl-macos.zip
+            artifacts/slopctl-windows-latest/slopctl-windows.zip
+            artifacts/slopctl-templates-temp/slopctl-templates.zip

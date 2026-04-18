@@ -44,7 +44,7 @@ impl TemplateManager
     {
         require!(
             self.has_global_templates() == true,
-            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
+            Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
         );
 
         let config = template_engine::load_template_config(&self.config_dir)?;
@@ -53,7 +53,7 @@ impl TemplateManager
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V5: vibe-cop config source.url https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5"
+                "V1 templates are no longer supported. Migrate to V5: slopctl config source.url https://github.com/heikopanjas/slopctl/tree/develop/templates/v5"
             )),
             | 2..=5 =>
             {
@@ -73,7 +73,7 @@ impl TemplateManager
                 let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
                 engine.update(options)
             }
-            | _ => Err(anyhow::anyhow!("Unsupported template version: {}. Please update vibe-cop to the latest version.", version))
+            | _ => Err(anyhow::anyhow!("Unsupported template version: {}. Please update slopctl to the latest version.", version))
         }
     }
 }

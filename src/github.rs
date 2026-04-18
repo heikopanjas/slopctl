@@ -228,7 +228,7 @@ pub fn list_directory_contents(github_url: &GitHubUrl) -> Result<Vec<GitHubConte
     let api_url = github_url.contents_api_url();
 
     let client = reqwest::blocking::Client::new();
-    let response = client.get(&api_url).header("User-Agent", "vibe-cop").header("Accept", "application/vnd.github.v3+json").send()?;
+    let response = client.get(&api_url).header("User-Agent", "slopctl").header("Accept", "application/vnd.github.v3+json").send()?;
 
     if response.status().is_success() == false
     {
@@ -252,7 +252,7 @@ pub fn list_directory_contents(github_url: &GitHubUrl) -> Result<Vec<GitHubConte
 pub fn download_file(url: &str, dest_path: &Path) -> Result<()>
 {
     let client = reqwest::blocking::Client::new();
-    let response = client.get(url).header("User-Agent", "vibe-cop").send()?;
+    let response = client.get(url).header("User-Agent", "slopctl").send()?;
 
     if response.status().is_success() == false
     {

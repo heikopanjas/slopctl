@@ -413,6 +413,8 @@ mod tests
     #[test]
     fn test_remove_lang_unknown_no_error() -> anyhow::Result<()>
     {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
         let yaml = "languages:\n  rust:\n    files: []\n";

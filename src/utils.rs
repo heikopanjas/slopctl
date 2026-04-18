@@ -1,4 +1,4 @@
-//! Utility functions for vibe-cop
+//! Utility functions for slopctl
 
 use std::{
     fs,
@@ -34,7 +34,7 @@ use crate::Result;
 /// ```no_run
 /// use std::path::Path;
 ///
-/// use vibe_cop::copy_dir_all;
+/// use slopctl::copy_dir_all;
 ///
 /// let src = Path::new("/path/to/source");
 /// let dst = Path::new("/path/to/dest");
