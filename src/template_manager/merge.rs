@@ -311,7 +311,7 @@ impl TemplateManager
                             if is_truncated == true
                             {
                                 let rel_partial = partial.strip_prefix(&workspace).unwrap_or(&partial);
-                                print!("\r");
+                                print!("\r\x1b[2K");
                                 println!(
                                     "  {} {} {} (truncated, partial saved: {})",
                                     "!".yellow(),
@@ -327,7 +327,7 @@ impl TemplateManager
                                 let _ = fs::remove_file(&partial);
 
                                 let rel = output_path.strip_prefix(&workspace).unwrap_or(&output_path);
-                                print!("\r");
+                                print!("\r\x1b[2K");
                                 if preview == true
                                 {
                                     println!("  {} wrote {}", "✓".green(), rel.display().to_string().yellow());
@@ -344,7 +344,7 @@ impl TemplateManager
                         | Err(e) =>
                         {
                             let rel_partial = partial.strip_prefix(&workspace).unwrap_or(&partial);
-                            print!("\r");
+                            print!("\r\x1b[2K");
                             println!("  {} {} failed: {} (partial saved: {})", "!".red(), display.yellow(), e, rel_partial.display().to_string().dimmed());
                         }
                     }
