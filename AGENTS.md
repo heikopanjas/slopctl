@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.4.0)
+**Last updated:** 2026-04-18 (v15.4.1)
 
 <!-- {mission} -->
 
@@ -801,6 +801,17 @@ After making ANY code changes:
 <!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-18 (v15.4.1, fix remove command not discovering untracked agent skills)
+
+- Fixed `remove --agent` and `remove --all` not discovering untracked/manually placed skill files in agent skill directories
+- Root cause: both code paths only consulted the FileTracker for skill files, missing any skills not recorded in the tracker (e.g. manually placed or installed by other tools)
+- `remove --agent <name>` now scans the agent's skill directory on the filesystem (e.g. `.cursor/skills/`) via `collect_files_recursive`, matching the approach used by `purge`
+- `remove --all` now scans all agent skill directories and the cross-client `.agents/skills/` directory via `get_all_skill_search_dirs`, same as `purge`
+- FileTracker sweep is retained as a supplement to catch tracked skill files outside standard directory trees
+- `purge` command was already correct (filesystem scan was present since v12.3.2)
+- Added 2 new tests: `test_remove_agent_discovers_untracked_skill_files`, `test_remove_all_discovers_untracked_skill_files`
+- Version bump: 15.4.0 to 15.4.1 (PATCH - bug fix)
 
 ### 2026-04-18 (v15.4.0, merge command optimization: streaming, changelog marker, partial recovery)
 
