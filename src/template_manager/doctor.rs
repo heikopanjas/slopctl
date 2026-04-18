@@ -146,7 +146,7 @@ impl TemplateManager
         if fix == false
         {
             println!();
-            println!("{} Run 'vibe-cop doctor --fix' to automatically fix issues", "→".blue());
+            println!("{} Run 'slopctl doctor --fix' to automatically fix issues", "→".blue());
             return Ok(());
         }
 
@@ -212,7 +212,7 @@ impl TemplateManager
         if modified_count > 0
         {
             println!(
-                "  {} Skipped {} modified file{} - run 'vibe-cop init --force' to overwrite",
+                "  {} Skipped {} modified file{} - run 'slopctl init --force' to overwrite",
                 "!".yellow(),
                 modified_count,
                 if modified_count == 1
@@ -229,7 +229,7 @@ impl TemplateManager
         if dry_run == false && unmerged_count > 0
         {
             println!();
-            println!("{} Run 'vibe-cop init' to re-merge language sections into AGENTS.md", "→".blue());
+            println!("{} Run 'slopctl init' to re-merge language sections into AGENTS.md", "→".blue());
         }
 
         Ok(())

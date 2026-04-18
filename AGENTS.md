@@ -1,12 +1,12 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-10 (v13.3.0)
+**Last updated:** 2026-04-18 (v15.0.0)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-vibe-cop is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
+slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
@@ -898,14 +898,14 @@ After making ANY code changes:
 ### 2026-04-10 (v12.4.0, CLI rework: templates and status commands)
 
 - Replaced `update` command with `templates` command that consolidates global template management
-- `templates --update` downloads/updates global templates (replaces `vibe-cop update`)
-- `templates --list` shows available agents, languages, and skills (replaces `vibe-cop list --global`)
+- `templates --update` downloads/updates global templates (replaces `slopctl update`)
+- `templates --list` shows available agents, languages, and skills (replaces `slopctl list --global`)
 - Both flags can be combined: `templates --update --list` updates then shows the catalog
-- Running `vibe-cop templates` with neither flag prints an error with usage examples
+- Running `slopctl templates` with neither flag prints an error with usage examples
 - `--from` and `--dry-run` now require `--update` (enforced by clap)
 - Renamed `list` command back to `status` (workspace-only; `--global` moved to `templates --list`)
 - Made `list_global()` public on `TemplateManager` for use by the templates command path
-- Updated all user-facing strings referencing `vibe-cop update` and `vibe-cop list` across codebase
+- Updated all user-facing strings referencing `slopctl update` and `slopctl list` across codebase
 - Updated README.md CLI docs and examples
 - Version bump: 12.3.4 to 12.4.0 (MINOR - new commands, removed old commands)
 
@@ -914,7 +914,7 @@ After making ANY code changes:
 - Added CI status badge to README.md linking to the Build and Test workflow on develop branch
 - Updated README.md footer version from v12.2.0 to v12.3.4
 - Filled in all placeholder sections in the project AGENTS.md with actual project information:
-  - Mission Statement: describes vibe-cop purpose and supported agents
+  - Mission Statement: describes slopctl purpose and supported agents
   - Technology Stack: Rust 2024, clap, reqwest, serde, GitHub Actions CI/CD, MIT license
   - Development Guidelines: debug builds, branch model, dry-run testing, module organization
   - Code Review: cargo fmt, clippy, and test before committing
@@ -1015,7 +1015,7 @@ After making ANY code changes:
 - Added `--global` (`-g`) and `--verbose` (`-v`) flags to `List` command
 - Enhanced `--global` view to show language/shared-group skill names inline under each language
 - Deleted `src/template_manager/status.rs`; moved logic into `list.rs` split across `list_workspace()` and `list_global()` helpers
-- Updated README.md references from `vibe-cop status` to `vibe-cop list`
+- Updated README.md references from `slopctl status` to `slopctl list`
 - Version bump: 12.0.0 to 12.1.0 (MINOR - merged commands, new --global flag)
 
 ### 2026-04-06 (v12.0.0, template version V5)
@@ -1215,19 +1215,19 @@ After making ANY code changes:
 - Added download loop for `config.shared` values before the language download loop
 - Version bump: 11.0.0 to 11.0.1 (PATCH - bug fix)
 
-### 2026-03-19 (v11.0.0, rebrand to vibe-cop)
+### 2026-03-19 (v11.0.0, rebrand to slopctl)
 
 - MAJOR version bump: 10.0.0 to 11.0.0 (breaking: binary, config paths, data paths all renamed)
-- Renamed tool from regulator to vibe-cop across entire codebase
-- Binary name: `regulator` to `vibe-cop`
-- Config path: `~/.config/regulator/` to `~/.config/vibe-cop/`
-- Data path: `~/.local/share/regulator/` to `~/.local/share/vibe-cop/`
+- Renamed tool from regulator to slopctl across entire codebase
+- Binary name: `regulator` to `slopctl`
+- Config path: `~/.config/regulator/` to `~/.config/slopctl/`
+- Data path: `~/.local/share/regulator/` to `~/.local/share/slopctl/`
 - Template marker: `REGULATOR-TEMPLATE` to `VIBE-COP-TEMPLATE`
-- User-Agent header: `regulator` to `vibe-cop`
+- User-Agent header: `regulator` to `slopctl`
 - Updated all CLI help text, error messages, and user-facing strings
 - Updated CI workflows (build.yml, release.yml) artifact names
 - Updated README.md with new tool name
-- Man page renamed to vibe-cop.1
+- Man page renamed to slopctl.1
 
 ### 2026-03-13 (v10.0.0, rebrand to regulator)
 
@@ -1441,7 +1441,7 @@ After making ANY code changes:
 ### 2026-02-15
 
 - Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
-- Use for language-independent setup: `vibe-cop init --no-lang` or `--no-lang --agent cursor`
+- Use for language-independent setup: `slopctl init --no-lang` or `--no-lang --agent cursor`
 - Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
 - Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
 - When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)
@@ -1479,3 +1479,31 @@ After making ANY code changes:
 - Established core coding standards and conventions
 - Created agent-specific reference files
 - Defined repository structure and governance principles
+
+### 2026-04-18 (v15.0.0, rebrand to slopctl)
+
+- MAJOR version bump: 14.0.0 to 15.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from slopcop to slopctl across entire codebase
+- Binary name: slopcop to slopctl
+- Config path: ~/.config/slopcop/ to ~/.config/slopctl/
+- Data path: ~/.local/share/slopcop/templates to ~/.local/share/slopctl/templates
+- Template marker: SLOPCOP-TEMPLATE to SLOPCTL-TEMPLATE
+- User-Agent header: slopcop to slopctl
+- Default template source URL updated to heikopanjas/slopctl (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
+
+### 2026-04-18 (v14.0.0, rebrand to slopcop)
+
+- MAJOR version bump: 13.3.0 to 14.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from vibe-cop to slopcop across entire codebase
+- Binary name: vibe-cop to slopcop
+- Config path: ~/.config/vibe-cop/ to ~/.config/slopcop/
+- Data path: ~/.local/share/vibe-cop/templates to ~/.local/share/slopcop/templates
+- Template marker: VIBE-COP-TEMPLATE to SLOPCOP-TEMPLATE
+- User-Agent header: vibe-cop to slopcop
+- Default template source URL updated to heikopanjas/slopcop (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name

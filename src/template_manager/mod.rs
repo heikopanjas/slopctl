@@ -1,4 +1,4 @@
-//! Template management functionality for vibe-cop
+//! Template management functionality for slopctl
 
 mod doctor;
 mod list;
@@ -21,8 +21,8 @@ use crate::{Result, download_manager::DownloadManager, utils::copy_dir_all};
 ///
 /// The `TemplateManager` handles all operations related to template storage,
 /// verification, and synchronization. Templates are stored in the
-/// local data directory (e.g., `$HOME/.local/share/vibe-cop/templates` on Linux,
-/// `$HOME/Library/Application Support/vibe-cop/templates` on macOS).
+/// local data directory (e.g., `$HOME/.local/share/slopctl/templates` on Linux,
+/// `$HOME/Library/Application Support/slopctl/templates` on macOS).
 pub struct TemplateManager
 {
     pub(crate) config_dir: PathBuf
@@ -42,7 +42,7 @@ impl TemplateManager
     {
         let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
 
-        let config_dir = data_dir.join("vibe-cop/templates");
+        let config_dir = data_dir.join("slopctl/templates");
 
         Ok(Self { config_dir })
     }
