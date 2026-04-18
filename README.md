@@ -23,7 +23,7 @@ slopctl is a command-line tool that helps you:
 - **Independent skill loading** – Install skills standalone with `--skill user/repo` (no templates or agent required); uses cross-client `.agents/skills/` directory per agentskills.io spec
 - **Keep templates synchronized** – Update global templates from remote sources
 - **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
-- **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`
+- **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`; run `doctor --smart` for AI-assisted linting of `AGENTS.md`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
 - **Support multiple agents** – Compatible with Claude Code, Cursor, GitHub Copilot, and Codex
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
@@ -52,6 +52,7 @@ slopctl/
 │   │   ├── mod.rs              # Struct, constructor, and helpers
 │   │   ├── update.rs           # init/update command logic
 │   │   ├── merge.rs            # AI-assisted merge command logic
+│   │   ├── smart.rs            # LLM-assisted doctor linting (parse_smart_issues, smart_doctor)
 │   │   ├── purge.rs            # Purge all slopctl files
 │   │   ├── remove.rs           # Remove agent/language/skill files
 │   │   ├── doctor.rs           # Workspace health checks and fixes
@@ -706,12 +707,12 @@ slopctl remove --all --dry-run
 
 ### `doctor` - Check Workspace Health
 
-Check the workspace for stale or broken managed files and optionally fix them.
+Check the workspace for stale or broken managed files and optionally fix them. With `--smart`, additionally run LLM-assisted linting of `AGENTS.md` for contradictions, stale references, and unclear instructions.
 
 **Usage:**
 
 ```bash
-slopctl doctor [--fix] [--dry-run] [--verbose]
+slopctl doctor [--fix] [--dry-run] [--verbose] [--smart]
 ```
 
 **Options:**
@@ -719,6 +720,7 @@ slopctl doctor [--fix] [--dry-run] [--verbose]
 - `--fix` - Automatically repair detected issues where safe to do so
 - `--dry-run` - Preview what would be fixed without applying changes
 - `--verbose` - Print every checked file and its result during the scan
+- `--smart` - Run AI-assisted linting of `AGENTS.md` after the standard checks. Reports contradictions, stale references, and unclear instructions. Provider is resolved from config `merge.provider` or env API keys.
 
 **Issue categories detected:**
 
@@ -748,6 +750,9 @@ slopctl doctor --fix
 
 # Preview fixes without applying them
 slopctl doctor --fix --dry-run
+
+# Run AI-assisted linting of AGENTS.md after the standard checks
+slopctl doctor --smart
 ```
 
 **Example output (with --verbose and issues present):**
@@ -852,32 +857,36 @@ slopctl completions powershell > slopctl.ps1
 
 ### `merge` - AI-Assisted Merge
 
-Merge customized workspace files with updated templates using AI assistance. By default, merged content replaces the original file directly. Use `--preview` to write `.merged` sidecar files for manual review instead.
+Merge customized workspace files with updated templates using AI assistance. `merge` runs the same workflow as `init` but resolves conflicts via an LLM instead of prompting the user. By default, merged content replaces the original file directly. Use `--preview` to write `.merged` sidecar files for manual review instead.
 
-The provider can be specified via `--provider`, the `merge.provider` config key, or auto-detected from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` — checked in that order). The model can be set via `--model`, the `merge.model` config key, or the provider's default.
+The provider is resolved from the `merge.provider` config key, or auto-detected from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` — checked in that order). The model is resolved from the `merge.model` config key, or the provider's default. There are no `--provider`/`--model` CLI flags; configure them via `slopctl config --add merge.provider <name>` or env vars.
 
 **Usage:**
 
 ```bash
-slopctl merge                                    # Auto-detect provider from env
-slopctl merge --provider anthropic
-slopctl merge --provider openai --model gpt-4o
-slopctl merge --provider anthropic --preview
-slopctl merge --provider anthropic --dry-run
-slopctl merge --provider anthropic --verbose
-slopctl merge --list-models
+slopctl merge                                    # Merge using config/env provider
+slopctl merge --lang rust                        # Override detected language
+slopctl merge --agent cursor                     # Override detected agent
+slopctl merge --mission "My new mission"         # Use a custom mission for the fresh template
+slopctl merge --skill user/my-skill              # Include an extra skill in the comparison
+slopctl merge --preview                          # Write .merged sidecars instead of replacing
+slopctl merge --dry-run                          # Show candidates without calling the LLM
+slopctl merge --verbose                          # Show token usage summary after merging
+slopctl merge --list-models                      # List available models from the resolved provider
 ```
 
 **Options:**
 
-- `--provider` / `-p` - LLM provider (openai, anthropic, ollama, mistral). Falls back to config `merge.provider`, then auto-detection from environment API keys.
-- `--model` / `-m` - Model to use for merging. Falls back to config `merge.model`, then provider default.
+- `--lang` / `-l` - Programming language override. Falls back to installed language detected by the FileTracker.
+- `--agent` / `-a` - AI coding agent override. Falls back to agents detected in the workspace.
+- `--mission` / `-m` - Custom mission statement for the fresh template (use `@filename` to read from a file).
+- `--skill` / `-s` - Include extra skill source(s) in the fresh template for comparison (repeatable). URL-based sources are skipped.
 - `--preview` - Write `.merged` sidecar files instead of replacing originals
 - `--dry-run` / `-n` - Show merge candidates without calling the LLM
-- `--list-models` / `-L` - List available models from the selected provider
+- `--list-models` / `-L` - List available models from the resolved provider
 - `--verbose` / `-v` - Show token usage summary after merging (input/output tokens, stop reason). Warns if any file was truncated due to max token limits.
 
-**Provider priority:** CLI `--provider` > config `merge.provider` > environment auto-detect > error
+**Provider priority:** config `merge.provider` > environment auto-detect > error. Set with `slopctl config --add merge.provider <name>` or via API key env vars.
 
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.1.0)
+**Last updated:** 2026-04-18 (v15.2.0)
 
 <!-- {mission} -->
 
@@ -1479,6 +1479,20 @@ After making ANY code changes:
 - Established core coding standards and conventions
 - Created agent-specific reference files
 - Defined repository structure and governance principles
+
+### 2026-04-18 (v15.2.0, init/merge redesign: AI-free init, AI-powered merge)
+
+- Removed --smart flag from init command: init is now pure template installation with no AI involvement; users resolve conflicts manually
+- Removed --provider and --model CLI flags from merge command: provider/model are resolved only from config (merge.provider, merge.model) and environment API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY)
+- Added --lang, --agent, --mission, --skill options to merge command (mirror init's options): these override the auto-detected installed language, agent, and allow specifying a custom mission or extra skills when generating the fresh template for AI comparison
+- Introduced MergeOptions<'a> struct in src/template_manager/merge.rs grouping lang/agent/mission/skills; re-exported via template_manager::MergeOptions and slopctl::MergeOptions
+- generate_fresh_main now accepts a mission override that takes precedence over template-defined mission fragments
+- build_target_source_map now accepts MergeOptions; lang override falls back to tracker.get_installed_language_for_workspace(); agent override falls back to agent_defaults::detect_all_installed_agents(); extra --skill sources are added to the target→content map (URL-based sources skipped)
+- Removed generate_smart_mission from smart.rs (no longer needed); smart.rs now only contains smart_doctor + parse_smart_issues + SmartIssueKind/SmartIssue
+- resolve_provider_and_model simplified to take no arguments (priority: config merge.provider > env auto-detect > error)
+- collect_workspace_context and its four tests removed (no production callers after generate_smart_mission removal)
+- Updated doctor.rs to call smart_doctor() without arguments
+- Version bump: 15.1.0 to 15.2.0 (MINOR - behavioural change to merge, CLI flag removals from init and merge, new CLI flags on merge)
 
 ### 2026-04-18 (v15.1.0, smart features for init and doctor)
 
