@@ -7,7 +7,7 @@ use std::{
 
 use owo_colors::OwoColorize;
 
-use super::TemplateManager;
+use super::{TemplateManager, smart::SmartIssueKind};
 use crate::{
     Result,
     file_tracker::{FileStatus, FileTracker},
@@ -41,17 +41,19 @@ impl TemplateManager
     /// Scans all FileTracker entries for the current workspace and reports three
     /// categories of issue: missing files (stale tracker entries), files with an
     /// unmerged template marker, and files modified since install (informational).
+    /// When `smart` is true, also runs AI-assisted linting of AGENTS.md.
     ///
     /// # Arguments
     ///
     /// * `fix` - If true, automatically repair issues where safe to do so
     /// * `dry_run` - If true, show what would be done without applying any changes
     /// * `verbose` - If true, print every checked file and its check result
+    /// * `smart` - If true, run AI-assisted linting of AGENTS.md after the standard checks
     ///
     /// # Errors
     ///
     /// Returns an error if the current directory or FileTracker cannot be read
-    pub fn doctor(&self, fix: bool, dry_run: bool, verbose: bool) -> Result<()>
+    pub fn doctor(&self, fix: bool, dry_run: bool, verbose: bool, smart: bool) -> Result<()>
     {
         let workspace = std::env::current_dir()?;
         let mut tracker = FileTracker::new(&self.config_dir)?;
@@ -61,175 +63,228 @@ impl TemplateManager
         if issues.is_empty() == true
         {
             println!("{} No issues found", "✓".green());
-            return Ok(());
-        }
-
-        // Display all issues grouped by kind
-        println!("{}", "Issues found:".bold());
-        println!();
-
-        for issue in &issues
-        {
-            let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
-            match issue.kind
-            {
-                | IssueKind::MissingFile =>
-                {
-                    println!("  {} {} {} {}", "✗".red(), "Missing:".red(), rel.display().to_string().red(), "(tracked but deleted)".dimmed());
-                }
-                | IssueKind::UnmergedTemplate =>
-                {
-                    println!("  {} {} {} {}", "✗".red(), "Unmerged:".red(), rel.display().to_string().red(), "(template marker still present)".dimmed());
-                }
-                | IssueKind::ModifiedFile =>
-                {
-                    println!("  {} {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow(), "(changed since install)".dimmed());
-                }
-            }
-        }
-
-        let missing_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::MissingFile)).count();
-        let unmerged_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::UnmergedTemplate)).count();
-        let modified_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::ModifiedFile)).count();
-
-        println!();
-
-        if missing_count > 0
-        {
-            println!(
-                "  {} {} stale tracker entr{}",
-                "✗".red(),
-                missing_count,
-                if missing_count == 1
-                {
-                    "y"
-                }
-                else
-                {
-                    "ies"
-                }
-            );
-        }
-        if unmerged_count > 0
-        {
-            println!(
-                "  {} {} file{} with unmerged template marker",
-                "✗".red(),
-                unmerged_count,
-                if unmerged_count == 1
-                {
-                    ""
-                }
-                else
-                {
-                    "s"
-                }
-            );
-        }
-        if modified_count > 0
-        {
-            println!(
-                "  {} {} modified file{} (no automatic fix available)",
-                "!".yellow(),
-                modified_count,
-                if modified_count == 1
-                {
-                    ""
-                }
-                else
-                {
-                    "s"
-                }
-            );
-        }
-
-        if fix == false
-        {
-            println!();
-            println!("{} Run 'slopctl doctor --fix' to automatically fix issues", "→".blue());
-            return Ok(());
-        }
-
-        // Apply fixes
-        println!();
-        if dry_run == true
-        {
-            println!("{}", "Dry run - no changes applied:".bold());
         }
         else
         {
-            println!("{}", "Applying fixes:".bold());
-        }
-        println!();
+            // Display all issues grouped by kind
+            println!("{}", "Issues found:".bold());
+            println!();
 
-        // Fix missing files: prune stale tracker entries
-        let mut pruned = 0;
-        for issue in &issues
-        {
-            if matches!(issue.kind, IssueKind::MissingFile) == false
+            for issue in &issues
             {
-                continue;
-            }
-
-            let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
-            if dry_run == true
-            {
-                println!("  {} Would prune stale tracker entry: {}", "→".blue(), rel.display().to_string().yellow());
-            }
-            else
-            {
-                tracker.remove_entry(&issue.path);
-                println!("  {} Pruned stale tracker entry: {}", "✓".green(), rel.display().to_string().yellow());
-                pruned += 1;
-            }
-        }
-
-        if pruned > 0
-        {
-            tracker.save()?;
-        }
-
-        // Fix unmerged templates: strip the template marker from the file
-        for issue in &issues
-        {
-            if matches!(issue.kind, IssueKind::UnmergedTemplate) == false
-            {
-                continue;
-            }
-
-            let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
-            if dry_run == true
-            {
-                println!("  {} Would strip template marker from: {}", "→".blue(), rel.display().to_string().yellow());
-            }
-            else
-            {
-                Self::fix_unmerged_template(&issue.path)?;
-                println!("  {} Stripped template marker from: {}", "✓".green(), rel.display().to_string().yellow());
-            }
-        }
-
-        if modified_count > 0
-        {
-            println!(
-                "  {} Skipped {} modified file{} - run 'slopctl init --force' to overwrite",
-                "!".yellow(),
-                modified_count,
-                if modified_count == 1
+                let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
+                match issue.kind
                 {
-                    ""
+                    | IssueKind::MissingFile =>
+                    {
+                        println!("  {} {} {} {}", "✗".red(), "Missing:".red(), rel.display().to_string().red(), "(tracked but deleted)".dimmed());
+                    }
+                    | IssueKind::UnmergedTemplate =>
+                    {
+                        println!("  {} {} {} {}", "✗".red(), "Unmerged:".red(), rel.display().to_string().red(), "(template marker still present)".dimmed());
+                    }
+                    | IssueKind::ModifiedFile =>
+                    {
+                        println!("  {} {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow(), "(changed since install)".dimmed());
+                    }
+                }
+            }
+
+            let missing_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::MissingFile)).count();
+            let unmerged_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::UnmergedTemplate)).count();
+            let modified_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::ModifiedFile)).count();
+
+            println!();
+
+            if missing_count > 0
+            {
+                println!(
+                    "  {} {} stale tracker entr{}",
+                    "✗".red(),
+                    missing_count,
+                    if missing_count == 1
+                    {
+                        "y"
+                    }
+                    else
+                    {
+                        "ies"
+                    }
+                );
+            }
+            if unmerged_count > 0
+            {
+                println!(
+                    "  {} {} file{} with unmerged template marker",
+                    "✗".red(),
+                    unmerged_count,
+                    if unmerged_count == 1
+                    {
+                        ""
+                    }
+                    else
+                    {
+                        "s"
+                    }
+                );
+            }
+            if modified_count > 0
+            {
+                println!(
+                    "  {} {} modified file{} (no automatic fix available)",
+                    "!".yellow(),
+                    modified_count,
+                    if modified_count == 1
+                    {
+                        ""
+                    }
+                    else
+                    {
+                        "s"
+                    }
+                );
+            }
+
+            if fix == false
+            {
+                println!();
+                println!("{} Run 'slopctl doctor --fix' to automatically fix issues", "→".blue());
+            }
+            else
+            {
+                // Apply fixes
+                println!();
+                if dry_run == true
+                {
+                    println!("{}", "Dry run - no changes applied:".bold());
                 }
                 else
                 {
-                    "s"
+                    println!("{}", "Applying fixes:".bold());
                 }
-            );
+                println!();
+
+                // Fix missing files: prune stale tracker entries
+                let mut pruned = 0;
+                for issue in &issues
+                {
+                    if matches!(issue.kind, IssueKind::MissingFile) == false
+                    {
+                        continue;
+                    }
+
+                    let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
+                    if dry_run == true
+                    {
+                        println!("  {} Would prune stale tracker entry: {}", "→".blue(), rel.display().to_string().yellow());
+                    }
+                    else
+                    {
+                        tracker.remove_entry(&issue.path);
+                        println!("  {} Pruned stale tracker entry: {}", "✓".green(), rel.display().to_string().yellow());
+                        pruned += 1;
+                    }
+                }
+
+                if pruned > 0
+                {
+                    tracker.save()?;
+                }
+
+                // Fix unmerged templates: strip the template marker from the file
+                for issue in &issues
+                {
+                    if matches!(issue.kind, IssueKind::UnmergedTemplate) == false
+                    {
+                        continue;
+                    }
+
+                    let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
+                    if dry_run == true
+                    {
+                        println!("  {} Would strip template marker from: {}", "→".blue(), rel.display().to_string().yellow());
+                    }
+                    else
+                    {
+                        Self::fix_unmerged_template(&issue.path)?;
+                        println!("  {} Stripped template marker from: {}", "✓".green(), rel.display().to_string().yellow());
+                    }
+                }
+
+                if modified_count > 0
+                {
+                    println!(
+                        "  {} Skipped {} modified file{} - run 'slopctl init --force' to overwrite",
+                        "!".yellow(),
+                        modified_count,
+                        if modified_count == 1
+                        {
+                            ""
+                        }
+                        else
+                        {
+                            "s"
+                        }
+                    );
+                }
+
+                if dry_run == false && unmerged_count > 0
+                {
+                    println!();
+                    println!("{} Run 'slopctl init' to re-merge language sections into AGENTS.md", "→".blue());
+                }
+            }
         }
 
-        if dry_run == false && unmerged_count > 0
+        if smart == true
         {
-            println!();
-            println!("{} Run 'slopctl init' to re-merge language sections into AGENTS.md", "→".blue());
+            self.display_smart_analysis()?;
+        }
+
+        Ok(())
+    }
+
+    /// Runs smart analysis and prints results in a dedicated section
+    fn display_smart_analysis(&self) -> Result<()>
+    {
+        println!();
+        println!("{}", "Smart Analysis:".bold());
+        println!();
+
+        match self.smart_doctor()
+        {
+            | Ok(smart_issues) =>
+            {
+                if smart_issues.is_empty() == true
+                {
+                    println!("{} No issues detected by AI analysis", "✓".green());
+                }
+                else
+                {
+                    for issue in &smart_issues
+                    {
+                        match issue.kind
+                        {
+                            | SmartIssueKind::Contradiction =>
+                            {
+                                println!("  {} {} {}", "!".red(), "Contradiction:    ".red(), issue.description.red());
+                            }
+                            | SmartIssueKind::StaleReference =>
+                            {
+                                println!("  {} {} {}", "!".yellow(), "Stale reference:  ".yellow(), issue.description.yellow());
+                            }
+                            | SmartIssueKind::UnclearInstruction =>
+                            {
+                                println!("  {} {} {}", "→".blue(), "Unclear:          ".blue(), issue.description.blue());
+                            }
+                        }
+                    }
+                }
+            }
+            | Err(e) =>
+            {
+                println!("{} Smart analysis failed: {}", "!".yellow(), e);
+            }
         }
 
         Ok(())
@@ -380,7 +435,7 @@ mod tests
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
         // Should succeed with no issues when tracker is empty
         // (doctor uses current_dir, not dir.path(), so we just test it doesn't error)
-        let result = manager.doctor(false, false, false);
+        let result = manager.doctor(false, false, false, false);
         assert!(result.is_ok() == true);
     }
 
