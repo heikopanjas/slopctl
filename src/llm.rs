@@ -329,12 +329,16 @@ impl LlmClient
             "model": self.model,
             "messages": messages,
             "temperature": 0.0,
-            "max_tokens": 32768,
             "stream": true
         });
 
-        if self.provider != Provider::Ollama
+        if self.provider == Provider::Ollama
         {
+            body["max_tokens"] = serde_json::json!(32768);
+        }
+        else
+        {
+            body["max_completion_tokens"] = serde_json::json!(32768);
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
 
