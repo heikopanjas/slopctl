@@ -800,6 +800,82 @@ After making ANY code changes:
 
 ## Recent Updates & Decisions
 
+### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
+
+- Redesigned merge command to follow the same file-resolution pipeline as init (DRY)
+- Extracted `resolve_all_files()` from `TemplateEngine::update()` into a reusable public method; both init and merge now call it
+- Added `ResolvedFiles` struct grouping `TemplateContext`, files-to-copy, and directories-to-create
+- Added `build_target_content_map()` on `TemplateEngine` that resolves all files and reads sources into `HashMap<PathBuf, String>`
+- Moved `generate_fresh_main()` from merge.rs into template_engine.rs as an associated function (pure template logic)
+- Refactored `merge_fragments()` to delegate content generation to `generate_fresh_main()`, eliminating duplicate fragment-merging code
+- Added `normalize_path()` as a public function in template_engine.rs
+- Merge now classifies files into three categories: New (write directly), Unchanged (skip), Diverged (LLM merge)
+- New files are created without LLM involvement; only diverged files are sent to the AI
+- LLM provider resolution is deferred until diverged files are actually found (no API key needed for new-only merges)
+- Deleted ~400 lines of duplicated code from merge.rs: build_target_source_map, find_merge_candidates, generate_fresh_main, insert_source_content, insert_skill_sources, insert_skill_dir_recursive, resolve_target, normalize_path, sha256_string
+- Added `categorize_path()` helper for FileTracker category detection during merge
+- Added 8 new tests: classify_files (new, unchanged, diverged, mixed, sorted), categorize_path (main, skill, integration, agent, language), plural helper
+- All written files (New + Diverged) are now recorded in FileTracker during merge
+- Version bump: 15.2.0 to 15.3.0 (MINOR - behavioral redesign of merge command)
+
+### 2026-04-18 (v15.2.0, init/merge redesign: AI-free init, AI-powered merge)
+
+- Removed --smart flag from init command: init is now pure template installation with no AI involvement; users resolve conflicts manually
+- Removed --provider and --model CLI flags from merge command: provider/model are resolved only from config (merge.provider, merge.model) and environment API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY)
+- Added --lang, --agent, --mission, --skill options to merge command (mirror init's options): these override the auto-detected installed language, agent, and allow specifying a custom mission or extra skills when generating the fresh template for AI comparison
+- Introduced MergeOptions<'a> struct in src/template_manager/merge.rs grouping lang/agent/mission/skills; re-exported via template_manager::MergeOptions and slopctl::MergeOptions
+- generate_fresh_main now accepts a mission override that takes precedence over template-defined mission fragments
+- build_target_source_map now accepts MergeOptions; lang override falls back to tracker.get_installed_language_for_workspace(); agent override falls back to agent_defaults::detect_all_installed_agents(); extra --skill sources are added to the target→content map (URL-based sources skipped)
+- Removed generate_smart_mission from smart.rs (no longer needed); smart.rs now only contains smart_doctor + parse_smart_issues + SmartIssueKind/SmartIssue
+- resolve_provider_and_model simplified to take no arguments (priority: config merge.provider > env auto-detect > error)
+- collect_workspace_context and its four tests removed (no production callers after generate_smart_mission removal)
+- Updated doctor.rs to call smart_doctor() without arguments
+- Version bump: 15.1.0 to 15.2.0 (MINOR - behavioural change to merge, CLI flag removals from init and merge, new CLI flags on merge)
+
+### 2026-04-18 (v15.1.0, smart features for init and doctor)
+
+- Added --smart flag to init command: generates mission statement from workspace context using LLM
+- Added --smart flag to doctor command: AI-assisted linting of AGENTS.md for contradictions, stale references, and unclear instructions
+- New src/template_manager/smart.rs: collect_workspace_context, generate_smart_mission, smart_doctor, parse_smart_issues
+- collect_workspace_context gathers directory listing, README.md (2000 chars), and project manifest (500 chars)
+- Smart mission generation uses LLM to produce a 2-4 sentence mission paragraph; skipped in dry-run mode
+- Smart doctor sends AGENTS.md to LLM and parses JSON array of issues with three kinds: contradiction, stale_reference, unclear_instruction
+- JSON parsing is tolerant of surrounding prose in LLM responses
+- init --smart and init --mission are mutually exclusive (enforced by clap conflicts_with)
+- Provider/model resolution reuses merge command priority chain: CLI > config merge.provider/merge.model > env auto-detect
+- resolve_provider_and_model changed to pub(super) for access from smart.rs sibling module
+- doctor() restructured to remove early returns; smart analysis always runs at the end when --smart is set
+- Added 8 new tests in smart.rs covering context collection, JSON parsing, edge cases
+- Version bump: 15.0.0 to 15.1.0 (MINOR - new CLI flags)
+
+### 2026-04-18 (v15.0.0, rebrand to slopctl)
+
+- MAJOR version bump: 14.0.0 to 15.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from slopcop to slopctl across entire codebase
+- Binary name: slopcop to slopctl
+- Config path: ~/.config/slopcop/ to ~/.config/slopctl/
+- Data path: ~/.local/share/slopcop/templates to ~/.local/share/slopctl/templates
+- Template marker: SLOPCOP-TEMPLATE to SLOPCTL-TEMPLATE
+- User-Agent header: slopcop to slopctl
+- Default template source URL updated to heikopanjas/slopctl (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
+
+### 2026-04-18 (v14.0.0, rebrand to slopcop)
+
+- MAJOR version bump: 13.3.0 to 14.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from vibe-cop to slopcop across entire codebase
+- Binary name: vibe-cop to slopcop
+- Config path: ~/.config/vibe-cop/ to ~/.config/slopcop/
+- Data path: ~/.local/share/vibe-cop/templates to ~/.local/share/slopcop/templates
+- Template marker: VIBE-COP-TEMPLATE to SLOPCOP-TEMPLATE
+- User-Agent header: vibe-cop to slopcop
+- Default template source URL updated to heikopanjas/slopcop (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
+
 ### 2026-04-10 (v13.3.0, merge --verbose token usage)
 
 - Added `--verbose` (`-v`) flag to the `merge` command for token usage reporting
@@ -1479,79 +1555,3 @@ After making ANY code changes:
 - Established core coding standards and conventions
 - Created agent-specific reference files
 - Defined repository structure and governance principles
-
-### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
-
-- Redesigned merge command to follow the same file-resolution pipeline as init (DRY)
-- Extracted `resolve_all_files()` from `TemplateEngine::update()` into a reusable public method; both init and merge now call it
-- Added `ResolvedFiles` struct grouping `TemplateContext`, files-to-copy, and directories-to-create
-- Added `build_target_content_map()` on `TemplateEngine` that resolves all files and reads sources into `HashMap<PathBuf, String>`
-- Moved `generate_fresh_main()` from merge.rs into template_engine.rs as an associated function (pure template logic)
-- Refactored `merge_fragments()` to delegate content generation to `generate_fresh_main()`, eliminating duplicate fragment-merging code
-- Added `normalize_path()` as a public function in template_engine.rs
-- Merge now classifies files into three categories: New (write directly), Unchanged (skip), Diverged (LLM merge)
-- New files are created without LLM involvement; only diverged files are sent to the AI
-- LLM provider resolution is deferred until diverged files are actually found (no API key needed for new-only merges)
-- Deleted ~400 lines of duplicated code from merge.rs: build_target_source_map, find_merge_candidates, generate_fresh_main, insert_source_content, insert_skill_sources, insert_skill_dir_recursive, resolve_target, normalize_path, sha256_string
-- Added `categorize_path()` helper for FileTracker category detection during merge
-- Added 8 new tests: classify_files (new, unchanged, diverged, mixed, sorted), categorize_path (main, skill, integration, agent, language), plural helper
-- All written files (New + Diverged) are now recorded in FileTracker during merge
-- Version bump: 15.2.0 to 15.3.0 (MINOR - behavioral redesign of merge command)
-
-### 2026-04-18 (v15.2.0, init/merge redesign: AI-free init, AI-powered merge)
-
-- Removed --smart flag from init command: init is now pure template installation with no AI involvement; users resolve conflicts manually
-- Removed --provider and --model CLI flags from merge command: provider/model are resolved only from config (merge.provider, merge.model) and environment API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY)
-- Added --lang, --agent, --mission, --skill options to merge command (mirror init's options): these override the auto-detected installed language, agent, and allow specifying a custom mission or extra skills when generating the fresh template for AI comparison
-- Introduced MergeOptions<'a> struct in src/template_manager/merge.rs grouping lang/agent/mission/skills; re-exported via template_manager::MergeOptions and slopctl::MergeOptions
-- generate_fresh_main now accepts a mission override that takes precedence over template-defined mission fragments
-- build_target_source_map now accepts MergeOptions; lang override falls back to tracker.get_installed_language_for_workspace(); agent override falls back to agent_defaults::detect_all_installed_agents(); extra --skill sources are added to the target→content map (URL-based sources skipped)
-- Removed generate_smart_mission from smart.rs (no longer needed); smart.rs now only contains smart_doctor + parse_smart_issues + SmartIssueKind/SmartIssue
-- resolve_provider_and_model simplified to take no arguments (priority: config merge.provider > env auto-detect > error)
-- collect_workspace_context and its four tests removed (no production callers after generate_smart_mission removal)
-- Updated doctor.rs to call smart_doctor() without arguments
-- Version bump: 15.1.0 to 15.2.0 (MINOR - behavioural change to merge, CLI flag removals from init and merge, new CLI flags on merge)
-
-### 2026-04-18 (v15.1.0, smart features for init and doctor)
-
-- Added --smart flag to init command: generates mission statement from workspace context using LLM
-- Added --smart flag to doctor command: AI-assisted linting of AGENTS.md for contradictions, stale references, and unclear instructions
-- New src/template_manager/smart.rs: collect_workspace_context, generate_smart_mission, smart_doctor, parse_smart_issues
-- collect_workspace_context gathers directory listing, README.md (2000 chars), and project manifest (500 chars)
-- Smart mission generation uses LLM to produce a 2-4 sentence mission paragraph; skipped in dry-run mode
-- Smart doctor sends AGENTS.md to LLM and parses JSON array of issues with three kinds: contradiction, stale_reference, unclear_instruction
-- JSON parsing is tolerant of surrounding prose in LLM responses
-- init --smart and init --mission are mutually exclusive (enforced by clap conflicts_with)
-- Provider/model resolution reuses merge command priority chain: CLI > config merge.provider/merge.model > env auto-detect
-- resolve_provider_and_model changed to pub(super) for access from smart.rs sibling module
-- doctor() restructured to remove early returns; smart analysis always runs at the end when --smart is set
-- Added 8 new tests in smart.rs covering context collection, JSON parsing, edge cases
-- Version bump: 15.0.0 to 15.1.0 (MINOR - new CLI flags)
-
-### 2026-04-18 (v15.0.0, rebrand to slopctl)
-
-- MAJOR version bump: 14.0.0 to 15.0.0 (breaking: binary, config paths, data paths all renamed)
-- Renamed tool from slopcop to slopctl across entire codebase
-- Binary name: slopcop to slopctl
-- Config path: ~/.config/slopcop/ to ~/.config/slopctl/
-- Data path: ~/.local/share/slopcop/templates to ~/.local/share/slopctl/templates
-- Template marker: SLOPCOP-TEMPLATE to SLOPCTL-TEMPLATE
-- User-Agent header: slopcop to slopctl
-- Default template source URL updated to heikopanjas/slopctl (pending GitHub repo rename)
-- Updated all CLI help text, error messages, and user-facing strings
-- Updated CI workflows (build.yml, release.yml) artifact names
-- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
-
-### 2026-04-18 (v14.0.0, rebrand to slopcop)
-
-- MAJOR version bump: 13.3.0 to 14.0.0 (breaking: binary, config paths, data paths all renamed)
-- Renamed tool from vibe-cop to slopcop across entire codebase
-- Binary name: vibe-cop to slopcop
-- Config path: ~/.config/vibe-cop/ to ~/.config/slopcop/
-- Data path: ~/.local/share/vibe-cop/templates to ~/.local/share/slopcop/templates
-- Template marker: VIBE-COP-TEMPLATE to SLOPCOP-TEMPLATE
-- User-Agent header: vibe-cop to slopcop
-- Default template source URL updated to heikopanjas/slopcop (pending GitHub repo rename)
-- Updated all CLI help text, error messages, and user-facing strings
-- Updated CI workflows (build.yml, release.yml) artifact names
-- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
