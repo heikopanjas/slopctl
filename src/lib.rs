@@ -42,7 +42,7 @@ pub use config::Config;
 pub use download_manager::DownloadManager;
 pub use file_tracker::{FileMetadata, FileStatus, FileTracker};
 pub use template_engine::{TemplateContext, TemplateEngine, UpdateOptions};
-pub use template_manager::TemplateManager;
+pub use template_manager::{MergeOptions, TemplateManager};
 pub use utils::{
     FileActionResponse, collect_files_recursive, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents
 };

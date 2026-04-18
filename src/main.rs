@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use slopctl::{Config, Result, TemplateManager, UpdateOptions};
+use slopctl::{Config, MergeOptions, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -162,6 +162,22 @@ enum Commands
     /// AI-assisted merge of customized files with updated templates
     Merge
     {
+        /// Programming language or framework (e.g., rust, c++, swift)
+        #[arg(short, long)]
+        lang: Option<String>,
+
+        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        #[arg(short, long)]
+        agent: Option<String>,
+
+        /// Custom mission statement (use @filename to read from file)
+        #[arg(short, long)]
+        mission: Option<String>,
+
+        /// Include skill(s) from GitHub or local path (repeatable)
+        #[arg(short, long)]
+        skill: Vec<String>,
+
         /// Write merged output to .merged sidecar files instead of replacing originals
         #[arg(long, default_value = "false")]
         preview: bool,
@@ -551,21 +567,42 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { preview, dry_run, list_models, verbose } =>
+        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, list_models, verbose } =>
         {
             if list_models == true
             {
                 manager.list_models()
             }
-            else if dry_run == true
-            {
-                println!("{} Dry run: previewing merge candidates", "→".blue());
-                manager.merge(dry_run, preview, verbose)
-            }
             else
             {
-                println!("{} AI-assisted merge of customized files", "→".blue());
-                manager.merge(dry_run, preview, verbose)
+                let resolved_mission = if let Some(ref mission_value) = mission
+                {
+                    match resolve_mission_content(mission_value)
+                    {
+                        | Ok(content) => Some(content),
+                        | Err(e) =>
+                        {
+                            eprintln!("{} {}", "✗".red(), e.to_string().red());
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                else
+                {
+                    None
+                };
+
+                let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
+
+                if dry_run == true
+                {
+                    println!("{} Dry run: previewing merge candidates", "→".blue());
+                }
+                else
+                {
+                    println!("{} AI-assisted merge of customized files", "→".blue());
+                }
+                manager.merge(&merge_options, dry_run, preview, verbose)
             }
         }
         | Commands::Completions { shell } =>

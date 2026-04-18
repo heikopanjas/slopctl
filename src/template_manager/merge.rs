@@ -17,6 +17,19 @@ use crate::{
     template_engine::{self, TemplateEngine}
 };
 
+/// User-supplied overrides that control which templates are considered during merge
+pub struct MergeOptions<'a>
+{
+    /// Language/framework override (falls back to installed language from tracker)
+    pub lang:    Option<&'a str>,
+    /// Agent override (falls back to installed agents detected in workspace)
+    pub agent:   Option<&'a str>,
+    /// Mission statement to use when generating the fresh template for comparison
+    pub mission: Option<&'a str>,
+    /// Additional skill sources from CLI `--skill` flags (local paths; URLs skipped)
+    pub skills:  &'a [String]
+}
+
 /// A file where the user's customizations need merging with template updates
 struct MergeCandidate
 {
@@ -104,7 +117,10 @@ impl TemplateManager
     /// # Arguments
     ///
     /// * `provider` - CLI override for LLM provider name (falls back to config)
-    /// * `model` - CLI override for model name (falls back to config, then provider default)
+    /// * `lang` - Language/framework override (falls back to installed language from tracker)
+    /// * `agent` - Agent override (falls back to installed agents detected in workspace)
+    /// * `mission` - Mission statement to use when generating the fresh template for comparison
+    /// * `skills` - Additional skill sources to include in the fresh template
     /// * `dry_run` - If true, shows what would be merged without calling the LLM
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
     /// * `verbose` - If true, prints token usage summary after merging
@@ -112,14 +128,14 @@ impl TemplateManager
     /// # Errors
     ///
     /// Returns an error if provider resolution fails, LLM calls fail, or file I/O fails
-    pub fn merge(&self, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
+    pub fn merge(&self, options: &MergeOptions, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
     {
         let (provider_name, model_name) = Self::resolve_provider_and_model()?;
         let provider_enum = Provider::from_name(&provider_name)?;
 
         println!("{} Using {} / {}", "→".blue(), provider_name.green(), model_name.as_deref().unwrap_or(provider_enum.default_model()).green());
 
-        let candidates = self.find_merge_candidates()?;
+        let candidates = self.find_merge_candidates(options)?;
 
         if candidates.is_empty() == true
         {
@@ -289,7 +305,7 @@ impl TemplateManager
     /// - It is tracked, user-modified, AND the template source has also changed
     /// - It exists on disk but is untracked, and its content differs from the current template (e.g. AGENTS.md was customized before tracking began, or was skipped by
     ///   init because it was already customized)
-    fn find_merge_candidates(&self) -> Result<Vec<MergeCandidate>>
+    fn find_merge_candidates(&self, options: &MergeOptions) -> Result<Vec<MergeCandidate>>
     {
         let workspace = std::env::current_dir()?;
         let tracker = FileTracker::new(&self.config_dir)?;
@@ -299,7 +315,7 @@ impl TemplateManager
         let engine = TemplateEngine::new(&self.config_dir);
         let userprofile = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
 
-        let target_source_map = build_target_source_map(&engine, &config, &workspace, &userprofile, &tracker)?;
+        let target_source_map = build_target_source_map(&engine, &config, &workspace, &userprofile, &tracker, options)?;
 
         let mut candidates = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
@@ -353,14 +369,16 @@ impl TemplateManager
 /// Walks all sections of templates.yml and resolves each entry's source content
 /// and target path. For the "main" file (AGENTS.md), produces a fresh merged
 /// version with all fragment sections filled in.
+///
+/// Fields in `options` override auto-detected values when set.
 fn build_target_source_map(
-    engine: &TemplateEngine, config: &TemplateConfig, workspace: &Path, userprofile: &Path, tracker: &FileTracker
+    engine: &TemplateEngine, config: &TemplateConfig, workspace: &Path, userprofile: &Path, tracker: &FileTracker, options: &MergeOptions
 ) -> Result<std::collections::HashMap<PathBuf, String>>
 {
     let mut map = std::collections::HashMap::new();
 
-    // Detect installed language from FileTracker
-    let installed_lang = tracker.get_installed_language_for_workspace(workspace);
+    // Resolve language: CLI override > tracker detection
+    let installed_lang = options.lang.map(|s| s.to_string()).or_else(|| tracker.get_installed_language_for_workspace(workspace));
 
     // Main template (AGENTS.md): generate fresh merged content
     if let Some(ref main_config) = config.main
@@ -370,7 +388,7 @@ fn build_target_source_map(
 
         if source_path.exists() == true
         {
-            let fresh_content = generate_fresh_main(&source_path, engine, config, installed_lang.as_deref())?;
+            let fresh_content = generate_fresh_main(&source_path, engine, config, installed_lang.as_deref(), options.mission)?;
             map.insert(normalize_path(&target_path), fresh_content);
         }
     }
@@ -426,17 +444,25 @@ fn build_target_source_map(
     }
 
     // Skill files: walk local skill sources and map each file to its installed target
-    let detected_agents = agent_defaults::detect_all_installed_agents(workspace);
+    // Agent: CLI override > workspace detection
+    let active_agents: Vec<String> = if let Some(a) = options.agent
+    {
+        vec![a.to_string()]
+    }
+    else
+    {
+        agent_defaults::detect_all_installed_agents(workspace)
+    };
     let cross_client_raw = agent_defaults::CROSS_CLIENT_SKILL_DIR;
 
-    // Top-level skills → each detected agent's skill dir + cross-client fallback
-    if detected_agents.is_empty() == true
+    // Top-level skills → each active agent's skill dir + cross-client fallback
+    if active_agents.is_empty() == true
     {
         insert_skill_sources(engine, &config.skills, cross_client_raw, workspace, userprofile, &mut map);
     }
     else
     {
-        for agent_name in &detected_agents
+        for agent_name in &active_agents
         {
             if let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
             {
@@ -445,8 +471,8 @@ fn build_target_source_map(
         }
     }
 
-    // Agent-specific skills for each detected agent
-    for agent_name in &detected_agents
+    // Agent-specific skills
+    for agent_name in &active_agents
     {
         if let Some(agent_config) = config.agents.get(agent_name.as_str()) &&
             let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
@@ -460,6 +486,14 @@ fn build_target_source_map(
         let Ok(lang_skills) = bom::resolve_language_skills(lang, config)
     {
         insert_skill_sources(engine, &lang_skills, cross_client_raw, workspace, userprofile, &mut map);
+    }
+
+    // Extra skills from CLI --skill flags (local paths only; URL-based skills are skipped)
+    if options.skills.is_empty() == false
+    {
+        let extra_defs: Vec<bom::SkillDefinition> = options.skills.iter().map(|s| bom::SkillDefinition { name: s.clone(), source: s.clone() }).collect();
+        let skill_dir = active_agents.first().and_then(|a| agent_defaults::get_skill_dir(a)).unwrap_or(cross_client_raw);
+        insert_skill_sources(engine, &extra_defs, skill_dir, workspace, userprofile, &mut map);
     }
 
     Ok(map)
@@ -547,7 +581,8 @@ fn resolve_target(engine: &TemplateEngine, target: &str, workspace: &Path, userp
 /// Generates a fresh AGENTS.md by merging the base template with all fragment sections
 ///
 /// Reproduces what `init` would produce without actually installing anything.
-fn generate_fresh_main(source_path: &Path, engine: &TemplateEngine, config: &TemplateConfig, lang: Option<&str>) -> Result<String>
+/// When `mission` is provided it replaces any template-defined mission fragments.
+fn generate_fresh_main(source_path: &Path, engine: &TemplateEngine, config: &TemplateConfig, lang: Option<&str>, mission: Option<&str>) -> Result<String>
 {
     let mut content = fs::read_to_string(source_path)?;
 
@@ -571,15 +606,22 @@ fn generate_fresh_main(source_path: &Path, engine: &TemplateEngine, config: &Tem
         }
     }
 
-    // Mission fragments
-    for entry in &config.mission
+    // Mission fragments — CLI override takes precedence over template fragments
+    if let Some(m) = mission
     {
-        if entry.target.starts_with("$instructions") == true
+        fragments_by_category.entry("mission".to_string()).or_default().push(m.to_string());
+    }
+    else
+    {
+        for entry in &config.mission
         {
-            let frag_path = engine.config_dir().join(&entry.source);
-            if let Ok(frag) = fs::read_to_string(&frag_path)
+            if entry.target.starts_with("$instructions") == true
             {
-                fragments_by_category.entry("mission".to_string()).or_default().push(frag);
+                let frag_path = engine.config_dir().join(&entry.source);
+                if let Ok(frag) = fs::read_to_string(&frag_path)
+                {
+                    fragments_by_category.entry("mission".to_string()).or_default().push(frag);
+                }
             }
         }
     }
@@ -777,7 +819,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
 
-        let result = generate_fresh_main(&source, &engine, &config, None)?;
+        let result = generate_fresh_main(&source, &engine, &config, None, None)?;
         assert!(result.contains(marker) == false);
         assert!(result.contains("# Title") == true);
         Ok(())
@@ -896,7 +938,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
 
-        let result = generate_fresh_main(&source, &engine, &config, None)?;
+        let result = generate_fresh_main(&source, &engine, &config, None, None)?;
         assert!(result.contains("Build great things.") == true);
         assert!(result.contains("Be excellent.") == true);
         Ok(())

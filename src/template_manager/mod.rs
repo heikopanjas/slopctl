@@ -14,6 +14,7 @@ use std::{
     path::{Path, PathBuf}
 };
 
+pub use merge::MergeOptions;
 use owo_colors::OwoColorize;
 
 use crate::{Result, download_manager::DownloadManager, utils::copy_dir_all};
