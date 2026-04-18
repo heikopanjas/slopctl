@@ -1,8 +1,8 @@
-# vibe-cop Roadmap
+# slopctl Roadmap
 
 **Last updated:** 2026-04-10
 
-This document indexes planned work for vibe-cop. Each plan originated
+This document indexes planned work for slopctl. Each plan originated
 in a Cursor chat session; the links below point to the original
 transcripts so future sessions can pick up context quickly.
 

@@ -269,7 +269,7 @@ impl TemplateManager
         {
             return Err(anyhow::anyhow!(
                 "No LLM provider specified and none auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: \
-                 vibe-cop config merge.provider openai\nor pass --provider on the command line.\nSupported: openai, anthropic, ollama, mistral"
+                 slopctl config merge.provider openai\nor pass --provider on the command line.\nSupported: openai, anthropic, ollama, mistral"
             ));
         };
 

@@ -1,4 +1,4 @@
-//! Download management functionality for vibe-cop
+//! Download management functionality for slopctl
 //!
 //! Handles downloading templates from GitHub repositories.
 

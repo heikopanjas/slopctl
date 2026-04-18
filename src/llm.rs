@@ -188,7 +188,7 @@ impl LlmClient
 
         let model_name = model.unwrap_or(provider.default_model()).to_string();
 
-        let http = reqwest::blocking::Client::builder().user_agent("vibe-cop").connect_timeout(Duration::from_secs(30)).timeout(Duration::from_secs(300)).build()?;
+        let http = reqwest::blocking::Client::builder().user_agent("slopctl").connect_timeout(Duration::from_secs(30)).timeout(Duration::from_secs(300)).build()?;
 
         Ok(Self { provider, model: model_name, api_key, http })
     }

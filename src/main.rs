@@ -3,7 +3,7 @@ use std::{fs, io};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::generate;
 use owo_colors::OwoColorize;
-use vibe_cop::{Config, Result, TemplateManager, UpdateOptions};
+use slopctl::{Config, Result, TemplateManager, UpdateOptions};
 
 /// Supported shells for completion generation
 #[derive(Clone, Copy, ValueEnum)]
@@ -30,7 +30,7 @@ impl From<ShellType> for clap_complete::Shell
 }
 
 #[derive(Parser)]
-#[command(name = "vibe-cop")]
+#[command(name = "slopctl")]
 #[command(about = "A manager for coding agent instruction files", long_about = None)]
 #[command(version)]
 struct Cli
@@ -88,7 +88,7 @@ enum Commands
         #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
-    /// Purge all vibe-cop files from project
+    /// Purge all slopctl files from project
     Purge
     {
         /// Force purge without confirmation
@@ -203,7 +203,7 @@ enum Commands
 }
 
 /// Default template source URL (V5 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/vibe-cop/tree/develop/templates/v5";
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -308,7 +308,7 @@ fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Opti
         if values.is_empty() == true
         {
             println!("{} No configuration values set", "→".blue());
-            println!("{} Use 'vibe-cop config --add <key> <value>' to set a value", "→".blue());
+            println!("{} Use 'slopctl config --add <key> <value>' to set a value", "→".blue());
             println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
         }
         else
@@ -358,13 +358,13 @@ fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Opti
     }
 
     // No flags or args: show help
-    println!("{}", "vibe-cop config".bold());
+    println!("{}", "slopctl config".bold());
     println!();
     println!("Usage:");
-    println!("  vibe-cop config --add <key> <value>  Set a configuration value");
-    println!("  vibe-cop config <key>                Get a configuration value");
-    println!("  vibe-cop config --list               List all configuration values");
-    println!("  vibe-cop config --remove <key>       Remove a configuration value");
+    println!("  slopctl config --add <key> <value>  Set a configuration value");
+    println!("  slopctl config <key>                Get a configuration value");
+    println!("  slopctl config --list               List all configuration values");
+    println!("  slopctl config --remove <key>       Remove a configuration value");
     println!();
     println!("Valid keys:");
     for key in Config::valid_keys()
@@ -395,10 +395,10 @@ fn main()
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
                 eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
-                eprintln!("{} Examples: vibe-cop init --lang rust", "→".blue());
-                eprintln!("{}          vibe-cop init --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop init --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          vibe-cop init --skill user/my-skill", "→".blue());
+                eprintln!("{} Examples: slopctl init --lang rust", "→".blue());
+                eprintln!("{}          slopctl init --agent cursor", "→".blue());
+                eprintln!("{}          slopctl init --lang rust --agent cursor", "→".blue());
+                eprintln!("{}          slopctl init --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
 
@@ -485,9 +485,9 @@ fn main()
             if update == false && list == false
             {
                 eprintln!("{} Must specify --update or --list", "✗".red());
-                eprintln!("{} Examples: vibe-cop templates --update", "→".blue());
-                eprintln!("{}          vibe-cop templates --list", "→".blue());
-                eprintln!("{}          vibe-cop templates --update --list", "→".blue());
+                eprintln!("{} Examples: slopctl templates --update", "→".blue());
+                eprintln!("{}          slopctl templates --list", "→".blue());
+                eprintln!("{}          slopctl templates --update --list", "→".blue());
                 std::process::exit(1);
             }
 
@@ -575,7 +575,7 @@ fn main()
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();
-            generate(shell, &mut Cli::command(), "vibe-cop", &mut io::stdout());
+            generate(shell, &mut Cli::command(), "slopctl", &mut io::stdout());
             Ok(())
         }
         | Commands::Doctor { fix, dry_run, verbose } => manager.doctor(fix, dry_run, verbose),

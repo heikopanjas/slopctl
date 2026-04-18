@@ -1,4 +1,4 @@
-//! Template engine for vibe-cop
+//! Template engine for slopctl
 //!
 //! This module provides the `TemplateEngine` struct and supporting types for
 //! template generation, fragment merging, and placeholder resolution.
@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Template marker comment used to detect unmerged template files
-pub const TEMPLATE_MARKER: &str = "<!-- VIBE-COP-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
+pub const TEMPLATE_MARKER: &str = "<!-- SLOPCTL-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
 
 /// Options for the template update operation
 ///
@@ -142,7 +142,7 @@ pub fn validate_no_duplicate_targets(files: &[(PathBuf, PathBuf)]) -> Result<()>
     Ok(())
 }
 
-/// Template engine for vibe-cop (agents.md standard)
+/// Template engine for slopctl (agents.md standard)
 ///
 /// Handles template generation, fragment merging, placeholder resolution,
 /// and skill installation. Supports V2-V4 template formats.
@@ -274,7 +274,7 @@ impl<'a> TemplateEngine<'a>
 
         require!(
             self.config_dir.exists() == true && templates_yml_path.exists() == true,
-            Err(anyhow::anyhow!("Global templates not found. Please run 'vibe-cop templates --update' first to download templates."))
+            Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
         );
 
         let config = load_template_config(self.config_dir)?;

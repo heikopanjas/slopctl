@@ -27,7 +27,7 @@ pub struct FileMetadata
 #[derive(Debug, PartialEq)]
 pub enum FileStatus
 {
-    /// File was never tracked by vibe-cop
+    /// File was never tracked by slopctl
     NotTracked,
     /// File exists and matches original SHA (user did not modify)
     Unmodified,

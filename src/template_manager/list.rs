@@ -16,12 +16,12 @@ impl TemplateManager
 {
     /// Show workspace status
     ///
-    /// Displays the current state of vibe-cop in the project:
+    /// Displays the current state of slopctl in the project:
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
     /// - Installed skills (filesystem scan of agent skill dirs + FileTracker fallback)
-    /// - All vibe-cop managed files in current directory (verbose only)
+    /// - All slopctl managed files in current directory (verbose only)
     ///
     /// # Arguments
     ///
@@ -40,7 +40,7 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
 
-        println!("{}", "vibe-cop status".bold());
+        println!("{}", "slopctl status".bold());
         println!();
 
         // Global templates status
@@ -71,7 +71,7 @@ impl TemplateManager
         else
         {
             println!("  {} Not installed", "✗".red());
-            println!("  {} Run 'vibe-cop templates --update' to download templates", "→".blue());
+            println!("  {} Run 'slopctl templates --update' to download templates", "→".blue());
         }
 
         println!();
@@ -227,8 +227,8 @@ impl TemplateManager
             else
             {
                 println!("{}", "Managed Files:".bold());
-                println!("  {} No vibe-cop files found in current directory", "○".yellow());
-                println!("  {} Run 'vibe-cop init --lang <lang> --agent <agent>' to set up", "→".blue());
+                println!("  {} No slopctl files found in current directory", "○".yellow());
+                println!("  {} Run 'slopctl init --lang <lang> --agent <agent>' to set up", "→".blue());
             }
         }
 
@@ -248,13 +248,13 @@ impl TemplateManager
     /// Returns an error if global templates are not installed or templates.yml cannot be loaded
     pub fn list_global(&self) -> Result<()>
     {
-        println!("{}", "vibe-cop templates --list".bold());
+        println!("{}", "slopctl templates --list".bold());
         println!();
 
         if self.has_global_templates() == false
         {
             println!("{} Global templates not installed", "✗".red());
-            println!("{} Run 'vibe-cop templates --update' to download templates", "→".blue());
+            println!("{} Run 'slopctl templates --update' to download templates", "→".blue());
             return Ok(());
         }
 
@@ -403,7 +403,7 @@ impl TemplateManager
         }
 
         println!();
-        println!("{} Use 'vibe-cop init --lang <lang> --agent <agent>' to install", "→".blue());
+        println!("{} Use 'slopctl init --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
     }
