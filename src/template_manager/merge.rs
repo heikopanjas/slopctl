@@ -3,6 +3,7 @@
 use std::{
     collections::HashMap,
     fs,
+    io::Write as _,
     path::{Path, PathBuf}
 };
 
@@ -29,6 +30,9 @@ pub struct MergeOptions<'a>
     pub skills:  &'a [String]
 }
 
+/// Marker that separates template-managed content from user-owned changelog
+const CHANGELOG_MARKER: &str = "<!-- {changelog} -->";
+
 /// Classification of a file in the target-source map
 enum FileClass
 {
@@ -42,10 +46,16 @@ enum FileClass
     {
         display: String
     },
-    /// File exists and content differs from template; needs LLM merge
+    /// File exists and content differs from template; needs LLM merge.
+    /// When the changelog marker is present, only the template half is stored
+    /// for merging; the user's changelog tail is preserved separately.
     Diverged
     {
-        target: PathBuf, template_content: String, display: String
+        target:           PathBuf,
+        template_content: String,
+        user_content:     String,
+        user_changelog:   Option<String>,
+        display:          String
     }
 }
 
@@ -175,13 +185,15 @@ impl TemplateManager
         println!();
 
         let needs_llm = diverged_count > 0 && dry_run == false;
-        let (provider_name, model_name) = if needs_llm == true
+        let client = if needs_llm == true
         {
-            Self::resolve_provider_and_model()?
+            let (provider_name, model_name) = Self::resolve_provider_and_model()?;
+            let provider_enum = Provider::from_name(&provider_name)?;
+            Some(LlmClient::new(provider_enum, model_name.as_deref())?)
         }
         else
         {
-            (String::new(), None)
+            None
         };
 
         let mut file_tracker = FileTracker::new(&self.config_dir)?;
@@ -222,7 +234,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, display } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, display } =>
                 {
                     if dry_run == true
                     {
@@ -230,13 +242,15 @@ impl TemplateManager
                         continue;
                     }
 
-                    if preview == true
+                    let llm = client.as_ref().expect("LlmClient required for diverged files");
+
+                    let output_path = if preview == true
                     {
                         let sidecar = sidecar_path(target);
-                        let rel_sidecar = sidecar.strip_prefix(&workspace).unwrap_or(&sidecar);
 
                         if sidecar.exists() == true
                         {
+                            let rel_sidecar = sidecar.strip_prefix(&workspace).unwrap_or(&sidecar);
                             println!(
                                 "  {} {} {} {}",
                                 "!".yellow(),
@@ -247,37 +261,92 @@ impl TemplateManager
                             continue;
                         }
 
-                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
-                        std::io::Write::flush(&mut std::io::stdout())?;
-
-                        let provider_enum = Provider::from_name(&provider_name)?;
-                        let client = LlmClient::new(provider_enum, model_name.as_deref())?;
-                        let user_content = fs::read_to_string(target)?;
-                        let messages = build_merge_messages(&user_content, template_content);
-                        let response = client.chat(&messages)?;
-
-                        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
-                        fs::write(&sidecar, &response.content)?;
-                        println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
+                        sidecar
                     }
                     else
                     {
-                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
-                        std::io::Write::flush(&mut std::io::stdout())?;
+                        target.clone()
+                    };
 
-                        let provider_enum = Provider::from_name(&provider_name)?;
-                        let client = LlmClient::new(provider_enum, model_name.as_deref())?;
-                        let user_content = fs::read_to_string(target)?;
-                        let messages = build_merge_messages(&user_content, template_content);
-                        let response = client.chat(&messages)?;
+                    let partial = partial_path(target);
 
-                        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
-                        fs::write(target, &response.content)?;
-                        println!("{} merged {}", "✓".green(), display.yellow());
+                    if partial.exists() == true
+                    {
+                        let rel_partial = partial.strip_prefix(&workspace).unwrap_or(&partial);
+                        println!(
+                            "  {} {} {} {}",
+                            "!".yellow(),
+                            "Skipped:".yellow(),
+                            display.yellow(),
+                            format!("(.partial exists from previous run: {})", rel_partial.display()).dimmed()
+                        );
+                        continue;
+                    }
 
-                        let sha = FileTracker::calculate_sha256(target)?;
-                        let category = categorize_path(target, options);
-                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                    print!("  {} Merging {}... ", "→".blue(), display.yellow());
+                    std::io::stdout().flush()?;
+
+                    let messages = build_merge_messages(user_content, template_content);
+                    let mut partial_file = fs::File::create(&partial)?;
+                    let mut char_count: usize = 0;
+                    let start = std::time::Instant::now();
+
+                    let response = llm.chat_stream(&messages, |chunk| {
+                        let _ = partial_file.write_all(chunk.as_bytes());
+                        char_count += chunk.len();
+                        let elapsed = start.elapsed().as_secs();
+                        let _ =
+                            write!(std::io::stdout(), "\r  {} Merging {}... {}s ({} chars)", "→".blue(), display.yellow(), elapsed, format_number(char_count as u64));
+                        let _ = std::io::stdout().flush();
+                    });
+
+                    match response
+                    {
+                        | Ok(response) =>
+                        {
+                            accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
+
+                            let is_truncated = response.stop_reason.as_deref().is_some_and(|r| matches!(r, "max_tokens" | "length"));
+
+                            if is_truncated == true
+                            {
+                                let rel_partial = partial.strip_prefix(&workspace).unwrap_or(&partial);
+                                print!("\r\x1b[2K");
+                                println!(
+                                    "  {} {} {} (truncated, partial saved: {})",
+                                    "!".yellow(),
+                                    display.yellow(),
+                                    "hit max_tokens limit".red(),
+                                    rel_partial.display().to_string().dimmed()
+                                );
+                            }
+                            else
+                            {
+                                let final_content = reassemble(&response.content, user_changelog);
+                                fs::write(&output_path, &final_content)?;
+                                let _ = fs::remove_file(&partial);
+
+                                let rel = output_path.strip_prefix(&workspace).unwrap_or(&output_path);
+                                print!("\r\x1b[2K");
+                                if preview == true
+                                {
+                                    println!("  {} wrote {}", "✓".green(), rel.display().to_string().yellow());
+                                }
+                                else
+                                {
+                                    println!("  {} merged {}", "✓".green(), display.yellow());
+                                    let sha = FileTracker::calculate_sha256(target)?;
+                                    let category = categorize_path(target, options);
+                                    file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                                }
+                            }
+                        }
+                        | Err(e) =>
+                        {
+                            let rel_partial = partial.strip_prefix(&workspace).unwrap_or(&partial);
+                            print!("\r\x1b[2K");
+                            println!("  {} {} failed: {} (partial saved: {})", "!".red(), display.yellow(), e, rel_partial.display().to_string().dimmed());
+                        }
                     }
                 }
             }
@@ -369,7 +438,20 @@ impl TemplateManager
     }
 }
 
-/// Classifies every entry in the content map as New, Unchanged, or Diverged
+/// Splits content at the changelog marker, returning (template_half, changelog_half).
+/// If the marker is absent, returns None.
+fn split_at_changelog(content: &str) -> Option<(&str, &str)>
+{
+    content.find(CHANGELOG_MARKER).map(|pos| {
+        let template_half = &content[..pos];
+        let changelog_half = &content[pos + CHANGELOG_MARKER.len()..];
+        (template_half, changelog_half)
+    })
+}
+
+/// Classifies every entry in the content map as New, Unchanged, or Diverged.
+/// When the changelog marker is present in both files, only the template half
+/// is compared -- changelog-only differences are classified as Unchanged.
 fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> Vec<FileClass>
 {
     let mut classified = Vec::with_capacity(content_map.len());
@@ -388,14 +470,43 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
             {
                 classified.push(FileClass::Unchanged { display });
             }
+            else if let (Some((tmpl_upper, _)), Some((user_upper, user_lower))) = (split_at_changelog(template_content), split_at_changelog(&current_content))
+            {
+                if tmpl_upper == user_upper
+                {
+                    classified.push(FileClass::Unchanged { display });
+                }
+                else
+                {
+                    classified.push(FileClass::Diverged {
+                        target: target.clone(),
+                        template_content: tmpl_upper.to_string(),
+                        user_content: user_upper.to_string(),
+                        user_changelog: Some(user_lower.to_string()),
+                        display
+                    });
+                }
+            }
             else
             {
-                classified.push(FileClass::Diverged { target: target.clone(), template_content: template_content.clone(), display });
+                classified.push(FileClass::Diverged {
+                    target: target.clone(),
+                    template_content: template_content.clone(),
+                    user_content: current_content,
+                    user_changelog: None,
+                    display
+                });
             }
         }
         else
         {
-            classified.push(FileClass::Diverged { target: target.clone(), template_content: template_content.clone(), display });
+            classified.push(FileClass::Diverged {
+                target: target.clone(),
+                template_content: template_content.clone(),
+                user_content: String::new(),
+                user_changelog: None,
+                display
+            });
         }
     }
 
@@ -460,12 +571,31 @@ fn build_merge_messages(user_content: &str, template_content: &str) -> Vec<ChatM
     }]
 }
 
+/// Reassembles a merged template half with the user's original changelog.
+/// If `user_changelog` is None (no marker was present), returns the merged content as-is.
+fn reassemble(merged_template_half: &str, user_changelog: &Option<String>) -> String
+{
+    match user_changelog
+    {
+        | Some(changelog) => format!("{}{}{}", merged_template_half, CHANGELOG_MARKER, changelog),
+        | None => merged_template_half.to_string()
+    }
+}
+
 /// Returns the `.merged` sidecar path for a given file
 fn sidecar_path(path: &Path) -> PathBuf
 {
     let mut sidecar = path.as_os_str().to_owned();
     sidecar.push(".merged");
     PathBuf::from(sidecar)
+}
+
+/// Returns the `.partial` recovery path for a given file
+fn partial_path(path: &Path) -> PathBuf
+{
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".partial");
+    PathBuf::from(partial)
 }
 
 /// Accumulates token counts and detects truncation from a chat response
@@ -773,6 +903,97 @@ mod tests
             .collect();
 
         assert_eq!(displays, vec!["alpha.md", "bravo.md", "charlie.md"]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_partial_path()
+    {
+        assert_eq!(partial_path(Path::new("/project/AGENTS.md")), PathBuf::from("/project/AGENTS.md.partial"));
+        assert_eq!(partial_path(Path::new("relative.txt")), PathBuf::from("relative.txt.partial"));
+    }
+
+    #[test]
+    fn test_split_at_changelog_present()
+    {
+        let content = "template half\n<!-- {changelog} -->\nchangelog half";
+        let (upper, lower) = split_at_changelog(content).expect("marker present");
+        assert_eq!(upper, "template half\n");
+        assert_eq!(lower, "\nchangelog half");
+    }
+
+    #[test]
+    fn test_split_at_changelog_absent()
+    {
+        let content = "no marker here";
+        assert!(split_at_changelog(content).is_none() == true);
+    }
+
+    #[test]
+    fn test_reassemble_with_changelog()
+    {
+        let merged = "merged template";
+        let changelog = Some("\nuser changelog".to_string());
+        let result = reassemble(merged, &changelog);
+        assert_eq!(result, "merged template<!-- {changelog} -->\nuser changelog");
+    }
+
+    #[test]
+    fn test_reassemble_without_changelog()
+    {
+        let merged = "full merged content";
+        let result = reassemble(merged, &None);
+        assert_eq!(result, "full merged content");
+    }
+
+    #[test]
+    fn test_classify_files_changelog_only_diff_is_unchanged() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("AGENTS.md");
+        let template_upper = "template content\n";
+        let template = format!("{}<!-- {{changelog}} -->\n## Log\n\n- initial", template_upper);
+        let user = format!("{}<!-- {{changelog}} -->\n## Log\n\n- initial\n- user entry", template_upper);
+        fs::write(&target, &user)?;
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&target), template);
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 1);
+        assert!(matches!(&classified[0], FileClass::Unchanged { .. }) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_classify_files_template_half_differs_is_diverged() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("AGENTS.md");
+        let template = "NEW template\n<!-- {changelog} -->\n## Log\n\n- initial";
+        let user = "OLD template\n<!-- {changelog} -->\n## Log\n\n- initial\n- user entry";
+        fs::write(&target, user)?;
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&target), template.to_string());
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 1);
+        match &classified[0]
+        {
+            | FileClass::Diverged { template_content, user_content, user_changelog, .. } =>
+            {
+                assert_eq!(template_content, "NEW template\n");
+                assert_eq!(user_content, "OLD template\n");
+                assert!(user_changelog.is_some() == true);
+                assert!(user_changelog.as_ref().unwrap().contains("user entry") == true);
+            }
+            | other => panic!("expected Diverged, got {:?}", std::mem::discriminant(other))
+        }
         Ok(())
     }
 }

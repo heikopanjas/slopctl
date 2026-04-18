@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.3.0)
+**Last updated:** 2026-04-18 (v15.4.2)
 
 <!-- {mission} -->
 
@@ -18,6 +18,13 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
 - **License:** MIT
+
+## Session Protocol
+
+When starting a new session, read this entire file and confirm you have
+understood the project instructions before proceeding. Summarize the project
+purpose and key conventions briefly. Do not make changes until you have
+confirmed your understanding.
 
 <!-- {principles} -->
 
@@ -634,6 +641,7 @@ Whenever asked to commit changes:
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - Commit the changes
+- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 This is **CRITICAL**!
 
@@ -793,12 +801,52 @@ After making ANY code changes:
 2. Update the version in `Cargo.toml` accordingly
 3. Include the version change in the same commit as the code change
 4. Mention version bump in commit message footer if significant
+5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
 
 **Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
 
 ---
 
+<!-- {changelog} -->
+
 ## Recent Updates & Decisions
+
+### 2026-04-18 (v15.4.2, protect userprofile skill directories from filesystem scans)
+
+- Fixed `remove`, `purge`, and `list` commands scanning userprofile-based skill directories (e.g. codex `~/.codex/skills`), which picked up agent-internal files (`.system/`) and skills belonging to other workspaces
+- Added `get_workspace_skill_search_dirs()` to `agent_defaults.rs`: returns only `$workspace`-prefixed skill directories, excluding `$userprofile`-based ones (currently codex)
+- `remove --agent`, `remove --all`, `purge`, and `list` now use the workspace-only function for filesystem scanning; FileTracker continues to cover userprofile skills that slopctl installed
+- `remove --agent` additionally checks the `$workspace` prefix before scanning an agent's skill dir
+- `remove --skill` still uses `get_all_skill_search_dirs` since it targets a specific skill name (safe)
+- Added 3 new tests: `get_workspace_skill_search_dirs_excludes_codex`, `remove_agent_codex_skips_userprofile_skill_scan`, `purge_skips_userprofile_skill_dir_scan`
+- Version bump: 15.4.1 to 15.4.2 (PATCH - bug fix)
+
+### 2026-04-18 (v15.4.1, fix remove command not discovering untracked agent skills)
+
+- Fixed `remove --agent` and `remove --all` not discovering untracked/manually placed skill files in agent skill directories
+- Root cause: both code paths only consulted the FileTracker for skill files, missing any skills not recorded in the tracker (e.g. manually placed or installed by other tools)
+- `remove --agent <name>` now scans the agent's skill directory on the filesystem (e.g. `.cursor/skills/`) via `collect_files_recursive`, matching the approach used by `purge`
+- `remove --all` now scans all agent skill directories and the cross-client `.agents/skills/` directory via `get_all_skill_search_dirs`, same as `purge`
+- FileTracker sweep is retained as a supplement to catch tracked skill files outside standard directory trees
+- `purge` command was already correct (filesystem scan was present since v12.3.2)
+- Added 2 new tests: `test_remove_agent_discovers_untracked_skill_files`, `test_remove_all_discovers_untracked_skill_files`
+- Version bump: 15.4.0 to 15.4.1 (PATCH - bug fix)
+
+### 2026-04-18 (v15.4.0, merge command optimization: streaming, changelog marker, partial recovery)
+
+- Added `<!-- {changelog} -->` marker to AGENTS.md template and user file to split template-managed content from user-owned changelog
+- `classify_files()` now splits at the changelog marker: only the template half is compared, so changelog-only diffs are classified as `Unchanged` (no LLM call)
+- When the template half differs, only it is sent to the LLM; the user's changelog is re-attached verbatim after merge, preventing truncation
+- Replaced blocking `chat()` with streaming `chat_stream()` on `LlmClient`: tokens arrive incrementally via SSE
+- Per-provider SSE parsing: OpenAI/Mistral (`data: {...}` lines with `stream_options.include_usage`), Anthropic (`content_block_delta`/`message_delta` events), Ollama (newline-delimited JSON with `done: true`)
+- `chat()` reimplemented as a thin wrapper around `chat_stream()` with a no-op callback (DRY)
+- Added `max_tokens: 32768` to all providers (was missing for OpenAI/Mistral, was 16384 for Anthropic)
+- Live progress display during merge: character count and elapsed time updated on each streaming chunk
+- Partial file recovery: `.partial` sidecar written during streaming; on success it is deleted, on error or truncation it is preserved for user inspection
+- Truncation detection: if `stop_reason` indicates `max_tokens`/`length`, the `.partial` file is kept and the target is not overwritten
+- Hoisted `LlmClient` construction out of the per-file loop; single client reuses TCP connection pool across all diverged files
+- Added 7 new tests: `partial_path`, `split_at_changelog` (present/absent), `reassemble` (with/without changelog), `classify_files_changelog_only_diff_is_unchanged`, `classify_files_template_half_differs_is_diverged`
+- Version bump: 15.3.0 to 15.4.0 (MINOR - streaming LLM, changelog marker optimization, partial recovery)
 
 ### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
 

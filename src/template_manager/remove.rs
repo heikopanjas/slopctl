@@ -6,7 +6,9 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Result, agent_defaults, bom,
+    Result, agent_defaults,
+    agent_defaults::resolve_placeholder_path,
+    bom,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
     template_engine,
@@ -91,11 +93,42 @@ impl TemplateManager
                     }
                 }
 
-                // Also collect ad-hoc/top-level skill files under this agent's skill dir
+                // Collect skill files under this agent's skill dir via filesystem scan
+                // (catches untracked/manually placed skills that FileTracker misses).
+                // Skip userprofile-based dirs (e.g. codex ~/.codex/skills) — those are
+                // user-global and may contain agent-internal files or other workspaces' skills.
+                let userprofile = dirs::home_dir().unwrap_or_default();
+                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir(agent_name) &&
+                    raw_skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+                {
+                    let skill_dir = resolve_placeholder_path(raw_skill_dir, &current_dir, &userprofile);
+                    if skill_dir.exists() == true &&
+                        let Ok(entries) = fs::read_dir(&skill_dir)
+                    {
+                        for entry in entries.flatten()
+                        {
+                            if entry.path().is_dir() == true
+                            {
+                                let mut skill_files = Vec::new();
+                                let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                                for f in skill_files
+                                {
+                                    if files_to_remove.contains(&f) == false
+                                    {
+                                        files_to_remove.push(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Supplement with tracked skill files that belong to this agent
+                // (covers paths outside the standard skill directory tree)
                 let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
                 for (path, _) in skill_entries
                 {
-                    if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true
+                    if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true && files_to_remove.contains(&path) == false
                     {
                         files_to_remove.push(path);
                     }
@@ -129,7 +162,35 @@ impl TemplateManager
                     }
                 }
 
-                // Also collect ALL skill files from FileTracker
+                // Scan workspace-scoped agent skill directories on filesystem to catch
+                // untracked/manually placed skills. Userprofile-based dirs (e.g. codex)
+                // are excluded — those are covered by the FileTracker sweep below.
+                let userprofile = dirs::home_dir().unwrap_or_default();
+                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
+                for dir in &skill_search_dirs
+                {
+                    if dir.exists() == true &&
+                        let Ok(entries) = fs::read_dir(dir)
+                    {
+                        for entry in entries.flatten()
+                        {
+                            if entry.path().is_dir() == true
+                            {
+                                let mut skill_files = Vec::new();
+                                let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                                for f in skill_files
+                                {
+                                    if files_to_remove.contains(&f) == false
+                                    {
+                                        files_to_remove.push(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Supplement with tracked skill files not already collected from filesystem
                 let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
                 for (path, _) in skill_entries
                 {
@@ -514,6 +575,99 @@ mod tests
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, Some("rust"), &[], false, true);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_discovers_untracked_skill_files() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nagents:\n  cursor:\n    instructions:\n      - source: cursorrules.md\n        target: $workspace/.cursorrules\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let agent_file = workspace.path().join(".cursorrules");
+        fs::write(&agent_file, "test")?;
+
+        // Place a skill directory on disk without any FileTracker entry
+        let skill_dir = workspace.path().join(".cursor/skills/my-skill");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# My Skill")?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("cursor"), None, &[], true, false);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_all_discovers_untracked_skill_files() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Place an untracked skill in the cross-client directory
+        let skill_dir = workspace.path().join(".agents/skills/my-skill");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# My Skill")?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, None, &[], true, false);
+
+        std::env::set_current_dir(original_dir)?;
+
+        assert!(result.is_ok() == true);
+        assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create CODEX.md so codex is detected as installed
+        let codex_file = workspace.path().join("CODEX.md");
+        fs::write(&codex_file, "Read AGENTS.md")?;
+
+        // Track the codex instruction file so remove has something to find
+        let mut tracker = FileTracker::new(data_dir.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        tracker.save()?;
+
+        let original_dir = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        // Use dry-run to inspect what would be removed without side effects.
+        // The key assertion is that this succeeds without attempting to scan
+        // the userprofile-based ~/.codex/skills directory (which would pick up
+        // .system and other workspaces' skills).
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("codex"), None, &[], false, true);
 
         std::env::set_current_dir(original_dir)?;
 

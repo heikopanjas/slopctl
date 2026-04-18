@@ -134,10 +134,12 @@ impl TemplateManager
             println!("  {} No language installed", "○".yellow());
         }
 
-        // Detect installed skills by scanning agent skill directories on disk,
+        // Detect installed skills by scanning workspace-scoped agent skill directories on disk,
         // then merge in FileTracker entries for skills outside standard directories.
+        // Userprofile-based dirs (e.g. codex) are excluded from scanning; FileTracker below
+        // still picks up any userprofile skills that slopctl installed.
         let userprofile = dirs::home_dir().unwrap_or_default();
-        let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
 
         let mut skill_names: BTreeSet<String> = BTreeSet::new();
 

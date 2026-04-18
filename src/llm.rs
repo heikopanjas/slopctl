@@ -3,7 +3,11 @@
 //! Supports OpenAI, Anthropic, Ollama, and Mistral as backend providers.
 //! API keys are read from environment variables; Ollama requires no key.
 
-use std::{env, time::Duration};
+use std::{
+    env,
+    io::{BufRead, BufReader},
+    time::Duration
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -195,19 +199,22 @@ impl LlmClient
 
     /// Sends a chat completion request and returns the response with usage metadata
     ///
-    /// # Arguments
-    ///
-    /// * `messages` - The conversation messages (system + user)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API call fails or the response cannot be parsed
+    /// Convenience wrapper around `chat_stream` with a no-op callback.
     pub fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
+    {
+        self.chat_stream(messages, |_| {})
+    }
+
+    /// Sends a streaming chat completion request, invoking `on_chunk` for each content token
+    ///
+    /// Returns the accumulated response with full content and usage metadata.
+    /// The `on_chunk` callback receives each content fragment as it arrives.
+    pub fn chat_stream(&self, messages: &[ChatMessage], on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
     {
         match self.provider
         {
-            | Provider::Anthropic => self.chat_anthropic(messages),
-            | _ => self.chat_openai_compatible(messages)
+            | Provider::Anthropic => self.stream_anthropic(messages, on_chunk),
+            | _ => self.stream_openai_compatible(messages, on_chunk)
         }
     }
 
@@ -315,14 +322,25 @@ impl LlmClient
         Ok(models)
     }
 
-    /// OpenAI-compatible chat completion (works for OpenAI, Ollama, Mistral)
-    fn chat_openai_compatible(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
+    /// Streaming OpenAI-compatible chat completion (OpenAI, Ollama, Mistral)
+    fn stream_openai_compatible(&self, messages: &[ChatMessage], mut on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
     {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
-            "temperature": 0.0
+            "temperature": 0.0,
+            "stream": true
         });
+
+        if self.provider == Provider::Ollama
+        {
+            body["max_tokens"] = serde_json::json!(32768);
+        }
+        else
+        {
+            body["max_completion_tokens"] = serde_json::json!(32768);
+            body["stream_options"] = serde_json::json!({"include_usage": true});
+        }
 
         let mut request = self.http.post(self.provider.endpoint()).json(&body);
 
@@ -340,36 +358,77 @@ impl LlmClient
             return Err(anyhow::anyhow!("{} API error ({}): {}", self.provider_name(), status, error_body));
         }
 
-        let json: serde_json::Value = response.json()?;
+        let mut content = String::new();
+        let mut input_tokens: Option<u64> = None;
+        let mut output_tokens: Option<u64> = None;
+        let mut stop_reason: Option<String> = None;
 
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| anyhow::anyhow!("Unexpected {} API response format", self.provider_name()))?;
-
-        let (input_tokens, output_tokens) = if self.provider == Provider::Ollama
+        if self.provider == Provider::Ollama
         {
-            (json["prompt_eval_count"].as_u64(), json["eval_count"].as_u64())
+            let reader = BufReader::new(response);
+            for line in reader.lines()
+            {
+                let line = line?;
+                if line.is_empty() == true
+                {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line)
+                {
+                    if let Some(text) = json["message"]["content"].as_str()
+                    {
+                        content.push_str(text);
+                        on_chunk(text);
+                    }
+                    if json["done"].as_bool() == Some(true)
+                    {
+                        input_tokens = json["prompt_eval_count"].as_u64();
+                        output_tokens = json["eval_count"].as_u64();
+                        stop_reason = json["done_reason"].as_str().map(|s| s.to_string());
+                    }
+                }
+            }
         }
         else
         {
-            (json["usage"]["prompt_tokens"].as_u64(), json["usage"]["completion_tokens"].as_u64())
-        };
-
-        let stop_reason = if self.provider == Provider::Ollama
-        {
-            json["done_reason"].as_str().map(|s| s.to_string())
+            let reader = BufReader::new(response);
+            for line in reader.lines()
+            {
+                let line = line?;
+                if line.starts_with("data: ") == false
+                {
+                    continue;
+                }
+                let data = &line[6..];
+                if data == "[DONE]"
+                {
+                    break;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
+                {
+                    if let Some(text) = json["choices"][0]["delta"]["content"].as_str()
+                    {
+                        content.push_str(text);
+                        on_chunk(text);
+                    }
+                    if let Some(reason) = json["choices"][0]["finish_reason"].as_str()
+                    {
+                        stop_reason = Some(reason.to_string());
+                    }
+                    if let Some(usage) = json["usage"].as_object()
+                    {
+                        input_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64());
+                        output_tokens = usage.get("completion_tokens").and_then(|v| v.as_u64());
+                    }
+                }
+            }
         }
-        else
-        {
-            json["choices"][0]["finish_reason"].as_str().map(|s| s.to_string())
-        };
 
         Ok(ChatResponse { content, input_tokens, output_tokens, stop_reason })
     }
 
-    /// Anthropic Messages API (different request/response shape)
-    fn chat_anthropic(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
+    /// Streaming Anthropic Messages API
+    fn stream_anthropic(&self, messages: &[ChatMessage], mut on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
     {
         let system_msg = messages.iter().find(|m| m.role == "system").map(|m| m.content.as_str()).unwrap_or("");
 
@@ -378,10 +437,11 @@ impl LlmClient
 
         let body = serde_json::json!({
             "model": self.model,
-            "max_tokens": 16384,
+            "max_tokens": 32768,
             "system": system_msg,
             "messages": api_messages,
-            "temperature": 0.0
+            "temperature": 0.0,
+            "stream": true
         });
 
         let key = self.api_key.as_deref().ok_or_else(|| anyhow::anyhow!("Anthropic API key not set"))?;
@@ -403,13 +463,47 @@ impl LlmClient
             return Err(anyhow::anyhow!("Anthropic API error ({}): {}", status, error_body));
         }
 
-        let json: serde_json::Value = response.json()?;
+        let mut content = String::new();
+        let mut input_tokens: Option<u64> = None;
+        let mut output_tokens: Option<u64> = None;
+        let mut stop_reason: Option<String> = None;
 
-        let content = json["content"][0]["text"].as_str().map(|s| s.to_string()).ok_or_else(|| anyhow::anyhow!("Unexpected Anthropic API response format"))?;
-
-        let input_tokens = json["usage"]["input_tokens"].as_u64();
-        let output_tokens = json["usage"]["output_tokens"].as_u64();
-        let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
+        let reader = BufReader::new(response);
+        for line in reader.lines()
+        {
+            let line = line?;
+            if line.starts_with("data: ") == false
+            {
+                continue;
+            }
+            let data = &line[6..];
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data)
+            {
+                let event_type = json["type"].as_str().unwrap_or("");
+                match event_type
+                {
+                    | "message_start" =>
+                    {
+                        input_tokens = json["message"]["usage"]["input_tokens"].as_u64();
+                    }
+                    | "content_block_delta" =>
+                    {
+                        if let Some(text) = json["delta"]["text"].as_str()
+                        {
+                            content.push_str(text);
+                            on_chunk(text);
+                        }
+                    }
+                    | "message_delta" =>
+                    {
+                        output_tokens = json["delta"]["usage"]["output_tokens"].as_u64().or(json["usage"]["output_tokens"].as_u64());
+                        stop_reason = json["delta"]["stop_reason"].as_str().map(|s| s.to_string());
+                    }
+                    | _ =>
+                    {}
+                }
+            }
+        }
 
         Ok(ChatResponse { content, input_tokens, output_tokens, stop_reason })
     }
