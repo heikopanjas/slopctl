@@ -1,6 +1,7 @@
 //! AI-assisted merge of customized files with updated templates
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf}
 };
@@ -9,12 +10,10 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Config, Result, agent_defaults,
-    bom::{self, TemplateConfig},
-    file_tracker::{FileStatus, FileTracker},
-    github,
+    Config, Result,
+    file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
-    template_engine::{self, TemplateEngine}
+    template_engine::{self, TemplateEngine, UpdateOptions}
 };
 
 /// User-supplied overrides that control which templates are considered during merge
@@ -30,15 +29,24 @@ pub struct MergeOptions<'a>
     pub skills:  &'a [String]
 }
 
-/// A file where the user's customizations need merging with template updates
-struct MergeCandidate
+/// Classification of a file in the target-source map
+enum FileClass
 {
-    /// Absolute path to the user's current (customized) file in the workspace
-    workspace_path:   PathBuf,
-    /// Content of the fresh template (what init would produce now)
-    template_content: String,
-    /// Human-readable label for display (relative path)
-    display_name:     String
+    /// File does not exist on disk; write template content directly
+    New
+    {
+        target: PathBuf, content: String, display: String
+    },
+    /// File exists and content matches template; skip
+    Unchanged
+    {
+        display: String
+    },
+    /// File exists and content differs from template; needs LLM merge
+    Diverged
+    {
+        target: PathBuf, template_content: String, display: String
+    }
 }
 
 /// System prompt instructing the LLM how to perform the merge
@@ -117,110 +125,165 @@ impl TemplateManager
 
     /// AI-assisted merge of customized workspace files with updated templates
     ///
-    /// For each tracked file that the user has modified AND whose template source
-    /// has changed since installation, calls an LLM to produce a merged version.
-    /// By default, the merged content replaces the original file. With `preview`,
-    /// a `.merged` sidecar file is written instead for manual review.
+    /// Follows the same file-resolution pipeline as `init`, but differs in conflict
+    /// strategy: new files are written directly, unchanged files are skipped, and
+    /// diverged files are sent to an LLM for AI-assisted merging.
     ///
     /// # Arguments
     ///
-    /// * `provider` - CLI override for LLM provider name (falls back to config)
-    /// * `lang` - Language/framework override (falls back to installed language from tracker)
-    /// * `agent` - Agent override (falls back to installed agents detected in workspace)
-    /// * `mission` - Mission statement to use when generating the fresh template for comparison
-    /// * `skills` - Additional skill sources to include in the fresh template
-    /// * `dry_run` - If true, shows what would be merged without calling the LLM
+    /// * `options` - User-supplied overrides (lang, agent, mission, skills)
+    /// * `dry_run` - If true, shows what would happen without making changes
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
-    /// * `verbose` - If true, prints token usage summary after merging
+    /// * `verbose` - If true, prints token usage summary and reports unchanged files
     ///
     /// # Errors
     ///
     /// Returns an error if provider resolution fails, LLM calls fail, or file I/O fails
     pub fn merge(&self, options: &MergeOptions, dry_run: bool, preview: bool, verbose: bool) -> Result<()>
     {
-        let (provider_name, model_name) = Self::resolve_provider_and_model()?;
-        let provider_enum = Provider::from_name(&provider_name)?;
+        let engine = TemplateEngine::new(&self.config_dir);
 
-        let candidates = self.find_merge_candidates(options)?;
+        let update_options =
+            UpdateOptions { lang: options.lang, agent: options.agent, mission: options.mission, skills: options.skills, force: false, dry_run: false };
 
-        if candidates.is_empty() == true
+        let content_map = engine.build_target_content_map(&update_options)?;
+
+        let workspace = std::env::current_dir()?;
+        let classified = classify_files(&content_map, &workspace);
+
+        let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
+        let diverged_count = classified.iter().filter(|c| matches!(c, FileClass::Diverged { .. })).count();
+        let unchanged_count = classified.iter().filter(|c| matches!(c, FileClass::Unchanged { .. })).count();
+
+        if new_count == 0 && diverged_count == 0
         {
-            println!("{} No files need merging", "✓".green());
-            println!("{} Files are either unmodified or templates have not changed", "→".blue());
+            println!("{} All files are up to date", "✓".green());
+            if verbose == true && unchanged_count > 0
+            {
+                println!("{} {} file{} unchanged", "→".blue(), unchanged_count, plural(unchanged_count));
+            }
             return Ok(());
         }
 
         println!(
-            "{} Found {} file{} to merge",
+            "{} {} new, {} to merge, {} unchanged",
             "→".blue(),
-            candidates.len(),
-            if candidates.len() == 1
-            {
-                ""
-            }
-            else
-            {
-                "s"
-            }
+            new_count.to_string().green(),
+            diverged_count.to_string().yellow(),
+            unchanged_count.to_string().dimmed()
         );
         println!();
+
+        let needs_llm = diverged_count > 0 && dry_run == false;
+        let (provider_name, model_name) = if needs_llm == true
+        {
+            Self::resolve_provider_and_model()?
+        }
+        else
+        {
+            (String::new(), None)
+        };
+
+        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+        let template_version = template_engine::load_template_config(&self.config_dir).map(|c| c.version).unwrap_or(0);
 
         let mut total_input: u64 = 0;
         let mut total_output: u64 = 0;
         let mut truncated_count: u64 = 0;
 
-        for candidate in &candidates
+        for entry in &classified
         {
-            if dry_run == true
+            match entry
             {
-                println!("  {} Would merge: {}", "→".blue(), candidate.display_name.yellow());
-                continue;
-            }
-
-            if preview == true
-            {
-                let sidecar = sidecar_path(&candidate.workspace_path);
-                let rel_sidecar = sidecar.strip_prefix(std::env::current_dir().unwrap_or_default()).unwrap_or(&sidecar);
-
-                if sidecar.exists() == true
+                | FileClass::New { target, content, display } =>
                 {
-                    println!(
-                        "  {} {} {} {}",
-                        "!".yellow(),
-                        "Skipped:".yellow(),
-                        candidate.display_name.yellow(),
-                        format!("(.merged already exists: {})", rel_sidecar.display()).dimmed()
-                    );
-                    continue;
+                    if dry_run == true
+                    {
+                        println!("  {} Would create: {}", "●".green(), display.green());
+                    }
+                    else
+                    {
+                        if let Some(parent) = target.parent()
+                        {
+                            fs::create_dir_all(parent)?;
+                        }
+                        fs::write(target, content)?;
+                        println!("  {} Created {}", "✓".green(), display.green());
+
+                        let sha = FileTracker::calculate_sha256(target)?;
+                        let category = categorize_path(target, options);
+                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                    }
                 }
+                | FileClass::Unchanged { display } =>
+                {
+                    if verbose == true
+                    {
+                        println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
+                    }
+                }
+                | FileClass::Diverged { target, template_content, display } =>
+                {
+                    if dry_run == true
+                    {
+                        println!("  {} Would merge: {}", "→".yellow(), display.yellow());
+                        continue;
+                    }
 
-                print!("  {} Merging {}... ", "→".blue(), candidate.display_name.yellow());
-                std::io::Write::flush(&mut std::io::stdout())?;
+                    if preview == true
+                    {
+                        let sidecar = sidecar_path(target);
+                        let rel_sidecar = sidecar.strip_prefix(&workspace).unwrap_or(&sidecar);
 
-                let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
-                let user_content = fs::read_to_string(&candidate.workspace_path)?;
-                let messages = build_merge_messages(&user_content, &candidate.template_content);
-                let response = client.chat(&messages)?;
+                        if sidecar.exists() == true
+                        {
+                            println!(
+                                "  {} {} {} {}",
+                                "!".yellow(),
+                                "Skipped:".yellow(),
+                                display.yellow(),
+                                format!("(.merged already exists: {})", rel_sidecar.display()).dimmed()
+                            );
+                            continue;
+                        }
 
-                accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
-                fs::write(&sidecar, &response.content)?;
-                println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
-            }
-            else
-            {
-                print!("  {} Merging {}... ", "→".blue(), candidate.display_name.yellow());
-                std::io::Write::flush(&mut std::io::stdout())?;
+                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
+                        std::io::Write::flush(&mut std::io::stdout())?;
 
-                let client = LlmClient::new(provider_enum.clone(), model_name.as_deref())?;
-                let user_content = fs::read_to_string(&candidate.workspace_path)?;
-                let messages = build_merge_messages(&user_content, &candidate.template_content);
-                let response = client.chat(&messages)?;
+                        let provider_enum = Provider::from_name(&provider_name)?;
+                        let client = LlmClient::new(provider_enum, model_name.as_deref())?;
+                        let user_content = fs::read_to_string(target)?;
+                        let messages = build_merge_messages(&user_content, template_content);
+                        let response = client.chat(&messages)?;
 
-                accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
-                fs::write(&candidate.workspace_path, &response.content)?;
-                println!("{} merged {}", "✓".green(), candidate.display_name.yellow());
+                        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
+                        fs::write(&sidecar, &response.content)?;
+                        println!("{} wrote {}", "✓".green(), rel_sidecar.display().to_string().yellow());
+                    }
+                    else
+                    {
+                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
+                        std::io::Write::flush(&mut std::io::stdout())?;
+
+                        let provider_enum = Provider::from_name(&provider_name)?;
+                        let client = LlmClient::new(provider_enum, model_name.as_deref())?;
+                        let user_content = fs::read_to_string(target)?;
+                        let messages = build_merge_messages(&user_content, template_content);
+                        let response = client.chat(&messages)?;
+
+                        accumulate_usage(&response, &mut total_input, &mut total_output, &mut truncated_count);
+                        fs::write(target, &response.content)?;
+                        println!("{} merged {}", "✓".green(), display.yellow());
+
+                        let sha = FileTracker::calculate_sha256(target)?;
+                        let category = categorize_path(target, options);
+                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                    }
+                }
             }
         }
+
+        file_tracker.save()?;
 
         if dry_run == true
         {
@@ -235,10 +298,10 @@ impl TemplateManager
         else
         {
             println!();
-            println!("{} Merge complete. Merged files replaced originals.", "✓".green());
+            println!("{} Merge complete.", "✓".green());
         }
 
-        if verbose == true && dry_run == false
+        if verbose == true && dry_run == false && (total_input > 0 || total_output > 0)
         {
             let total = total_input + total_output;
             println!("{} Tokens: {} input, {} output ({} total)", "→".blue(), format_number(total_input), format_number(total_output), format_number(total));
@@ -264,11 +327,11 @@ impl TemplateManager
         Ok(())
     }
 
-    /// Resolves the LLM provider and model from CLI args, config, env, or error
+    /// Resolves the LLM provider and model from config or env
     ///
-    /// Priority: CLI `--provider` > config `merge.provider` > auto-detect from
-    /// environment API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
-    /// Model: CLI `--model` > config `merge.model` > None (provider default used later).
+    /// Priority: config `merge.provider` > auto-detect from environment API keys
+    /// (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
+    /// Model: config `merge.model` > None (provider default used later).
     pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
     {
         let config = Config::load().ok();
@@ -304,385 +367,84 @@ impl TemplateManager
 
         Ok((provider, model))
     }
-
-    /// Finds workspace files that need AI-assisted merging
-    ///
-    /// A file is a merge candidate when either:
-    /// - It is tracked, user-modified, AND the template source has also changed
-    /// - It exists on disk but is untracked, and its content differs from the current template (e.g. AGENTS.md was customized before tracking began, or was skipped by
-    ///   init because it was already customized)
-    fn find_merge_candidates(&self, options: &MergeOptions) -> Result<Vec<MergeCandidate>>
-    {
-        let workspace = std::env::current_dir()?;
-        let tracker = FileTracker::new(&self.config_dir)?;
-        let entries = tracker.get_workspace_entries(&workspace);
-
-        let config = template_engine::load_template_config(&self.config_dir)?;
-        let engine = TemplateEngine::new(&self.config_dir);
-        let userprofile = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
-
-        let target_source_map = build_target_source_map(&engine, &config, &workspace, &userprofile, &tracker, options)?;
-
-        let mut candidates = Vec::new();
-        let mut seen_paths = std::collections::HashSet::new();
-
-        // Tracked files: both user AND template must have changed since install
-        for (path, metadata) in &entries
-        {
-            seen_paths.insert(path.clone());
-
-            if tracker.check_modification(path)? != FileStatus::Modified
-            {
-                continue;
-            }
-
-            if let Some(template_content) = target_source_map.get(path)
-            {
-                let template_sha = sha256_string(template_content);
-
-                if template_sha != metadata.original_sha
-                {
-                    let display = path.strip_prefix(&workspace).unwrap_or(path).display().to_string();
-                    candidates.push(MergeCandidate { workspace_path: path.clone(), template_content: template_content.clone(), display_name: display });
-                }
-            }
-        }
-
-        // Untracked files: exist on disk and differ from current template
-        for (target_path, template_content) in &target_source_map
-        {
-            if seen_paths.contains(target_path) || target_path.exists() == false
-            {
-                continue;
-            }
-
-            let current_sha = FileTracker::calculate_sha256(target_path)?;
-            let template_sha = sha256_string(template_content);
-
-            if current_sha != template_sha
-            {
-                let display = target_path.strip_prefix(&workspace).unwrap_or(target_path).display().to_string();
-                candidates.push(MergeCandidate { workspace_path: target_path.clone(), template_content: template_content.clone(), display_name: display });
-            }
-        }
-
-        Ok(candidates)
-    }
 }
 
-/// Builds a map from resolved workspace target path → fresh template content
-///
-/// Walks all sections of templates.yml and resolves each entry's source content
-/// and target path. For the "main" file (AGENTS.md), produces a fresh merged
-/// version with all fragment sections filled in.
-///
-/// Fields in `options` override auto-detected values when set.
-fn build_target_source_map(
-    engine: &TemplateEngine, config: &TemplateConfig, workspace: &Path, userprofile: &Path, tracker: &FileTracker, options: &MergeOptions
-) -> Result<std::collections::HashMap<PathBuf, String>>
+/// Classifies every entry in the content map as New, Unchanged, or Diverged
+fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> Vec<FileClass>
 {
-    let mut map = std::collections::HashMap::new();
+    let mut classified = Vec::with_capacity(content_map.len());
 
-    // Resolve language: CLI override > tracker detection
-    let installed_lang = options.lang.map(|s| s.to_string()).or_else(|| tracker.get_installed_language_for_workspace(workspace));
-
-    // Main template (AGENTS.md): generate fresh merged content
-    if let Some(ref main_config) = config.main
+    for (target, template_content) in content_map
     {
-        let source_path = engine.config_dir().join(&main_config.source);
-        let target_path = resolve_target(engine, &main_config.target, workspace, userprofile);
+        let display = target.strip_prefix(workspace).unwrap_or(target).display().to_string();
 
-        if source_path.exists() == true
+        if target.exists() == false
         {
-            let fresh_content = generate_fresh_main(&source_path, engine, config, installed_lang.as_deref(), options.mission)?;
-            map.insert(normalize_path(&target_path), fresh_content);
+            classified.push(FileClass::New { target: target.clone(), content: template_content.clone(), display });
         }
-    }
-
-    // Principles, mission entries → direct source files
-    for entry in config.principles.iter().chain(config.mission.iter())
-    {
-        if entry.target.starts_with("$instructions") == true
+        else if let Ok(current_content) = fs::read_to_string(target)
         {
-            continue;
-        }
-        insert_source_content(engine, &entry.source, &entry.target, workspace, userprofile, &mut map);
-    }
-
-    // Integration entries
-    for int_config in config.integration.values()
-    {
-        for entry in &int_config.files
-        {
-            if entry.target.starts_with("$instructions") == true
+            if current_content == *template_content
             {
-                continue;
+                classified.push(FileClass::Unchanged { display });
             }
-            insert_source_content(engine, &entry.source, &entry.target, workspace, userprofile, &mut map);
-        }
-    }
-
-    // Agent entries (instructions + prompts for all agents)
-    for agent_config in config.agents.values()
-    {
-        for entry in agent_config.instructions.iter().chain(agent_config.prompts.iter())
-        {
-            if entry.target.starts_with("$userprofile") == true
+            else
             {
-                continue;
+                classified.push(FileClass::Diverged { target: target.clone(), template_content: template_content.clone(), display });
             }
-            insert_source_content(engine, &entry.source, &entry.target, workspace, userprofile, &mut map);
         }
-    }
-
-    // Language files (if a language is installed)
-    if let Some(ref lang) = installed_lang &&
-        let Ok(files) = bom::resolve_language_files(lang, config)
-    {
-        for entry in &files
+        else
         {
-            if entry.target.starts_with("$instructions") == true || entry.target.starts_with("$userprofile") == true
-            {
-                continue;
-            }
-            insert_source_content(engine, &entry.source, &entry.target, workspace, userprofile, &mut map);
+            classified.push(FileClass::Diverged { target: target.clone(), template_content: template_content.clone(), display });
         }
     }
 
-    // Skill files: walk local skill sources and map each file to its installed target
-    // Agent: CLI override > workspace detection
-    let active_agents: Vec<String> = if let Some(a) = options.agent
+    classified.sort_by(|a, b| {
+        let display_a = match a
+        {
+            | FileClass::New { display, .. } | FileClass::Unchanged { display } | FileClass::Diverged { display, .. } => display
+        };
+        let display_b = match b
+        {
+            | FileClass::New { display, .. } | FileClass::Unchanged { display } | FileClass::Diverged { display, .. } => display
+        };
+        display_a.cmp(display_b)
+    });
+
+    classified
+}
+
+/// Determines the tracking category for a target file path
+fn categorize_path(target: &Path, options: &MergeOptions) -> String
+{
+    let target_str = target.to_string_lossy();
+    if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
     {
-        vec![a.to_string()]
+        "skill".to_string()
+    }
+    else if target_str.contains(".git")
+    {
+        "integration".to_string()
+    }
+    else if target_str.contains("AGENTS.md")
+    {
+        "main".to_string()
+    }
+    else if let Some(name) = options.agent
+    {
+        if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
+        {
+            "agent".to_string()
+        }
+        else
+        {
+            "language".to_string()
+        }
     }
     else
     {
-        agent_defaults::detect_all_installed_agents(workspace)
-    };
-    let cross_client_raw = agent_defaults::CROSS_CLIENT_SKILL_DIR;
-
-    // Top-level skills → each active agent's skill dir + cross-client fallback
-    if active_agents.is_empty() == true
-    {
-        insert_skill_sources(engine, &config.skills, cross_client_raw, workspace, userprofile, &mut map);
+        "language".to_string()
     }
-    else
-    {
-        for agent_name in &active_agents
-        {
-            if let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
-            {
-                insert_skill_sources(engine, &config.skills, skill_dir, workspace, userprofile, &mut map);
-            }
-        }
-    }
-
-    // Agent-specific skills
-    for agent_name in &active_agents
-    {
-        if let Some(agent_config) = config.agents.get(agent_name.as_str()) &&
-            let Some(skill_dir) = agent_defaults::get_skill_dir(agent_name)
-        {
-            insert_skill_sources(engine, &agent_config.skills, skill_dir, workspace, userprofile, &mut map);
-        }
-    }
-
-    // Language skills → cross-client dir
-    if let Some(ref lang) = installed_lang &&
-        let Ok(lang_skills) = bom::resolve_language_skills(lang, config)
-    {
-        insert_skill_sources(engine, &lang_skills, cross_client_raw, workspace, userprofile, &mut map);
-    }
-
-    // Extra skills from CLI --skill flags (local paths only; URL-based skills are skipped)
-    if options.skills.is_empty() == false
-    {
-        let extra_defs: Vec<bom::SkillDefinition> = options.skills.iter().map(|s| bom::SkillDefinition { name: s.clone(), source: s.clone() }).collect();
-        let skill_dir = active_agents.first().and_then(|a| agent_defaults::get_skill_dir(a)).unwrap_or(cross_client_raw);
-        insert_skill_sources(engine, &extra_defs, skill_dir, workspace, userprofile, &mut map);
-    }
-
-    Ok(map)
-}
-
-/// Reads a template source file and inserts it into the target→content map
-fn insert_source_content(
-    engine: &TemplateEngine, source: &str, target: &str, workspace: &Path, userprofile: &Path, map: &mut std::collections::HashMap<PathBuf, String>
-)
-{
-    let source_path = engine.config_dir().join(source);
-    let target_path = resolve_target(engine, target, workspace, userprofile);
-
-    if source_path.exists() == true &&
-        let Ok(content) = fs::read_to_string(&source_path)
-    {
-        map.insert(normalize_path(&target_path), content);
-    }
-}
-
-/// Walks local skill source directories and inserts each file into the target→content map
-///
-/// URL-based skill sources are skipped (they are fetched at install time, not cached locally).
-fn insert_skill_sources(
-    engine: &TemplateEngine, skills: &[bom::SkillDefinition], skill_dir_placeholder: &str, workspace: &Path, userprofile: &Path,
-    map: &mut std::collections::HashMap<PathBuf, String>
-)
-{
-    let skill_base = agent_defaults::resolve_placeholder_path(skill_dir_placeholder, workspace, userprofile);
-
-    for skill in skills
-    {
-        if github::is_url(&skill.source) == true
-        {
-            continue;
-        }
-
-        let source_dir = engine.config_dir().join(&skill.source);
-        if source_dir.is_dir() == false
-        {
-            continue;
-        }
-
-        let target_base = skill_base.join(&skill.name);
-        insert_skill_dir_recursive(&source_dir, &target_base, map);
-    }
-}
-
-/// Recursively reads files from a skill source directory and inserts them into the map
-fn insert_skill_dir_recursive(source_dir: &Path, target_base: &Path, map: &mut std::collections::HashMap<PathBuf, String>)
-{
-    let Ok(entries) = fs::read_dir(source_dir)
-    else
-    {
-        return;
-    };
-
-    for entry in entries.flatten()
-    {
-        let path = entry.path();
-
-        if path.is_dir() == true
-        {
-            if let Some(dir_name) = path.file_name()
-            {
-                insert_skill_dir_recursive(&path, &target_base.join(dir_name), map);
-            }
-        }
-        else if path.is_file() == true &&
-            let Some(filename) = path.file_name() &&
-            let Ok(content) = fs::read_to_string(&path)
-        {
-            let target_path = target_base.join(filename);
-            map.insert(normalize_path(&target_path), content);
-        }
-    }
-}
-
-/// Resolves a target placeholder string to a workspace path
-fn resolve_target(engine: &TemplateEngine, target: &str, workspace: &Path, userprofile: &Path) -> PathBuf
-{
-    engine.resolve_target(target, workspace, userprofile)
-}
-
-/// Generates a fresh AGENTS.md by merging the base template with all fragment sections
-///
-/// Reproduces what `init` would produce without actually installing anything.
-/// When `mission` is provided it replaces any template-defined mission fragments.
-fn generate_fresh_main(source_path: &Path, engine: &TemplateEngine, config: &TemplateConfig, lang: Option<&str>, mission: Option<&str>) -> Result<String>
-{
-    let mut content = fs::read_to_string(source_path)?;
-
-    // Strip the template marker
-    let marker_line = format!("{}\n", template_engine::TEMPLATE_MARKER);
-    content = content.replace(&marker_line, "");
-
-    // Collect fragments by category
-    let mut fragments_by_category: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-
-    // Principles fragments
-    for entry in &config.principles
-    {
-        if entry.target.starts_with("$instructions") == true
-        {
-            let frag_path = engine.config_dir().join(&entry.source);
-            if let Ok(frag) = fs::read_to_string(&frag_path)
-            {
-                fragments_by_category.entry("principles".to_string()).or_default().push(frag);
-            }
-        }
-    }
-
-    // Mission fragments — CLI override takes precedence over template fragments
-    if let Some(m) = mission
-    {
-        fragments_by_category.entry("mission".to_string()).or_default().push(m.to_string());
-    }
-    else
-    {
-        for entry in &config.mission
-        {
-            if entry.target.starts_with("$instructions") == true
-            {
-                let frag_path = engine.config_dir().join(&entry.source);
-                if let Ok(frag) = fs::read_to_string(&frag_path)
-                {
-                    fragments_by_category.entry("mission".to_string()).or_default().push(frag);
-                }
-            }
-        }
-    }
-
-    // Language fragments
-    if let Some(lang_name) = lang &&
-        let Ok(files) = bom::resolve_language_files(lang_name, config)
-    {
-        for entry in &files
-        {
-            if entry.target.starts_with("$instructions") == true
-            {
-                let frag_path = engine.config_dir().join(&entry.source);
-                if let Ok(frag) = fs::read_to_string(&frag_path)
-                {
-                    let category = entry.target.strip_prefix("$instructions/").unwrap_or("languages");
-                    fragments_by_category.entry(category.to_string()).or_default().push(frag);
-                }
-            }
-        }
-    }
-
-    // Integration fragments
-    for int_config in config.integration.values()
-    {
-        for entry in &int_config.files
-        {
-            if entry.target.starts_with("$instructions") == true
-            {
-                let frag_path = engine.config_dir().join(&entry.source);
-                if let Ok(frag) = fs::read_to_string(&frag_path)
-                {
-                    let category = entry.target.strip_prefix("$instructions/").unwrap_or("integration");
-                    fragments_by_category.entry(category.to_string()).or_default().push(frag);
-                }
-            }
-        }
-    }
-
-    // If no language installed, insert empty entry to clear the placeholder
-    if lang.is_none() == true
-    {
-        fragments_by_category.entry("languages".to_string()).or_default();
-    }
-
-    // Merge fragments into content at insertion points
-    for (category, contents) in &fragments_by_category
-    {
-        let insertion_point = format!("<!-- {{{}}} -->", category);
-        let combined = contents.iter().map(|c| c.trim()).collect::<Vec<_>>().join("\n\n");
-        let replacement = format!("<!-- {{{}}} -->\n\n{}", category, combined);
-        content = content.replace(&insertion_point, &replacement);
-    }
-
-    Ok(content)
 }
 
 /// Builds the LLM messages for a merge operation
@@ -704,22 +466,6 @@ fn sidecar_path(path: &Path) -> PathBuf
     let mut sidecar = path.as_os_str().to_owned();
     sidecar.push(".merged");
     PathBuf::from(sidecar)
-}
-
-/// Computes SHA-256 of a string (for comparing template content against stored hashes)
-fn sha256_string(content: &str) -> String
-{
-    use sha2::{Digest, Sha256};
-    let hash = Sha256::digest(content.as_bytes());
-    format!("{:x}", hash)
-}
-
-/// Normalizes a path to its canonical form for map lookups
-///
-/// Falls back to the original path if canonicalization fails (e.g. file doesn't exist yet).
-fn normalize_path(path: &Path) -> PathBuf
-{
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Accumulates token counts and detects truncation from a chat response
@@ -756,23 +502,32 @@ fn format_number(n: u64) -> String
     result
 }
 
+/// Returns "s" for plural counts, empty for singular
+fn plural(count: usize) -> &'static str
+{
+    if count == 1
+    {
+        ""
+    }
+    else
+    {
+        "s"
+    }
+}
+
 #[cfg(test)]
 mod tests
 {
+    use std::collections::HashMap;
+
     use super::*;
+    use crate::template_engine::normalize_path;
 
     #[test]
     fn test_sidecar_path()
     {
         assert_eq!(sidecar_path(Path::new("/project/AGENTS.md")), PathBuf::from("/project/AGENTS.md.merged"));
         assert_eq!(sidecar_path(Path::new("relative.txt")), PathBuf::from("relative.txt.merged"));
-    }
-
-    #[test]
-    fn test_sha256_string()
-    {
-        let sha = sha256_string("Hello, World!");
-        assert_eq!(sha, "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f");
     }
 
     #[test]
@@ -801,153 +556,6 @@ mod tests
             assert!(result.is_err() == true);
             assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
         }
-    }
-
-    #[test]
-    fn test_generate_fresh_main_strips_marker() -> anyhow::Result<()>
-    {
-        let dir = tempfile::tempdir()?;
-        let source = dir.path().join("AGENTS.md");
-        let marker = template_engine::TEMPLATE_MARKER;
-        fs::write(&source, format!("{}\n# Title\n\n<!-- {{mission}} -->\n<!-- {{languages}} -->\n", marker))?;
-
-        let config = TemplateConfig {
-            version:     5,
-            main:        None,
-            agents:      std::collections::HashMap::new(),
-            languages:   std::collections::HashMap::new(),
-            shared:      std::collections::HashMap::new(),
-            integration: std::collections::HashMap::new(),
-            principles:  Vec::new(),
-            mission:     Vec::new(),
-            skills:      Vec::new()
-        };
-
-        let engine = TemplateEngine::new(dir.path());
-
-        let result = generate_fresh_main(&source, &engine, &config, None, None)?;
-        assert!(result.contains(marker) == false);
-        assert!(result.contains("# Title") == true);
-        Ok(())
-    }
-
-    #[test]
-    fn test_insert_skill_dir_recursive_maps_files() -> anyhow::Result<()>
-    {
-        let dir = tempfile::tempdir()?;
-        let source_dir = dir.path().join("skills/my-skill");
-        fs::create_dir_all(&source_dir)?;
-        fs::write(source_dir.join("SKILL.md"), "# My Skill")?;
-        fs::write(source_dir.join("extra.md"), "Extra content")?;
-
-        let target_base = dir.path().join("workspace/.cursor/skills/my-skill");
-        fs::create_dir_all(&target_base)?;
-
-        let mut map = std::collections::HashMap::new();
-        insert_skill_dir_recursive(&source_dir, &target_base, &mut map);
-
-        assert_eq!(map.len(), 2);
-        let skill_md = normalize_path(&target_base.join("SKILL.md"));
-        let extra_md = normalize_path(&target_base.join("extra.md"));
-        assert_eq!(map.get(&skill_md).map(|s| s.as_str()), Some("# My Skill"));
-        assert_eq!(map.get(&extra_md).map(|s| s.as_str()), Some("Extra content"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_insert_skill_dir_recursive_handles_subdirs() -> anyhow::Result<()>
-    {
-        let dir = tempfile::tempdir()?;
-        let source_dir = dir.path().join("skills/my-skill");
-        let sub_dir = source_dir.join("scripts");
-        fs::create_dir_all(&sub_dir)?;
-        fs::write(source_dir.join("SKILL.md"), "# Skill")?;
-        fs::write(sub_dir.join("helper.sh"), "#!/bin/bash")?;
-
-        let target_base = dir.path().join("workspace/.agents/skills/my-skill");
-        fs::create_dir_all(target_base.join("scripts"))?;
-
-        let mut map = std::collections::HashMap::new();
-        insert_skill_dir_recursive(&source_dir, &target_base, &mut map);
-
-        assert_eq!(map.len(), 2);
-        let helper = normalize_path(&target_base.join("scripts/helper.sh"));
-        assert_eq!(map.get(&helper).map(|s| s.as_str()), Some("#!/bin/bash"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_insert_skill_sources_skips_urls()
-    {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let engine = TemplateEngine::new(dir.path());
-        let workspace = dir.path().join("workspace");
-        let userprofile = dir.path().join("home");
-
-        let skills = vec![bom::SkillDefinition { name: "remote-skill".into(), source: "https://github.com/user/repo".into() }];
-
-        let mut map = std::collections::HashMap::new();
-        insert_skill_sources(&engine, &skills, agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile, &mut map);
-
-        assert!(map.is_empty() == true);
-    }
-
-    #[test]
-    fn test_insert_skill_sources_includes_local_skills() -> anyhow::Result<()>
-    {
-        let dir = tempfile::tempdir()?;
-        let skill_dir = dir.path().join("skills/git-workflow");
-        fs::create_dir_all(&skill_dir)?;
-        fs::write(skill_dir.join("SKILL.md"), "# Git Workflow")?;
-
-        let workspace = dir.path().join("workspace");
-        fs::create_dir_all(&workspace)?;
-        let engine = TemplateEngine::new(dir.path());
-        let userprofile = dir.path().join("home");
-
-        let skills = vec![bom::SkillDefinition { name: "git-workflow".into(), source: "skills/git-workflow".into() }];
-
-        let mut map = std::collections::HashMap::new();
-        insert_skill_sources(&engine, &skills, agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile, &mut map);
-
-        assert_eq!(map.len(), 1);
-        let expected_target = workspace.join(".agents/skills/git-workflow/SKILL.md");
-        let key = normalize_path(&expected_target);
-        assert_eq!(map.get(&key).map(|s| s.as_str()), Some("# Git Workflow"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_generate_fresh_main_with_fragments() -> anyhow::Result<()>
-    {
-        let dir = tempfile::tempdir()?;
-        let source = dir.path().join("AGENTS.md");
-        fs::write(&source, "# Title\n\n<!-- {mission} -->\n\n<!-- {principles} -->\n")?;
-
-        let mission_frag = dir.path().join("mission.md");
-        fs::write(&mission_frag, "## Mission\n\nBuild great things.")?;
-
-        let principles_frag = dir.path().join("principles.md");
-        fs::write(&principles_frag, "## Principles\n\nBe excellent.")?;
-
-        let config = TemplateConfig {
-            version:     5,
-            main:        None,
-            agents:      std::collections::HashMap::new(),
-            languages:   std::collections::HashMap::new(),
-            shared:      std::collections::HashMap::new(),
-            integration: std::collections::HashMap::new(),
-            principles:  vec![bom::FileMapping { source: "principles.md".into(), target: "$instructions/principles".into() }],
-            mission:     vec![bom::FileMapping { source: "mission.md".into(), target: "$instructions/mission".into() }],
-            skills:      Vec::new()
-        };
-
-        let engine = TemplateEngine::new(dir.path());
-
-        let result = generate_fresh_main(&source, &engine, &config, None, None)?;
-        assert!(result.contains("Build great things.") == true);
-        assert!(result.contains("Be excellent.") == true);
-        Ok(())
     }
 
     #[test]
@@ -1011,5 +619,160 @@ mod tests
         assert_eq!(total_input, 10);
         assert_eq!(total_output, 20);
         assert_eq!(truncated, 0);
+    }
+
+    #[test]
+    fn test_classify_files_new() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("new_file.md");
+        let mut map = HashMap::new();
+        map.insert(target.clone(), "template content".to_string());
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 1);
+        assert!(matches!(&classified[0], FileClass::New { display, .. } if display == "new_file.md") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_classify_files_unchanged() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("existing.md");
+        fs::write(&target, "same content")?;
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&target), "same content".to_string());
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 1);
+        assert!(matches!(&classified[0], FileClass::Unchanged { .. }) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_classify_files_diverged() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("modified.md");
+        fs::write(&target, "user customized content")?;
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&target), "new template content".to_string());
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 1);
+        assert!(matches!(&classified[0], FileClass::Diverged { .. }) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_classify_files_mixed() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let new_file = workspace.join("new.md");
+        let unchanged_file = workspace.join("unchanged.md");
+        let diverged_file = workspace.join("diverged.md");
+
+        fs::write(&unchanged_file, "same")?;
+        fs::write(&diverged_file, "user version")?;
+
+        let mut map = HashMap::new();
+        map.insert(new_file, "template".to_string());
+        map.insert(normalize_path(&unchanged_file), "same".to_string());
+        map.insert(normalize_path(&diverged_file), "template version".to_string());
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 3);
+
+        let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
+        let unchanged_count = classified.iter().filter(|c| matches!(c, FileClass::Unchanged { .. })).count();
+        let diverged_count = classified.iter().filter(|c| matches!(c, FileClass::Diverged { .. })).count();
+
+        assert_eq!(new_count, 1);
+        assert_eq!(unchanged_count, 1);
+        assert_eq!(diverged_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_categorize_path_main()
+    {
+        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        assert_eq!(categorize_path(Path::new("/project/AGENTS.md"), &options), "main");
+    }
+
+    #[test]
+    fn test_categorize_path_skill()
+    {
+        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        assert_eq!(categorize_path(Path::new("/project/.cursor/skills/my-skill/SKILL.md"), &options), "skill");
+    }
+
+    #[test]
+    fn test_categorize_path_integration()
+    {
+        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        assert_eq!(categorize_path(Path::new("/project/.gitignore"), &options), "integration");
+    }
+
+    #[test]
+    fn test_categorize_path_agent()
+    {
+        let options = MergeOptions { lang: None, agent: Some("cursor"), mission: None, skills: &[] };
+        assert_eq!(categorize_path(Path::new("/project/.cursorrules"), &options), "agent");
+    }
+
+    #[test]
+    fn test_categorize_path_language()
+    {
+        let options = MergeOptions { lang: Some("rust"), agent: None, mission: None, skills: &[] };
+        assert_eq!(categorize_path(Path::new("/project/.rustfmt.toml"), &options), "language");
+    }
+
+    #[test]
+    fn test_plural()
+    {
+        assert_eq!(plural(0), "s");
+        assert_eq!(plural(1), "");
+        assert_eq!(plural(2), "s");
+        assert_eq!(plural(100), "s");
+    }
+
+    #[test]
+    fn test_classify_files_sorted_by_display_name() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let file_c = workspace.join("charlie.md");
+        let file_a = workspace.join("alpha.md");
+        let file_b = workspace.join("bravo.md");
+
+        let mut map = HashMap::new();
+        map.insert(file_c, "c".to_string());
+        map.insert(file_a, "a".to_string());
+        map.insert(file_b, "b".to_string());
+
+        let classified = classify_files(&map, workspace);
+        let displays: Vec<&str> = classified
+            .iter()
+            .map(|c| match c
+            {
+                | FileClass::New { display, .. } | FileClass::Unchanged { display } | FileClass::Diverged { display, .. } => display.as_str()
+            })
+            .collect();
+
+        assert_eq!(displays, vec!["alpha.md", "bravo.md", "charlie.md"]);
+        Ok(())
     }
 }

@@ -60,6 +60,20 @@ pub struct TemplateContext
     pub template_version: u32
 }
 
+/// All files, fragments, and directories resolved from templates.yml for a given set of options
+///
+/// Produced by `TemplateEngine::resolve_all_files()` and consumed by both `update()` (init)
+/// and the merge command.
+pub struct ResolvedFiles
+{
+    /// Main AGENTS.md template context (source, target, fragments, version)
+    pub context:     TemplateContext,
+    /// (source, target) file pairs for agent files, language files, integration files, skills
+    pub files:       Vec<(PathBuf, PathBuf)>,
+    /// Directories to create (agent-declared workspace directories)
+    pub directories: Vec<PathBuf>
+}
+
 /// Result of the file copy operation
 pub enum CopyFilesResult
 {
@@ -247,28 +261,23 @@ impl<'a> TemplateEngine<'a>
         }
     }
 
-    /// Updates local templates from global storage
+    /// Resolves all files, fragments, and directories from templates.yml for the given options
     ///
-    /// This method:
-    /// 1. Verifies global templates exist
-    /// 2. Detects local modifications to AGENTS.md
-    /// 3. Copies templates to current directory
-    /// 4. Installs skills from templates.yml and CLI args
+    /// Walks every section of the template configuration (main, principles, mission,
+    /// languages, integration, agents, skills) and produces the complete set of
+    /// (source, target) file pairs, AGENTS.md fragments, and directories to create.
     ///
-    /// Single AGENTS.md works for all agents. Agent-specific instruction files
-    /// (e.g. CLAUDE.md) and prompts are copied if agent is specified.
+    /// This is the shared pipeline used by both `update()` (init) and the merge command.
     ///
     /// # Arguments
     ///
-    /// * `options` - Aggregated CLI parameters for the update operation
+    /// * `options` - Aggregated CLI parameters controlling which sections are resolved
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - Global templates don't exist
-    /// - Local modifications detected and force is false
-    /// - Copy operations fail
-    pub fn update(&self, options: &UpdateOptions) -> Result<()>
+    /// Returns an error if global templates are missing, agent/language validation fails,
+    /// or any source resolution fails
+    pub fn resolve_all_files(&self, options: &UpdateOptions) -> Result<ResolvedFiles>
     {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
@@ -305,8 +314,6 @@ impl<'a> TemplateEngine<'a>
 
         let workspace = std::env::current_dir()?;
         let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
-
-        let mut file_tracker = FileTracker::new(self.config_dir)?;
 
         let temp_dir = tempfile::TempDir::new()?;
 
@@ -426,7 +433,6 @@ impl<'a> TemplateEngine<'a>
         let agent_skill_dir = options.agent.and_then(agent_defaults::get_skill_dir).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
         let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
 
-        // Agent-specific skills from templates.yml → agent skill dir
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name) &&
             agent_config.skills.is_empty() == false &&
@@ -435,7 +441,6 @@ impl<'a> TemplateEngine<'a>
             self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, &mut files_to_copy)?;
         }
 
-        // Language-specific skills (own + inherited from shared groups) → cross-client dir
         if let Some(lang) = options.lang
         {
             let lang_skills = bom::resolve_language_skills(lang, &config)?;
@@ -445,14 +450,12 @@ impl<'a> TemplateEngine<'a>
             }
         }
 
-        // Top-level skills from templates.yml → agent dir if agent specified, else cross-client
         if config.skills.is_empty() == false
         {
             let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
             self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
         }
 
-        // Ad-hoc CLI skills → agent dir if agent specified, else cross-client
         if options.skills.is_empty() == false
         {
             let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
@@ -463,6 +466,119 @@ impl<'a> TemplateEngine<'a>
         validate_no_duplicate_targets(&files_to_copy)?;
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+
+        Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create })
+    }
+
+    /// Builds a map from resolved workspace target path to fresh template content
+    ///
+    /// Calls `resolve_all_files()` and reads each source file into a `HashMap`.
+    /// For the main AGENTS.md, generates a fresh merged version with all fragments
+    /// filled in. This is consumed by the merge command to compare against disk.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Aggregated CLI parameters controlling which sections are resolved
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file resolution or reading fails
+    pub fn build_target_content_map(&self, options: &UpdateOptions) -> Result<HashMap<PathBuf, String>>
+    {
+        let resolved = self.resolve_all_files(options)?;
+        let mut map: HashMap<PathBuf, String> = HashMap::new();
+
+        let fresh_main = Self::generate_fresh_main(&resolved.context, options)?;
+        let main_target = normalize_path(&resolved.context.target);
+        map.insert(main_target, fresh_main);
+
+        for (source, target) in &resolved.files
+        {
+            if source.exists() == true &&
+                let Ok(content) = fs::read_to_string(source)
+            {
+                map.insert(normalize_path(target), content);
+            }
+        }
+
+        Ok(map)
+    }
+
+    /// Generates a fresh AGENTS.md by merging the base template with all fragment sections
+    ///
+    /// Reproduces what `init` would produce without actually installing anything.
+    /// When a mission override is set in options, it replaces any template-defined mission fragments.
+    fn generate_fresh_main(ctx: &TemplateContext, options: &UpdateOptions) -> Result<String>
+    {
+        let mut content = fs::read_to_string(&ctx.source)?;
+
+        let marker_line = format!("{}\n", TEMPLATE_MARKER);
+        content = content.replace(&marker_line, "");
+
+        let mut fragments_by_category: HashMap<String, Vec<String>> = HashMap::new();
+
+        if options.lang.is_none() == true
+        {
+            fragments_by_category.entry("languages".to_string()).or_default();
+        }
+
+        if let Some(mission_content) = options.mission
+        {
+            let formatted_mission = format!("## Mission Statement\n\n{}", mission_content.trim());
+            fragments_by_category.entry("mission".to_string()).or_default().push(formatted_mission);
+        }
+
+        for (fragment_path, category) in &ctx.fragments
+        {
+            if options.mission.is_some() == true && category == "mission"
+            {
+                continue;
+            }
+            if let Ok(frag) = fs::read_to_string(fragment_path)
+            {
+                fragments_by_category.entry(category.clone()).or_default().push(frag);
+            }
+        }
+
+        for (category, contents) in &fragments_by_category
+        {
+            let insertion_point = format!("<!-- {{{}}} -->", category);
+            let combined = contents.iter().map(|c| c.trim()).collect::<Vec<_>>().join("\n\n");
+            let replacement = format!("<!-- {{{}}} -->\n\n{}", category, combined);
+            content = content.replace(&insertion_point, &replacement);
+        }
+
+        Ok(content)
+    }
+
+    /// Updates local templates from global storage
+    ///
+    /// This method:
+    /// 1. Resolves all files from templates.yml
+    /// 2. Detects local modifications to AGENTS.md
+    /// 3. Copies templates to current directory
+    /// 4. Installs skills from templates.yml and CLI args
+    ///
+    /// Single AGENTS.md works for all agents. Agent-specific instruction files
+    /// (e.g. CLAUDE.md) and prompts are copied if agent is specified.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Aggregated CLI parameters for the update operation
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Global templates don't exist
+    /// - Local modifications detected and force is false
+    /// - Copy operations fail
+    pub fn update(&self, options: &UpdateOptions) -> Result<()>
+    {
+        let resolved = self.resolve_all_files(options)?;
+        let ctx = &resolved.context;
+
+        let workspace = std::env::current_dir()?;
+        let mut file_tracker = FileTracker::new(self.config_dir)?;
 
         let skip_agents_md = ctx.target.exists() && is_file_customized(&ctx.target)?;
 
@@ -478,19 +594,19 @@ impl<'a> TemplateEngine<'a>
 
         if options.dry_run == true
         {
-            self.show_dry_run_files(&ctx, skip_agents_md, options, &files_to_copy, &directories_to_create);
+            self.show_dry_run_files(ctx, skip_agents_md, options, &resolved.files, &resolved.directories);
             return Ok(());
         }
 
-        self.handle_main_template(&ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
+        self.handle_main_template(ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
 
-        for dir_path in &directories_to_create
+        for dir_path in &resolved.directories
         {
             fs::create_dir_all(dir_path)?;
             println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
         }
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, ctx.template_version, options, &workspace)?;
+        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options, &workspace)?;
 
         match copy_result
         {
@@ -519,14 +635,10 @@ impl<'a> TemplateEngine<'a>
         Ok(())
     }
 
-    /// Merges fragment files into main AGENTS.md at insertion points
+    /// Merges fragment files into main AGENTS.md at insertion points and writes to disk
     ///
-    /// Reads fragments that have `$instructions` placeholder in their target path
-    /// and inserts them into the main AGENTS.md template at the corresponding
-    /// insertion points: `<!-- {mission} -->`, `<!-- {principles} -->`,
-    /// `<!-- {languages} -->`, `<!-- {integration} -->`
-    ///
-    /// The insertion point comments are preserved in the final merged file.
+    /// Delegates content generation to `generate_fresh_main()`, then writes the
+    /// result to the target path.
     ///
     /// # Arguments
     ///
@@ -538,53 +650,18 @@ impl<'a> TemplateEngine<'a>
     /// Returns an error if file reading or writing fails
     fn merge_fragments(&self, ctx: &TemplateContext, options: &UpdateOptions) -> Result<()>
     {
-        let mut main_content = fs::read_to_string(&ctx.source)?;
-
-        let marker_with_newline = format!("{}\n", TEMPLATE_MARKER);
-        main_content = main_content.replace(&marker_with_newline, "");
-
-        let mut fragments_by_category: HashMap<String, Vec<String>> = HashMap::new();
-
-        if options.lang.is_none() == true
+        if options.mission.is_some() == true
         {
-            fragments_by_category.entry("languages".to_string()).or_default();
-        }
-
-        for (fragment_path, category) in &ctx.fragments
-        {
-            let fragment_content = fs::read_to_string(fragment_path)?;
-            fragments_by_category.entry(category.clone()).or_default().push(fragment_content);
-        }
-
-        if let Some(mission_content) = options.mission
-        {
-            let formatted_mission = format!("## Mission Statement\n\n{}", mission_content.trim());
-            fragments_by_category.entry("mission".to_string()).or_default().push(formatted_mission);
             println!("{} Using custom mission statement", "→".blue());
         }
 
-        for (category, contents) in fragments_by_category
-        {
-            let insertion_point = format!("<!-- {{{}}} -->", category);
-
-            let combined_content = contents.iter().map(|c| c.trim()).collect::<Vec<_>>().join("\n\n");
-
-            if main_content.contains(&insertion_point)
-            {
-                let replacement = format!("<!-- {{{}}} -->\n\n{}", category, combined_content);
-                main_content = main_content.replace(&insertion_point, &replacement);
-            }
-            else
-            {
-                println!("{} Warning: Insertion point {} not found in AGENTS.md", "!".yellow(), insertion_point.yellow());
-            }
-        }
+        let content = Self::generate_fresh_main(ctx, options)?;
 
         if let Some(parent) = ctx.target.parent()
         {
             fs::create_dir_all(parent)?;
         }
-        fs::write(&ctx.target, main_content)?;
+        fs::write(&ctx.target, content)?;
 
         Ok(())
     }
@@ -1123,7 +1200,7 @@ impl<'a> TemplateEngine<'a>
     }
 
     /// Recursively collect all files from a local skill directory
-    fn collect_local_skill_files(source_dir: &Path, target_base: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
+    pub fn collect_local_skill_files(source_dir: &Path, target_base: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
     {
         for entry in fs::read_dir(source_dir)?
         {
@@ -1166,6 +1243,14 @@ impl<'a> TemplateEngine<'a>
         let trimmed = url.trim_end_matches('/');
         trimmed.rsplit('/').next().map(|s| s.to_string()).filter(|s| s.is_empty() == false)
     }
+}
+
+/// Normalizes a path to its canonical form for map lookups
+///
+/// Falls back to the original path if canonicalization fails (e.g. file doesn't exist yet).
+pub fn normalize_path(path: &Path) -> PathBuf
+{
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
