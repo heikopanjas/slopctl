@@ -54,7 +54,7 @@ enum Commands
         agent: Option<String>,
 
         /// Custom mission statement (use @filename to read from file)
-        #[arg(short, long, conflicts_with = "smart")]
+        #[arg(short, long)]
         mission: Option<String>,
 
         /// Install skill(s) from GitHub or local path (repeatable)
@@ -67,11 +67,7 @@ enum Commands
 
         /// Preview changes without applying them
         #[arg(short = 'n', long, default_value = "false")]
-        dry_run: bool,
-
-        /// Use an LLM to auto-generate the mission statement from workspace context
-        #[arg(long, default_value = "false")]
-        smart: bool
+        dry_run: bool
     },
     /// Manage global template catalog
     Templates
@@ -166,14 +162,6 @@ enum Commands
     /// AI-assisted merge of customized files with updated templates
     Merge
     {
-        /// LLM provider (openai, anthropic, ollama, mistral)
-        #[arg(short, long)]
-        provider: Option<String>,
-
-        /// Model to use for merging
-        #[arg(short, long)]
-        model: Option<String>,
-
         /// Write merged output to .merged sidecar files instead of replacing originals
         #[arg(long, default_value = "false")]
         preview: bool,
@@ -398,7 +386,7 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, mission, skill, force, dry_run, smart } =>
+        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
         {
             if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
             {
@@ -412,24 +400,7 @@ fn main()
 
             let skill_only = lang.is_none() == true && agent.is_none() == true;
 
-            let resolved_mission = if smart == true && dry_run == true
-            {
-                println!("{} Dry run: would generate mission statement with AI", "→".blue());
-                None
-            }
-            else if smart == true
-            {
-                match manager.generate_smart_mission(None, None)
-                {
-                    | Ok(generated) => Some(generated),
-                    | Err(e) =>
-                    {
-                        eprintln!("{} {}", "✗".red(), e.to_string().red());
-                        std::process::exit(1);
-                    }
-                }
-            }
-            else if let Some(ref mission_value) = mission
+            let resolved_mission = if let Some(ref mission_value) = mission
             {
                 match resolve_mission_content(mission_value)
                 {
@@ -580,21 +551,21 @@ fn main()
                 manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
             }
         }
-        | Commands::Merge { provider, model, preview, dry_run, list_models, verbose } =>
+        | Commands::Merge { preview, dry_run, list_models, verbose } =>
         {
             if list_models == true
             {
-                manager.list_models(provider.as_deref(), model.as_deref())
+                manager.list_models()
             }
             else if dry_run == true
             {
                 println!("{} Dry run: previewing merge candidates", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
+                manager.merge(dry_run, preview, verbose)
             }
             else
             {
                 println!("{} AI-assisted merge of customized files", "→".blue());
-                manager.merge(provider.as_deref(), model.as_deref(), dry_run, preview, verbose)
+                manager.merge(dry_run, preview, verbose)
             }
         }
         | Commands::Completions { shell } =>
