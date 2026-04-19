@@ -1,3 +1,4 @@
+
 # Project Instructions for AI Coding Agents
 
 **Last updated:** 2026-04-19 (v16.0.0)
@@ -33,7 +34,7 @@ confirmed your understanding.
 - Avoid making assumptions. If you need additional context to accurately answer the user, ask the user for the missing information. Be specific about which context you need.
 - Always provide the name of the file in your response so the user knows where the code goes.
 - Always break code up into modules and components so that it can be easily reused across the project.
-- All code you write MUST be fully optimized. ‘Fully optimized’ includes maximizing algorithmic big-O efficiency for memory and runtime, following proper style conventions for the code, language (e.g. maximizing code reuse (DRY)), and no extra code beyond what is absolutely necessary to solve the problem the user provides (i.e. no technical debt). If the code is not fully optimized, you will be fined $100.
+- All code you write MUST be fully optimized. 'Fully optimized' includes maximizing algorithmic big-O efficiency for memory and runtime, following proper style conventions for the code, language (e.g. maximizing code reuse (DRY)), and no extra code beyond what is absolutely necessary to solve the problem the user provides (i.e. no technical debt). If the code is not fully optimized, you will be fined $100.
 
 ### Working Together
 
@@ -116,7 +117,12 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 
 <!-- {languages} -->
 
-## Rust Coding Conventions
+## Rust Coding Standards
+
+Load the `rust-coding-conventions` skill before writing, reviewing, or refactoring Rust code.
+Load the `rust-build-commands` skill when building or running the project.
+
+### Rust Coding Conventions
 
 **General Principles:**
 
@@ -632,16 +638,61 @@ cargo audit
 
 <!-- {integration} -->
 
+## Semantic Versioning Protocol
+
+**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
+
+Automatically bump the project version after every code change and include it in the same commit. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules.
+
+The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
+
+### Version Format: MAJOR.MINOR.PATCH
+
+**When to increment:**
+
+1. **PATCH version** (X.Y.Z → X.Y.Z+1)
+   - Bug fixes and minor corrections
+   - Performance improvements without API changes
+   - Documentation updates
+   - Internal refactoring that doesn't affect public API
+   - Example: `1.0.0` → `1.0.1`
+
+2. **MINOR version** (X.Y.Z → X.Y+1.0)
+   - New features added
+   - New CLI commands or options
+   - New functionality that maintains backward compatibility
+   - Example: `1.0.1` → `1.1.0`
+
+3. **MAJOR version** (X.Y.Z → X+1.0.0)
+   - Breaking changes to public API
+   - Removal of features or commands
+   - Changes that require user action or code updates
+   - Incompatible CLI changes
+   - Example: `1.1.0` → `2.0.0`
+
+### Process
+
+After making ANY code changes:
+
+1. Determine the type of change (fix, feature, or breaking change)
+2. Update the version in `Cargo.toml` accordingly
+3. Include the version change in the same commit as the code change
+4. Mention version bump in commit message footer if significant
+5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
+
+**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
+
 ## Commit Protocol (CRITICAL)
 
-- **NEVER commit automatically** - always wait for explicit confirmation
+- **NEVER commit automatically** — always wait for explicit user confirmation
+- Stage changes, write a conventional commits message (max 50-char subject, 72-char body lines), then commit
+- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 Whenever asked to commit changes:
 
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - Commit the changes
-- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 This is **CRITICAL**!
 
@@ -763,51 +814,7 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 - Repository uses `.gitattributes` to enforce LF for Rust source files (`*.rs`)
 - Be aware of CRLF vs LF differences when comparing file content or hashes
 
-## Semantic Versioning Protocol
-
-**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
-
-The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
-
-### Version Format: MAJOR.MINOR.PATCH
-
-**When to increment:**
-
-1. **PATCH version** (X.Y.Z → X.Y.Z+1)
-   - Bug fixes and minor corrections
-   - Performance improvements without API changes
-   - Documentation updates
-   - Internal refactoring that doesn't affect public API
-   - Example: `1.0.0` → `1.0.1`
-
-2. **MINOR version** (X.Y.Z → X.Y+1.0)
-   - New features added
-   - New CLI commands or options
-   - New functionality that maintains backward compatibility
-   - Example: `1.0.1` → `1.1.0`
-
-3. **MAJOR version** (X.Y.Z → X+1.0.0)
-   - Breaking changes to public API
-   - Removal of features or commands
-   - Changes that require user action or code updates
-   - Incompatible CLI changes
-   - Example: `1.1.0` → `2.0.0`
-
-### Process
-
-After making ANY code changes:
-
-1. Determine the type of change (fix, feature, or breaking change)
-2. Update the version in `Cargo.toml` accordingly
-3. Include the version change in the same commit as the code change
-4. Mention version bump in commit message footer if significant
-5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
-
-**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
-
----
-
-<!-- {changelog} -->
+---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
 
