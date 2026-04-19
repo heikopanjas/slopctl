@@ -290,26 +290,22 @@ impl FileTracker
         // Adopt skills (category "skill") from all workspace-scoped skill directories
         for agent_name in agent_defaults::known_agents()
         {
-            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            if let Some(defaults) = agent_defaults::get_defaults(agent_name) &&
+                defaults.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
             {
-                if defaults.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+                let skill_dir = agent_defaults::resolve_placeholder_path(defaults.skill_dir, workspace, &userprofile);
+                if skill_dir.exists() == true &&
+                    let Ok(entries) = fs::read_dir(&skill_dir)
                 {
-                    let skill_dir = agent_defaults::resolve_placeholder_path(defaults.skill_dir, workspace, &userprofile);
-                    if skill_dir.exists() == true
+                    for entry in entries.flatten()
                     {
-                        if let Ok(entries) = fs::read_dir(&skill_dir)
+                        if entry.path().is_dir() == true
                         {
-                            for entry in entries.flatten()
+                            let mut files = Vec::new();
+                            crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
+                            for file in files
                             {
-                                if entry.path().is_dir() == true
-                                {
-                                    let mut files = Vec::new();
-                                    crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
-                                    for file in files
-                                    {
-                                        adopted += self.try_adopt(&file, None, "skill")?;
-                                    }
-                                }
+                                adopted += self.try_adopt(&file, None, "skill")?;
                             }
                         }
                     }
@@ -319,20 +315,18 @@ impl FileTracker
 
         // Also scan the cross-client skill directory
         let cross_client = agent_defaults::resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, &userprofile);
-        if cross_client.exists() == true
+        if cross_client.exists() == true &&
+            let Ok(entries) = fs::read_dir(&cross_client)
         {
-            if let Ok(entries) = fs::read_dir(&cross_client)
+            for entry in entries.flatten()
             {
-                for entry in entries.flatten()
+                if entry.path().is_dir() == true
                 {
-                    if entry.path().is_dir() == true
+                    let mut files = Vec::new();
+                    crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
+                    for file in files
                     {
-                        let mut files = Vec::new();
-                        crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
-                        for file in files
-                        {
-                            adopted += self.try_adopt(&file, None, "skill")?;
-                        }
+                        adopted += self.try_adopt(&file, None, "skill")?;
                     }
                 }
             }
@@ -341,23 +335,19 @@ impl FileTracker
         // Adopt commands/prompts from all workspace-scoped prompt directories
         for agent_name in agent_defaults::known_agents()
         {
-            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            if let Some(defaults) = agent_defaults::get_defaults(agent_name) &&
+                defaults.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
             {
-                if defaults.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+                let prompt_dir = agent_defaults::resolve_placeholder_path(defaults.prompt_dir, workspace, &userprofile);
+                if prompt_dir.exists() == true &&
+                    let Ok(entries) = fs::read_dir(&prompt_dir)
                 {
-                    let prompt_dir = agent_defaults::resolve_placeholder_path(defaults.prompt_dir, workspace, &userprofile);
-                    if prompt_dir.exists() == true
+                    for entry in entries.flatten()
                     {
-                        if let Ok(entries) = fs::read_dir(&prompt_dir)
+                        let path = entry.path();
+                        if path.is_file() == true
                         {
-                            for entry in entries.flatten()
-                            {
-                                let path = entry.path();
-                                if path.is_file() == true
-                                {
-                                    adopted += self.try_adopt(&path, None, "command")?;
-                                }
-                            }
+                            adopted += self.try_adopt(&path, None, "command")?;
                         }
                     }
                 }
