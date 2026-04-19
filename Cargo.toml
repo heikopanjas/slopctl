@@ -1,6 +1,6 @@
 [package]
 name = "slopctl"
-version = "15.4.3"
+version = "15.4.4"
 edition = "2024"
 
 [dependencies]
@@ -21,6 +21,7 @@ anyhow = "1.0.102"
 
 [build-dependencies]
 clap = { version = "4.5.20", features = ["derive"] }
+clap_complete = "4.5"
 clap_mangen = "0.2"
 
 [lints.clippy]
