@@ -39,6 +39,7 @@ impl TemplateManager
     fn list_workspace(&self, verbose: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&current_dir);
 
         println!("{}", "slopctl status".bold());
         println!();
@@ -96,7 +97,7 @@ impl TemplateManager
             println!("  {} AGENTS.md: {}", "○".yellow(), "not found".yellow());
         }
 
-        let file_tracker = FileTracker::new(&self.config_dir)?;
+        let file_tracker = FileTracker::new(&current_dir)?;
 
         // Detect installed agents via BoM
         let mut installed_agents: Vec<String> = Vec::new();
@@ -125,7 +126,7 @@ impl TemplateManager
         }
 
         // Installed language (from FileTracker metadata)
-        if let Some(lang) = file_tracker.get_installed_language_for_workspace(&current_dir)
+        if let Some(lang) = file_tracker.get_installed_language()
         {
             println!("  {} Installed language: {}", "✓".green(), lang.green());
         }
@@ -159,7 +160,7 @@ impl TemplateManager
             }
         }
 
-        let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+        let skill_entries = file_tracker.get_entries_by_category("skill");
         for (path, _) in &skill_entries
         {
             if path.exists() == true &&
@@ -198,7 +199,7 @@ impl TemplateManager
                 }
             }
 
-            let all_tracked = file_tracker.get_workspace_entries(&current_dir);
+            let all_tracked = file_tracker.get_entries();
             for (path, _) in all_tracked
             {
                 if path.exists() == true
@@ -377,8 +378,8 @@ impl TemplateManager
         let current_dir = std::env::current_dir().ok();
         if let Some(ref cwd) = current_dir
         {
-            let file_tracker = FileTracker::new(&self.config_dir)?;
-            let skill_entries = file_tracker.get_workspace_entries_by_category(cwd, "skill");
+            let file_tracker = FileTracker::new(cwd)?;
+            let skill_entries = file_tracker.get_entries_by_category("skill");
 
             let mut adhoc_names: BTreeSet<String> = BTreeSet::new();
             for (path, _) in &skill_entries

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-19 (v15.4.4)
+**Last updated:** 2026-04-19 (v16.0.0)
 
 <!-- {mission} -->
 
@@ -810,6 +810,19 @@ After making ANY code changes:
 <!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-19 (v16.0.0, workspace-local file tracker)
+
+- **BREAKING**: FileTracker storage moved from global `installed_files.json` to workspace-local `.slopctl/tracker.json`
+- FileTracker now takes a workspace path instead of global data dir; all paths stored as relative to workspace root
+- Removed `workspace` field from `FileMetadata` (no longer needed since tracker is workspace-scoped)
+- Removed `is_template_updated` method (unused)
+- Renamed workspace-scoped query methods: `get_workspace_entries` to `get_entries`, `get_workspace_entries_by_category` to `get_entries_by_category`, `get_installed_language_for_workspace` to `get_installed_language`
+- Added auto-migration: on first command in a workspace, entries are extracted from the global tracker, converted to relative paths, and saved locally; migrated entries are pruned from the global file
+- Added adoption of untracked files: after migration, scans workspace for known slopctl-managed files (agent instructions, skills, commands) and adopts any not yet tracked with `template_version: 0`
+- Added `TemplateManager::try_migrate_tracker()` called at all command entry points (update, list, doctor, purge, remove, merge, smart)
+- Added `TemplateManager::slopctl_dir()` and `is_workspace_initialized()` workspace helpers
+- Version bump: 15.4.4 to 16.0.0 (MAJOR - breaking tracker format and storage location)
 
 ### 2026-04-19 (v15.4.4, extract shared CLI module and fix man page generation)
 

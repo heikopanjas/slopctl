@@ -47,6 +47,9 @@ impl TemplateManager
             Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
         );
 
+        let workspace = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&workspace);
+
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
 

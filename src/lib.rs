@@ -41,7 +41,7 @@ pub use anyhow::Result;
 pub use bom::BillOfMaterials;
 pub use config::Config;
 pub use download_manager::DownloadManager;
-pub use file_tracker::{FileMetadata, FileStatus, FileTracker};
+pub use file_tracker::{FileMetadata, FileStatus, FileTracker, SLOPCTL_DIR, legacy_tracker_path};
 pub use template_engine::{ResolvedFiles, TemplateContext, TemplateEngine, UpdateOptions, normalize_path};
 pub use template_manager::{MergeOptions, TemplateManager};
 pub use utils::{
