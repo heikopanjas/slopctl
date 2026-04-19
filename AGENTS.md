@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-18 (v15.4.3)
+**Last updated:** 2026-04-19 (v15.4.4)
 
 <!-- {mission} -->
 
@@ -810,6 +810,17 @@ After making ANY code changes:
 <!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-19 (v15.4.4, extract shared CLI module and fix man page generation)
+
+- Extracted CLI definitions (Cli, Commands, ShellType) into shared `src/cli.rs` module
+- Both `main.rs` and `build.rs` now use the same CLI struct, keeping man pages in sync with the actual CLI
+- `build.rs` uses `#[path = "src/cli.rs"]` to include the shared module at build time
+- Man pages now generated per-subcommand: `slopctl.1` plus `slopctl-init.1`, `slopctl-merge.1`, etc.
+- Previously `build.rs` had a stale duplicate CLI struct missing most subcommands and flags
+- Removed `cargo:warning` output during release builds for cleaner build output
+- Added `clap_complete` to `[build-dependencies]` (needed by shared `cli.rs`)
+- Version bump: 15.4.3 to 15.4.4 (PATCH - internal refactor)
 
 ### 2026-04-18 (v15.4.3, fix Anthropic API temperature rejection on newer models)
 

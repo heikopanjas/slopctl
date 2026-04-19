@@ -27,6 +27,7 @@ macro_rules! require {
 
 pub mod agent_defaults;
 mod bom;
+pub mod cli;
 mod config;
 mod download_manager;
 mod file_tracker;
