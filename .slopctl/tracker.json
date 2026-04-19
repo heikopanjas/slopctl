@@ -1,0 +1,16 @@
+{
+  ".cursor/commands/init-session.md": {
+    "original_sha": "21f4305fa05b0a465480784c61b7236343f613cd364236c3e9ca23e81d57ea53",
+    "template_version": 0,
+    "installed_date": "2026-04-19T16:05:42.374553+00:00",
+    "lang": null,
+    "category": "command"
+  },
+  "AGENTS.md": {
+    "original_sha": "90229458b151abc94da1497b655f04b24381079fd3712ea47e5bed79b61dc7f6",
+    "template_version": 0,
+    "installed_date": "2026-04-19T16:05:42.373278+00:00",
+    "lang": null,
+    "category": "main"
+  }
+}
