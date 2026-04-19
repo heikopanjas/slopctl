@@ -16,11 +16,7 @@ pub struct FileMetadata
     pub template_version: u32,
     pub installed_date:   String,
     pub lang:             Option<String>,
-    pub category:         String,
-    /// Canonicalized workspace root where this file was installed.
-    /// `None` for legacy entries recorded before workspace tracking was added.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace:        Option<String>
+    pub category:         String
 }
 
 /// Status of a tracked file
@@ -37,43 +33,78 @@ pub enum FileStatus
     Deleted
 }
 
+/// Name of the workspace-local slopctl directory
+pub const SLOPCTL_DIR: &str = ".slopctl";
+
+/// Name of the tracker JSON file inside the slopctl directory
+const TRACKER_FILE: &str = "tracker.json";
+
+/// Legacy tracker filename used in the global template directory
+const LEGACY_TRACKER_FILE: &str = "installed_files.json";
+
 /// Tracks installed template files using SHA checksums
+///
+/// Stores metadata in a workspace-local `.slopctl/tracker.json` file.
+/// All paths are stored relative to the workspace root.
 pub struct FileTracker
 {
+    workspace:     PathBuf,
     metadata_path: PathBuf,
     metadata:      HashMap<String, FileMetadata>
 }
 
 impl FileTracker
 {
-    /// Resolves a file path to its absolute string representation
+    /// Converts a file path to a relative path string from the workspace root
     ///
-    /// For existing files, uses `fs::canonicalize`. For deleted files,
-    /// attempts to resolve via the parent directory. Falls back to the
-    /// path as-is if neither approach works.
-    fn resolve_absolute_path(file_path: &Path) -> String
+    /// For absolute paths, strips the workspace prefix. For paths that are
+    /// already relative, normalises separators to forward slashes.
+    fn to_relative_key(&self, file_path: &Path) -> String
     {
-        // Try direct canonicalize (works for existing files)
-        if let Ok(canonical) = fs::canonicalize(file_path)
+        let absolute = if let Ok(canonical) = fs::canonicalize(file_path)
         {
-            return canonical.to_string_lossy().to_string();
+            canonical
         }
-
-        // File doesn't exist, try to construct absolute path from parent
-        if let Some(parent) = file_path.parent() &&
+        else if let Some(parent) = file_path.parent() &&
             let Ok(parent_abs) = fs::canonicalize(parent) &&
             let Some(filename) = file_path.file_name()
         {
-            return parent_abs.join(filename).to_string_lossy().to_string();
+            parent_abs.join(filename)
+        }
+        else
+        {
+            file_path.to_path_buf()
+        };
+
+        let workspace_canon = fs::canonicalize(&self.workspace).unwrap_or_else(|_| self.workspace.clone());
+
+        if let Ok(relative) = absolute.strip_prefix(&workspace_canon)
+        {
+            let rel_str = relative.to_string_lossy();
+            return rel_str.replace('\\', "/");
         }
 
-        file_path.to_path_buf().to_string_lossy().to_string()
+        let lossy = file_path.to_string_lossy();
+        lossy.replace('\\', "/")
     }
 
-    /// Create a new FileTracker and load existing metadata
-    pub fn new(data_dir: &Path) -> anyhow::Result<Self>
+    /// Create a new FileTracker for a workspace
+    ///
+    /// Loads existing tracker data from `.slopctl/tracker.json` in the
+    /// workspace root. Creates the `.slopctl/` directory if it does not exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace` - Absolute path to the workspace root directory
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the tracker file exists but cannot be read
+    pub fn new(workspace: &Path) -> anyhow::Result<Self>
     {
-        let metadata_path = data_dir.join("installed_files.json");
+        let slopctl_dir = workspace.join(SLOPCTL_DIR);
+        let metadata_path = slopctl_dir.join(TRACKER_FILE);
+
         let metadata = if metadata_path.exists() == true
         {
             let contents = fs::read_to_string(&metadata_path)?;
@@ -84,7 +115,13 @@ impl FileTracker
             HashMap::new()
         };
 
-        Ok(Self { metadata_path, metadata })
+        Ok(Self { workspace: workspace.to_path_buf(), metadata_path, metadata })
+    }
+
+    /// Returns the workspace root this tracker is bound to
+    pub fn workspace(&self) -> &Path
+    {
+        &self.workspace
     }
 
     /// Calculate SHA-256 checksum of a file
@@ -110,43 +147,41 @@ impl FileTracker
 
     /// Record a file installation with metadata
     ///
+    /// The file path is stored relative to the workspace root.
+    ///
     /// # Arguments
     ///
-    /// * `file_path` - Path to the installed file
+    /// * `file_path` - Path to the installed file (absolute or relative to workspace)
     /// * `original_sha` - SHA-256 of the file at install time
     /// * `template_version` - Template format version used
     /// * `lang` - Language name if this file belongs to a language install
     /// * `category` - Category tag (e.g. "main", "agent", "language", "skill")
-    /// * `workspace` - Workspace root directory where the install was performed
-    pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: Option<String>, category: String, workspace: &Path)
+    pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: Option<String>, category: String)
     {
         let now = chrono::Utc::now().to_rfc3339();
-        let absolute_path = Self::resolve_absolute_path(file_path);
-        let workspace_str = Self::resolve_absolute_path(workspace);
+        let relative_key = self.to_relative_key(file_path);
 
-        self.metadata.insert(absolute_path, FileMetadata { original_sha, template_version, installed_date: now, lang, category, workspace: Some(workspace_str) });
+        self.metadata.insert(relative_key, FileMetadata { original_sha, template_version, installed_date: now, lang, category });
     }
 
     /// Check the modification status of a file
     pub fn check_modification(&self, file_path: &Path) -> anyhow::Result<FileStatus>
     {
-        let absolute_path = Self::resolve_absolute_path(file_path);
+        let relative_key = self.to_relative_key(file_path);
 
-        // Check if file is tracked
-        let metadata = match self.metadata.get(&absolute_path)
+        let metadata = match self.metadata.get(&relative_key)
         {
             | Some(meta) => meta,
             | None => return Ok(FileStatus::NotTracked)
         };
 
-        // Check if file still exists
-        if file_path.exists() == false
+        let absolute = self.workspace.join(&relative_key);
+        if absolute.exists() == false
         {
             return Ok(FileStatus::Deleted);
         }
 
-        // Calculate current SHA and compare
-        let current_sha = Self::calculate_sha256(file_path)?;
+        let current_sha = Self::calculate_sha256(&absolute)?;
         if current_sha == metadata.original_sha
         {
             Ok(FileStatus::Unmodified)
@@ -157,52 +192,30 @@ impl FileTracker
         }
     }
 
-    /// Check if new template is different from original
-    pub fn is_template_updated(&self, file_path: &Path, new_template_sha: &str) -> anyhow::Result<bool>
-    {
-        let absolute_path = Self::resolve_absolute_path(file_path);
-
-        if let Some(metadata) = self.metadata.get(&absolute_path)
-        {
-            Ok(new_template_sha != metadata.original_sha)
-        }
-        else
-        {
-            // Not tracked, so consider it updated
-            Ok(true)
-        }
-    }
-
     /// Remove a tracked file entry
     pub fn remove_entry(&mut self, file_path: &Path)
     {
-        let absolute_path = Self::resolve_absolute_path(file_path);
+        let relative_key = self.to_relative_key(file_path);
 
-        self.metadata.remove(&absolute_path);
+        self.metadata.remove(&relative_key);
     }
 
     /// Get metadata for a tracked file
     pub fn get_metadata(&self, file_path: &Path) -> Option<&FileMetadata>
     {
-        let absolute_path = Self::resolve_absolute_path(file_path);
+        let relative_key = self.to_relative_key(file_path);
 
-        self.metadata.get(&absolute_path)
+        self.metadata.get(&relative_key)
     }
 
-    /// Returns the installed language for files in the given workspace
+    /// Returns the installed language for this workspace
     ///
-    /// Used when re-initializing with only --agent to preserve the existing language
-    /// (e.g. switching from Cursor to Claude without changing Rust setup).
-    /// Matches only entries whose recorded `workspace` field exactly equals the
-    /// canonicalized query path.
-    pub fn get_installed_language_for_workspace(&self, workspace: &Path) -> Option<String>
+    /// Scans all tracked entries for one with a `lang` field set.
+    pub fn get_installed_language(&self) -> Option<String>
     {
-        let workspace_canon = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())?;
-        let workspace_str = workspace_canon.to_string_lossy();
-
         for meta in self.metadata.values()
         {
-            if meta.lang.is_some() == true && meta.workspace.as_deref() == Some(workspace_str.as_ref())
+            if meta.lang.is_some() == true
             {
                 return meta.lang.clone();
             }
@@ -211,55 +224,178 @@ impl FileTracker
         None
     }
 
-    /// Returns all tracked files whose recorded workspace exactly matches
+    /// Returns all tracked file entries
     ///
-    /// # Arguments
-    ///
-    /// * `workspace` - Root directory of the workspace to query
-    pub fn get_workspace_entries(&self, workspace: &Path) -> Vec<(PathBuf, &FileMetadata)>
+    /// Each entry is a `(PathBuf, &FileMetadata)` tuple where the path is
+    /// relative to the workspace root.
+    pub fn get_entries(&self) -> Vec<(PathBuf, &FileMetadata)>
     {
-        let Some(workspace_canon) = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())
-        else
-        {
-            return Vec::new();
-        };
-
-        let workspace_str = workspace_canon.to_string_lossy();
-
-        self.metadata
-            .iter()
-            .filter(|(_path_str, meta)| meta.workspace.as_deref() == Some(workspace_str.as_ref()))
-            .map(|(path_str, meta)| (PathBuf::from(path_str), meta))
-            .collect()
+        self.metadata.iter().map(|(path_str, meta)| (PathBuf::from(path_str), meta)).collect()
     }
 
-    /// Returns tracked files under a workspace filtered by category
+    /// Returns tracked file entries filtered by category
     ///
     /// # Arguments
     ///
-    /// * `workspace` - Root directory of the workspace to query
     /// * `category` - Category to filter by (e.g. "skill", "agent", "language")
-    pub fn get_workspace_entries_by_category(&self, workspace: &Path, category: &str) -> Vec<(PathBuf, &FileMetadata)>
+    pub fn get_entries_by_category(&self, category: &str) -> Vec<(PathBuf, &FileMetadata)>
     {
-        let Some(workspace_canon) = fs::canonicalize(workspace).ok().or_else(|| workspace.to_path_buf().canonicalize().ok())
-        else
+        self.metadata.iter().filter(|(_path_str, meta)| meta.category == category).map(|(path_str, meta)| (PathBuf::from(path_str), meta)).collect()
+    }
+
+    /// Adopt existing slopctl-managed files that are not yet tracked
+    ///
+    /// Scans the workspace for agent instruction files, skills, and commands
+    /// using the known agent conventions from `agent_defaults`. Any files
+    /// found on disk that are not already in the tracker are adopted with
+    /// their current SHA and a `template_version` of 0 (indicating adoption
+    /// rather than a template install).
+    ///
+    /// # Returns
+    ///
+    /// The number of files adopted.
+    pub fn adopt_untracked_files(&mut self, workspace: &Path) -> anyhow::Result<usize>
+    {
+        use crate::agent_defaults;
+
+        let mut adopted = 0usize;
+        let userprofile = dirs::home_dir().unwrap_or_default();
+
+        // Adopt AGENTS.md (category "main")
+        let agents_md = workspace.join("AGENTS.md");
+        if agents_md.exists() == true
         {
-            return Vec::new();
-        };
+            adopted += self.try_adopt(&agents_md, None, "main")?;
+        }
 
-        let workspace_str = workspace_canon.to_string_lossy();
+        // Adopt agent instruction files (category "agent") for all known agents
+        for agent_name in agent_defaults::known_agents()
+        {
+            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            {
+                for instr in defaults.instruction_files
+                {
+                    if instr.placeholder == agent_defaults::PLACEHOLDER_WORKSPACE
+                    {
+                        let path = workspace.join(instr.path);
+                        if path.exists() == true
+                        {
+                            adopted += self.try_adopt(&path, None, "agent")?;
+                        }
+                    }
+                }
+            }
+        }
 
-        self.metadata
-            .iter()
-            .filter(|(_path_str, meta)| meta.workspace.as_deref() == Some(workspace_str.as_ref()) && meta.category == category)
-            .map(|(path_str, meta)| (PathBuf::from(path_str), meta))
-            .collect()
+        // Adopt skills (category "skill") from all workspace-scoped skill directories
+        for agent_name in agent_defaults::known_agents()
+        {
+            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            {
+                if defaults.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+                {
+                    let skill_dir = agent_defaults::resolve_placeholder_path(defaults.skill_dir, workspace, &userprofile);
+                    if skill_dir.exists() == true
+                    {
+                        if let Ok(entries) = fs::read_dir(&skill_dir)
+                        {
+                            for entry in entries.flatten()
+                            {
+                                if entry.path().is_dir() == true
+                                {
+                                    let mut files = Vec::new();
+                                    crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
+                                    for file in files
+                                    {
+                                        adopted += self.try_adopt(&file, None, "skill")?;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also scan the cross-client skill directory
+        let cross_client = agent_defaults::resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, &userprofile);
+        if cross_client.exists() == true
+        {
+            if let Ok(entries) = fs::read_dir(&cross_client)
+            {
+                for entry in entries.flatten()
+                {
+                    if entry.path().is_dir() == true
+                    {
+                        let mut files = Vec::new();
+                        crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
+                        for file in files
+                        {
+                            adopted += self.try_adopt(&file, None, "skill")?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Adopt commands/prompts from all workspace-scoped prompt directories
+        for agent_name in agent_defaults::known_agents()
+        {
+            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            {
+                if defaults.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+                {
+                    let prompt_dir = agent_defaults::resolve_placeholder_path(defaults.prompt_dir, workspace, &userprofile);
+                    if prompt_dir.exists() == true
+                    {
+                        if let Ok(entries) = fs::read_dir(&prompt_dir)
+                        {
+                            for entry in entries.flatten()
+                            {
+                                let path = entry.path();
+                                if path.is_file() == true
+                                {
+                                    adopted += self.try_adopt(&path, None, "command")?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if adopted > 0
+        {
+            self.save()?;
+        }
+
+        Ok(adopted)
+    }
+
+    /// Try to adopt a single file if not already tracked
+    ///
+    /// Returns 1 if the file was adopted, 0 if it was already tracked.
+    fn try_adopt(&mut self, file_path: &Path, lang: Option<String>, category: &str) -> anyhow::Result<usize>
+    {
+        let key = self.to_relative_key(file_path);
+        if self.metadata.contains_key(&key) == true
+        {
+            return Ok(0);
+        }
+
+        let sha = Self::calculate_sha256(file_path)?;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        self.metadata.insert(key, FileMetadata { original_sha: sha, template_version: 0, installed_date: now, lang, category: category.to_string() });
+
+        Ok(1)
     }
 
     /// Save metadata to disk
+    ///
+    /// Creates the `.slopctl/` directory if it does not exist.
     pub fn save(&self) -> anyhow::Result<()>
     {
-        // Ensure parent directory exists
         if let Some(parent) = self.metadata_path.parent()
         {
             fs::create_dir_all(parent)?;
@@ -269,6 +405,105 @@ impl FileTracker
         fs::write(&self.metadata_path, json)?;
         Ok(())
     }
+
+    /// Migrate entries from the legacy global tracker to this workspace-local tracker
+    ///
+    /// Reads the global `installed_files.json`, extracts entries whose
+    /// `workspace` field matches this tracker's workspace root, converts
+    /// their absolute paths to relative, and inserts them. The migrated
+    /// entries are removed from the global file which is saved back.
+    ///
+    /// # Arguments
+    ///
+    /// * `global_tracker_path` - Path to the global `installed_files.json`
+    ///
+    /// # Returns
+    ///
+    /// The number of entries migrated, or 0 if the global file does not exist.
+    pub fn migrate_from_global(&mut self, global_tracker_path: &Path) -> anyhow::Result<usize>
+    {
+        if global_tracker_path.exists() == false
+        {
+            return Ok(0);
+        }
+
+        let contents = fs::read_to_string(global_tracker_path)?;
+
+        #[derive(Serialize, Deserialize)]
+        struct LegacyMetadata
+        {
+            original_sha:     String,
+            template_version: u32,
+            installed_date:   String,
+            lang:             Option<String>,
+            category:         String,
+            #[serde(default)]
+            workspace:        Option<String>
+        }
+
+        let global_entries: HashMap<String, LegacyMetadata> = serde_json::from_str(&contents).unwrap_or_else(|_| HashMap::new());
+
+        let workspace_canon = fs::canonicalize(&self.workspace).unwrap_or_else(|_| self.workspace.clone());
+        let workspace_str = workspace_canon.to_string_lossy();
+
+        let mut migrated_keys: Vec<String> = Vec::new();
+        let mut count = 0usize;
+
+        for (abs_path, legacy) in &global_entries
+        {
+            if legacy.workspace.as_deref() == Some(workspace_str.as_ref())
+            {
+                let abs = PathBuf::from(abs_path);
+                let relative = if let Ok(rel) = abs.strip_prefix(&workspace_canon)
+                {
+                    rel.to_string_lossy().replace('\\', "/")
+                }
+                else
+                {
+                    continue;
+                };
+
+                self.metadata.insert(relative, FileMetadata {
+                    original_sha:     legacy.original_sha.clone(),
+                    template_version: legacy.template_version,
+                    installed_date:   legacy.installed_date.clone(),
+                    lang:             legacy.lang.clone(),
+                    category:         legacy.category.clone()
+                });
+
+                migrated_keys.push(abs_path.clone());
+                count += 1;
+            }
+        }
+
+        if count > 0
+        {
+            self.save()?;
+
+            let remaining: HashMap<String, LegacyMetadata> = global_entries.into_iter().filter(|(k, _)| migrated_keys.contains(k) == false).collect();
+
+            if remaining.is_empty() == true
+            {
+                let _ = fs::remove_file(global_tracker_path);
+            }
+            else
+            {
+                let pruned_json = serde_json::to_string_pretty(&remaining)?;
+                fs::write(global_tracker_path, pruned_json)?;
+            }
+        }
+
+        Ok(count)
+    }
+}
+
+/// Returns the path to the legacy global tracker file
+///
+/// Used during migration to locate the old `installed_files.json` that
+/// lives alongside `templates.yml` in the global template directory.
+pub fn legacy_tracker_path(global_template_dir: &Path) -> PathBuf
+{
+    global_template_dir.join(LEGACY_TRACKER_FILE)
 }
 
 #[cfg(test)]
@@ -286,7 +521,6 @@ mod tests
         fs::write(&test_file, b"Hello, World!")?;
 
         let sha = FileTracker::calculate_sha256(&test_file)?;
-        // SHA-256 of "Hello, World!"
         assert_eq!(sha, "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f");
 
         Ok(())
@@ -296,17 +530,16 @@ mod tests
     fn test_file_tracking() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        fs::create_dir_all(&data_dir)?;
+        let workspace = temp_dir.path();
 
-        let mut tracker = FileTracker::new(&data_dir)?;
+        let mut tracker = FileTracker::new(workspace)?;
 
-        let test_file = temp_dir.path().join("test.txt");
+        let test_file = workspace.join("test.txt");
         fs::write(&test_file, b"Original content")?;
 
         let original_sha = FileTracker::calculate_sha256(&test_file)?;
 
-        tracker.record_installation(&test_file, original_sha.clone(), 1, Some("rust".to_string()), "language".to_string(), temp_dir.path());
+        tracker.record_installation(&test_file, original_sha.clone(), 1, Some("rust".to_string()), "language".to_string());
 
         let status = tracker.check_modification(&test_file)?;
         assert_eq!(status, FileStatus::Unmodified);
@@ -323,25 +556,18 @@ mod tests
     }
 
     #[test]
-    fn test_get_installed_language_for_workspace() -> anyhow::Result<()>
+    fn test_get_installed_language() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        fs::create_dir_all(&data_dir)?;
+        let workspace = temp_dir.path();
 
-        let mut tracker = FileTracker::new(&data_dir)?;
-        let project_file = temp_dir.path().join("project/AGENTS.md");
-        fs::create_dir_all(project_file.parent().ok_or_else(|| anyhow::anyhow!("expected parent directory"))?)?;
+        let mut tracker = FileTracker::new(workspace)?;
+        let project_file = workspace.join("AGENTS.md");
         fs::write(&project_file, b"test")?;
 
-        let project_dir = temp_dir.path().join("project");
-        tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string(), &project_dir);
-        let lang = tracker.get_installed_language_for_workspace(&project_dir);
+        tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string());
+        let lang = tracker.get_installed_language();
         assert_eq!(lang, Some("rust".to_string()));
-
-        let other_dir = temp_dir.path().join("other");
-        let lang_other = tracker.get_installed_language_for_workspace(&other_dir);
-        assert_eq!(lang_other, None);
 
         Ok(())
     }
@@ -350,22 +576,19 @@ mod tests
     fn test_save_and_load() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        fs::create_dir_all(&data_dir)?;
+        let workspace = temp_dir.path();
 
-        // Create and save metadata
         {
-            let mut tracker = FileTracker::new(&data_dir)?;
-            let test_file = temp_dir.path().join("test.txt");
+            let mut tracker = FileTracker::new(workspace)?;
+            let test_file = workspace.join("test.txt");
             fs::write(&test_file, b"Test")?;
             let sha = FileTracker::calculate_sha256(&test_file)?;
-            tracker.record_installation(&test_file, sha, 1, None, "test".to_string(), temp_dir.path());
+            tracker.record_installation(&test_file, sha, 1, None, "test".to_string());
             tracker.save()?;
         }
 
-        // Load metadata
         {
-            let tracker = FileTracker::new(&data_dir)?;
+            let tracker = FileTracker::new(workspace)?;
             assert_eq!(tracker.metadata.len(), 1);
         }
 
@@ -373,179 +596,276 @@ mod tests
     }
 
     #[test]
-    fn test_get_workspace_entries_returns_all_categories() -> anyhow::Result<()>
+    fn test_get_entries_returns_all_categories() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        let workspace = temp_dir.path().join("project");
-        fs::create_dir_all(&data_dir)?;
+        let workspace = temp_dir.path();
         fs::create_dir_all(workspace.join(".cursor/skills/my-skill"))?;
 
-        let mut tracker = FileTracker::new(&data_dir)?;
+        let mut tracker = FileTracker::new(workspace)?;
 
         let agent_file = workspace.join(".cursorrules");
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into(), &workspace);
+        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
 
         let skill_file = workspace.join(".cursor/skills/my-skill/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into(), &workspace);
+        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "main".into(), &workspace);
+        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "main".into());
 
-        let entries = tracker.get_workspace_entries(&workspace);
+        let entries = tracker.get_entries();
         assert_eq!(entries.len(), 3);
 
         Ok(())
     }
 
     #[test]
-    fn test_get_workspace_entries_excludes_other_workspaces() -> anyhow::Result<()>
+    fn test_get_entries_by_category_filters_correctly() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        let project_a = temp_dir.path().join("project_a");
-        let project_b = temp_dir.path().join("project_b");
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&project_a)?;
-        fs::create_dir_all(&project_b)?;
-
-        let mut tracker = FileTracker::new(&data_dir)?;
-
-        let file_a = project_a.join("AGENTS.md");
-        fs::write(&file_a, b"a")?;
-        tracker.record_installation(&file_a, "sha_a".into(), 3, None, "main".into(), &project_a);
-
-        let file_b = project_b.join("AGENTS.md");
-        fs::write(&file_b, b"b")?;
-        tracker.record_installation(&file_b, "sha_b".into(), 3, None, "main".into(), &project_b);
-
-        let entries_a = tracker.get_workspace_entries(&project_a);
-        assert_eq!(entries_a.len(), 1);
-
-        let entries_b = tracker.get_workspace_entries(&project_b);
-        assert_eq!(entries_b.len(), 1);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_workspace_entries_by_category_filters_correctly() -> anyhow::Result<()>
-    {
-        let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        let workspace = temp_dir.path().join("project");
-        fs::create_dir_all(&data_dir)?;
+        let workspace = temp_dir.path();
         fs::create_dir_all(workspace.join(".cursor/skills/foo"))?;
 
-        let mut tracker = FileTracker::new(&data_dir)?;
+        let mut tracker = FileTracker::new(workspace)?;
 
         let agent_file = workspace.join(".cursorrules");
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into(), &workspace);
+        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
 
         let skill_file = workspace.join(".cursor/skills/foo/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into(), &workspace);
+        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "language".into(), &workspace);
+        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "language".into());
 
-        let skills = tracker.get_workspace_entries_by_category(&workspace, "skill");
+        let skills = tracker.get_entries_by_category("skill");
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].1.category, "skill");
 
-        let agents = tracker.get_workspace_entries_by_category(&workspace, "agent");
+        let agents = tracker.get_entries_by_category("agent");
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].1.category, "agent");
 
-        let none = tracker.get_workspace_entries_by_category(&workspace, "nonexistent");
+        let none = tracker.get_entries_by_category("nonexistent");
         assert_eq!(none.len(), 0);
 
         Ok(())
     }
 
     #[test]
-    fn test_get_workspace_entries_nonexistent_workspace()
-    {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let data_dir = temp_dir.path().join("data");
-        fs::create_dir_all(&data_dir).expect("create data dir");
-
-        let tracker = FileTracker::new(&data_dir).expect("tracker");
-
-        let bogus = temp_dir.path().join("does_not_exist");
-        let entries = tracker.get_workspace_entries(&bogus);
-        assert!(entries.is_empty() == true);
-    }
-
-    #[test]
-    fn test_parent_dir_does_not_match_child_workspace() -> anyhow::Result<()>
+    fn test_relative_paths_stored() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        let parent = temp_dir.path().join("home");
-        let child = parent.join("projects/my-app");
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&parent)?;
-        fs::create_dir_all(&child)?;
+        let workspace = temp_dir.path();
 
-        let mut tracker = FileTracker::new(&data_dir)?;
+        let mut tracker = FileTracker::new(workspace)?;
 
-        let file_in_child = child.join("AGENTS.md");
-        fs::write(&file_in_child, b"child")?;
-        tracker.record_installation(&file_in_child, "sha_child".into(), 5, Some("rust".into()), "main".into(), &child);
+        let file = workspace.join("AGENTS.md");
+        fs::write(&file, b"test")?;
+        tracker.record_installation(&file, "sha1".into(), 5, None, "main".into());
 
-        let entries_child = tracker.get_workspace_entries(&child);
-        assert_eq!(entries_child.len(), 1);
-
-        let entries_parent = tracker.get_workspace_entries(&parent);
-        assert_eq!(entries_parent.len(), 0);
-
-        let lang_child = tracker.get_installed_language_for_workspace(&child);
-        assert_eq!(lang_child, Some("rust".to_string()));
-
-        let lang_parent = tracker.get_installed_language_for_workspace(&parent);
-        assert_eq!(lang_parent, None);
-
-        let skills_parent = tracker.get_workspace_entries_by_category(&parent, "main");
-        assert_eq!(skills_parent.len(), 0);
+        let entries = tracker.get_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, PathBuf::from("AGENTS.md"));
 
         Ok(())
     }
 
     #[test]
-    fn test_legacy_entries_without_workspace_not_matched() -> anyhow::Result<()>
+    fn test_nested_relative_paths() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
-        let data_dir = temp_dir.path().join("data");
-        let workspace = temp_dir.path().join("project");
-        fs::create_dir_all(&data_dir)?;
-        fs::create_dir_all(&workspace)?;
+        let workspace = temp_dir.path();
+        fs::create_dir_all(workspace.join(".cursor/skills/my-skill"))?;
 
-        let mut tracker = FileTracker::new(&data_dir)?;
+        let mut tracker = FileTracker::new(workspace)?;
 
-        let file = workspace.join("AGENTS.md");
-        let absolute_path = fs::canonicalize(&workspace)?.join("AGENTS.md").to_string_lossy().to_string();
-        fs::write(&file, b"legacy")?;
+        let file = workspace.join(".cursor/skills/my-skill/SKILL.md");
+        fs::write(&file, b"skill")?;
+        tracker.record_installation(&file, "sha1".into(), 5, None, "skill".into());
 
-        tracker.metadata.insert(absolute_path, FileMetadata {
-            original_sha:     "sha_legacy".into(),
-            template_version: 3,
-            installed_date:   "2025-01-01T00:00:00+00:00".into(),
-            lang:             Some("rust".into()),
-            category:         "main".into(),
-            workspace:        None
+        let entries = tracker.get_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, PathBuf::from(".cursor/skills/my-skill/SKILL.md"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_migrate_from_global() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace_a = temp_dir.path().join("project_a");
+        let workspace_b = temp_dir.path().join("project_b");
+        let global_dir = temp_dir.path().join("global");
+        fs::create_dir_all(&workspace_a)?;
+        fs::create_dir_all(&workspace_b)?;
+        fs::create_dir_all(&global_dir)?;
+
+        let workspace_a_canon = fs::canonicalize(&workspace_a)?;
+        let workspace_b_canon = fs::canonicalize(&workspace_b)?;
+
+        let agents_a = workspace_a.join("AGENTS.md");
+        fs::write(&agents_a, b"project a")?;
+
+        let agents_b = workspace_b.join("AGENTS.md");
+        fs::write(&agents_b, b"project b")?;
+
+        let global_tracker = global_dir.join(LEGACY_TRACKER_FILE);
+        let global_data = serde_json::json!({
+            workspace_a_canon.join("AGENTS.md").to_string_lossy().to_string(): {
+                "original_sha": "sha_a",
+                "template_version": 5,
+                "installed_date": "2026-01-01T00:00:00+00:00",
+                "lang": "rust",
+                "category": "main",
+                "workspace": workspace_a_canon.to_string_lossy().to_string()
+            },
+            workspace_b_canon.join("AGENTS.md").to_string_lossy().to_string(): {
+                "original_sha": "sha_b",
+                "template_version": 5,
+                "installed_date": "2026-01-01T00:00:00+00:00",
+                "lang": "rust",
+                "category": "main",
+                "workspace": workspace_b_canon.to_string_lossy().to_string()
+            }
         });
+        fs::write(&global_tracker, serde_json::to_string_pretty(&global_data)?)?;
 
-        let entries = tracker.get_workspace_entries(&workspace);
-        assert_eq!(entries.len(), 0);
+        let mut tracker_a = FileTracker::new(&workspace_a)?;
+        let migrated = tracker_a.migrate_from_global(&global_tracker)?;
+        assert_eq!(migrated, 1);
 
-        let lang = tracker.get_installed_language_for_workspace(&workspace);
-        assert_eq!(lang, None);
+        let entries = tracker_a.get_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, PathBuf::from("AGENTS.md"));
+        assert_eq!(entries[0].1.original_sha, "sha_a");
+
+        assert!(global_tracker.exists() == true);
+        let remaining: HashMap<String, serde_json::Value> = serde_json::from_str(&fs::read_to_string(&global_tracker)?)?;
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining.keys().next().ok_or_else(|| anyhow::anyhow!("expected key"))?.contains("project_b") == true);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_migrate_from_global_removes_empty_file() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path().join("project");
+        let global_dir = temp_dir.path().join("global");
+        fs::create_dir_all(&workspace)?;
+        fs::create_dir_all(&global_dir)?;
+
+        let workspace_canon = fs::canonicalize(&workspace)?;
+
+        let agents = workspace.join("AGENTS.md");
+        fs::write(&agents, b"test")?;
+
+        let global_tracker = global_dir.join(LEGACY_TRACKER_FILE);
+        let global_data = serde_json::json!({
+            workspace_canon.join("AGENTS.md").to_string_lossy().to_string(): {
+                "original_sha": "sha1",
+                "template_version": 5,
+                "installed_date": "2026-01-01T00:00:00+00:00",
+                "category": "main",
+                "workspace": workspace_canon.to_string_lossy().to_string()
+            }
+        });
+        fs::write(&global_tracker, serde_json::to_string_pretty(&global_data)?)?;
+
+        let mut tracker = FileTracker::new(&workspace)?;
+        let migrated = tracker.migrate_from_global(&global_tracker)?;
+        assert_eq!(migrated, 1);
+
+        assert!(global_tracker.exists() == false);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_migrate_from_global_nonexistent() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        let mut tracker = FileTracker::new(workspace)?;
+        let count = tracker.migrate_from_global(&PathBuf::from("/nonexistent/tracker.json"))?;
+        assert_eq!(count, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adopt_untracked_files_discovers_agents_and_skills() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
+        fs::write(workspace.join("CLAUDE.md"), b"Read AGENTS.md")?;
+        fs::create_dir_all(workspace.join(".claude/skills/git-workflow"))?;
+        fs::write(workspace.join(".claude/skills/git-workflow/SKILL.md"), b"# Skill")?;
+        fs::create_dir_all(workspace.join(".claude/commands"))?;
+        fs::write(workspace.join(".claude/commands/init-session.md"), b"# Command")?;
+
+        let mut tracker = FileTracker::new(workspace)?;
+        assert_eq!(tracker.get_entries().len(), 0);
+
+        let adopted = tracker.adopt_untracked_files(workspace)?;
+        assert_eq!(adopted, 4);
+
+        let entries = tracker.get_entries();
+        assert_eq!(entries.len(), 4);
+
+        let categories: Vec<&str> = entries.iter().map(|(_, m)| m.category.as_str()).collect();
+        assert!(categories.contains(&"main"));
+        assert!(categories.contains(&"agent"));
+        assert!(categories.contains(&"skill"));
+        assert!(categories.contains(&"command"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adopt_skips_already_tracked() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
+
+        let mut tracker = FileTracker::new(workspace)?;
+        tracker.record_installation(&workspace.join("AGENTS.md"), "sha1".into(), 5, None, "main".into());
+        assert_eq!(tracker.get_entries().len(), 1);
+
+        let adopted = tracker.adopt_untracked_files(workspace)?;
+        assert_eq!(adopted, 0);
+        assert_eq!(tracker.get_entries().len(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adopt_sets_template_version_zero() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
+
+        let mut tracker = FileTracker::new(workspace)?;
+        tracker.adopt_untracked_files(workspace)?;
+
+        let entries = tracker.get_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1.template_version, 0);
 
         Ok(())
     }

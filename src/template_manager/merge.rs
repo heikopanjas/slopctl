@@ -159,6 +159,7 @@ impl TemplateManager
         let content_map = engine.build_target_content_map(&update_options)?;
 
         let workspace = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&workspace);
         let classified = classify_files(&content_map, &workspace);
 
         let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
@@ -196,7 +197,7 @@ impl TemplateManager
             None
         };
 
-        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
         let template_version = template_engine::load_template_config(&self.config_dir).map(|c| c.version).unwrap_or(0);
 
         let mut total_input: u64 = 0;
@@ -224,7 +225,7 @@ impl TemplateManager
 
                         let sha = FileTracker::calculate_sha256(target)?;
                         let category = categorize_path(target, options);
-                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category);
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -337,7 +338,7 @@ impl TemplateManager
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
                                     let category = categorize_path(target, options);
-                                    file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                                    file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category);
                                 }
                             }
                         }

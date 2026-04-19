@@ -578,7 +578,7 @@ impl<'a> TemplateEngine<'a>
         let ctx = &resolved.context;
 
         let workspace = std::env::current_dir()?;
-        let mut file_tracker = FileTracker::new(self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
 
         let skip_agents_md = ctx.target.exists() && is_file_customized(&ctx.target)?;
 
@@ -598,7 +598,7 @@ impl<'a> TemplateEngine<'a>
             return Ok(());
         }
 
-        self.handle_main_template(ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
+        self.handle_main_template(ctx, options, skip_agents_md, &mut file_tracker)?;
 
         for dir_path in &resolved.directories
         {
@@ -606,7 +606,7 @@ impl<'a> TemplateEngine<'a>
             println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
         }
 
-        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options, &workspace)?;
+        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options)?;
 
         match copy_result
         {
@@ -738,9 +738,7 @@ impl<'a> TemplateEngine<'a>
     /// # Errors
     ///
     /// Returns an error if file operations fail
-    fn handle_main_template(
-        &self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker, workspace: &Path
-    ) -> Result<()>
+    fn handle_main_template(&self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker) -> Result<()>
     {
         if skip_agents_md && options.force == false
         {
@@ -765,7 +763,7 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string(), workspace);
+        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string());
 
         Ok(())
     }
@@ -792,7 +790,7 @@ impl<'a> TemplateEngine<'a>
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions, workspace: &Path
+        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
@@ -890,7 +888,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string(), workspace);
+                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string());
             }
         }
 
@@ -1026,7 +1024,7 @@ impl<'a> TemplateEngine<'a>
             vec![("cross-client".to_string(), cross_client)]
         };
 
-        let mut file_tracker = FileTracker::new(self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
         let temp_dir = tempfile::TempDir::new()?;
 
         let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -1059,7 +1057,7 @@ impl<'a> TemplateEngine<'a>
 
         println!("{} Copying skill files", "→".blue());
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options, &workspace)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
 
         match copy_result
         {

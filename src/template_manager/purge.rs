@@ -31,6 +31,7 @@ impl TemplateManager
     pub fn purge(&self, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&current_dir);
 
         let mut files_to_purge: Vec<PathBuf> = Vec::new();
         let mut agents_md_skipped = false;
@@ -58,12 +59,13 @@ impl TemplateManager
         }
 
         // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
-        let file_tracker = FileTracker::new(&self.config_dir)?;
-        for (path, _) in file_tracker.get_workspace_entries(&current_dir)
+        let file_tracker = FileTracker::new(&current_dir)?;
+        for (rel_path, _) in file_tracker.get_entries()
         {
-            if path.exists() == true
+            let abs_path = current_dir.join(&rel_path);
+            if abs_path.exists() == true
             {
-                files_to_purge.push(path);
+                files_to_purge.push(abs_path);
             }
         }
 
@@ -142,7 +144,7 @@ impl TemplateManager
         }
 
         // Re-load as mutable for cleanup
-        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&current_dir)?;
 
         let mut purged_count = 0;
         for file in &files_to_purge
@@ -224,9 +226,9 @@ mod tests
         let agent_file = workspace.path().join(".cursorrules");
         fs::write(&agent_file, "test")?;
 
-        // Record the same file in FileTracker (stores absolute path)
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        // Record the same file in FileTracker (workspace-local)
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -284,8 +286,8 @@ mod tests
 
         // Track the codex instruction file
         let codex_file = workspace.path().join("CODEX.md");
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;

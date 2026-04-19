@@ -88,14 +88,15 @@ impl TemplateManager
         let client = LlmClient::new(provider, model_name.as_deref())?;
 
         let workspace = std::env::current_dir()?;
-        let tracker = FileTracker::new(&self.config_dir)?;
+        let _ = self.try_migrate_tracker(&workspace);
+        let tracker = FileTracker::new(&workspace)?;
 
         // Find the installed AGENTS.md (category "main") or fall back to workspace root
         let agents_md_path = tracker
-            .get_workspace_entries(&workspace)
+            .get_entries()
             .into_iter()
             .find(|(_, meta)| meta.category == "main")
-            .map(|(path, _)| path)
+            .map(|(rel_path, _)| workspace.join(rel_path))
             .unwrap_or_else(|| workspace.join("AGENTS.md"));
 
         require!(agents_md_path.exists() == true, Err(anyhow::anyhow!("No AGENTS.md found in workspace. Run 'slopctl init' first.")));

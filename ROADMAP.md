@@ -22,7 +22,7 @@ transcripts so future sessions can pick up context quickly.
 ## Completed
 
 | Version | Item | Date |
-|---------|------|------|
+| --------- | ------ | ------ |
 | v15.3.0 | Merge command redesign: DRY shared pipeline with init, New/Unchanged/Diverged classification | 2026-04-18 |
 | v15.2.0 | Init/merge redesign: AI-free init, AI-powered merge with --lang/--agent/--mission/--skill options | 2026-04-18 |
 | v15.1.0 | Smart doctor (AI-assisted AGENTS.md linting via `doctor --smart`) | 2026-04-18 |
