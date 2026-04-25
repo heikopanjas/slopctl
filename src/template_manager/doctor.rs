@@ -323,11 +323,21 @@ impl TemplateManager
                 }
                 | FileStatus::Modified =>
                 {
-                    if verbose == true
+                    if metadata.category == "main"
                     {
-                        println!("  {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow());
+                        if verbose == true
+                        {
+                            println!("  {} {} {}", "✓".green(), "OK:      ".green(), rel.display().to_string().dimmed());
+                        }
                     }
-                    issues.push(DoctorIssue { kind: IssueKind::ModifiedFile, path });
+                    else
+                    {
+                        if verbose == true
+                        {
+                            println!("  {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow());
+                        }
+                        issues.push(DoctorIssue { kind: IssueKind::ModifiedFile, path });
+                    }
                 }
                 | FileStatus::Unmodified =>
                 {
@@ -383,6 +393,7 @@ mod tests
     use std::fs;
 
     use super::*;
+    use crate::file_tracker::{AGENT_ALL, LANG_NONE};
 
     fn make_temp_dir() -> tempfile::TempDir
     {
@@ -448,7 +459,7 @@ mod tests
         let target = workspace.join("AGENTS.md");
 
         let mut tracker = FileTracker::new(&workspace).unwrap();
-        tracker.record_installation(&target, "abc123".to_string(), 4, None, "main".to_string());
+        tracker.record_installation(&target, "abc123".into(), 4, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         tracker.save().unwrap();
 
         let tracker2 = FileTracker::new(&workspace).unwrap();
@@ -470,7 +481,7 @@ mod tests
 
         let sha = FileTracker::calculate_sha256(&target).unwrap();
         let mut tracker = FileTracker::new(&workspace).unwrap();
-        tracker.record_installation(&target, sha, 4, None, "main".to_string());
+        tracker.record_installation(&target, sha, 4, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         tracker.save().unwrap();
 
         let tracker2 = FileTracker::new(&workspace).unwrap();

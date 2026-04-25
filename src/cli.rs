@@ -206,19 +206,23 @@ pub enum Commands
     /// Manage configuration
     Config
     {
-        /// Configuration key to get (e.g., source.url)
+        /// Configuration key to get (e.g., templates.uri)
         key: Option<String>,
 
-        /// Set a configuration value: --add <key> <value>
+        /// Set a configuration value: --set <key> <value>
         #[arg(short, long, num_args = 2, value_names = ["KEY", "VALUE"])]
-        add: Vec<String>,
+        set: Vec<String>,
 
         /// List all configuration values
         #[arg(short, long, default_value = "false")]
         list: bool,
 
-        /// Remove a configuration key
+        /// Delete a configuration key
         #[arg(short, long)]
-        remove: Option<String>
+        delete: Option<String>,
+
+        /// Operate on the global config (~/.config/slopctl/config.yml) instead of the workspace config
+        #[arg(short = 'g', long, default_value = "false")]
+        global: bool
     }
 }

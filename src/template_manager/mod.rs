@@ -115,12 +115,12 @@ impl TemplateManager
     /// Returns true if the workspace has a local tracker file
     pub fn is_workspace_initialized(workspace: &Path) -> bool
     {
-        Self::slopctl_dir(workspace).join("tracker.json").exists()
+        Self::slopctl_dir(workspace).join("tracker.yml").exists()
     }
 
     /// Attempt migration from the global tracker and adopt untracked files
     ///
-    /// If `.slopctl/tracker.json` does not exist, runs two passes:
+    /// If `.slopctl/tracker.yml` does not exist, runs two passes:
     /// 1. Migrates matching entries from the global `installed_files.json`
     /// 2. Scans the workspace for known slopctl-managed files (instructions, skills, commands) and adopts any that are not yet tracked
     ///

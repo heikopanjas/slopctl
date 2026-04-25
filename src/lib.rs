@@ -39,10 +39,10 @@ mod utils;
 
 pub use anyhow::Result;
 pub use bom::BillOfMaterials;
-pub use config::Config;
+pub use config::{Config, ConfigScope, EffectiveConfig};
 pub use download_manager::DownloadManager;
-pub use file_tracker::{FileMetadata, FileStatus, FileTracker, SLOPCTL_DIR, legacy_tracker_path};
-pub use template_engine::{ResolvedFiles, TemplateContext, TemplateEngine, UpdateOptions, normalize_path};
+pub use file_tracker::{AGENT_ALL, FileMetadata, FileStatus, FileTracker, LANG_NONE, SLOPCTL_DIR, legacy_tracker_path};
+pub use template_engine::{ResolvedContent, ResolvedFile, ResolvedFiles, TemplateContext, TemplateEngine, UpdateOptions, normalize_path};
 pub use template_manager::{MergeOptions, TemplateManager};
 pub use utils::{
     FileActionResponse, collect_files_recursive, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents

@@ -56,7 +56,7 @@ impl TemplateManager
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V5: slopctl config source.url https://github.com/heikopanjas/slopctl/tree/develop/templates/v5"
+                "V1 templates are no longer supported. Migrate to V5: slopctl config --set templates.uri https://github.com/heikopanjas/slopctl/tree/develop/templates/v5"
             )),
             | 2..=5 =>
             {

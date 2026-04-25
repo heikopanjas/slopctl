@@ -248,7 +248,7 @@ impl TemplateManager
                 for (rel_path, meta) in all_entries
                 {
                     let abs_path = current_dir.join(&rel_path);
-                    if meta.lang.as_deref() == Some(lang_name) &&
+                    if meta.lang == lang_name &&
                         meta.category != "main" &&
                         meta.category != "skill" &&
                         abs_path.exists() == true &&
@@ -426,7 +426,11 @@ mod tests
     use std::{fs, path::PathBuf};
 
     use super::TemplateManager;
-    use crate::{bom::BillOfMaterials, file_tracker::FileTracker, template_manager::CWD_LOCK};
+    use crate::{
+        bom::BillOfMaterials,
+        file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
+        template_manager::CWD_LOCK
+    };
 
     #[test]
     fn test_path_belongs_to_cursor()
@@ -508,7 +512,7 @@ mod tests
         fs::write(&agent_file, "test")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -538,7 +542,7 @@ mod tests
         fs::write(&lang_file, "max_width = 100")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into());
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -571,9 +575,9 @@ mod tests
         fs::write(&skill_file, "# Skill")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into());
-        tracker.record_installation(&main_file, "sha2".into(), 5, Some("rust".into()), "main".into());
-        tracker.record_installation(&skill_file, "sha3".into(), 5, Some("rust".into()), "skill".into());
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&main_file, "sha2".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&skill_file, "sha3".into(), 5, "rust".into(), AGENT_ALL.into(), "skill".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -662,7 +666,7 @@ mod tests
 
         // Track the codex instruction file so remove has something to find
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into());
+        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;

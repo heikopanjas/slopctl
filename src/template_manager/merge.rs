@@ -11,10 +11,10 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Config, Result,
+    EffectiveConfig, Result,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
-    template_engine::{self, TemplateEngine, UpdateOptions}
+    template_engine::{self, ResolvedContent, TemplateEngine, UpdateOptions}
 };
 
 /// User-supplied overrides that control which templates are considered during merge
@@ -39,7 +39,7 @@ enum FileClass
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, display: String
+        target: PathBuf, content: String, lang: String, agent: String, display: String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -55,6 +55,8 @@ enum FileClass
         template_content: String,
         user_content:     String,
         user_changelog:   Option<String>,
+        lang:             String,
+        agent:            String,
         display:          String
     }
 }
@@ -94,7 +96,7 @@ impl TemplateManager
     {
         let (provider_name, model_name) = if let Some(p) = provider_override
         {
-            let config = Config::load().ok();
+            let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
             let model = config.as_ref().and_then(|c| c.get("merge.model"));
             let provider_enum = Provider::from_name(p)?;
             let effective_model = model.clone().unwrap_or_else(|| provider_enum.default_model().to_string());
@@ -208,7 +210,7 @@ impl TemplateManager
         {
             match entry
             {
-                | FileClass::New { target, content, display } =>
+                | FileClass::New { target, content, lang, agent, display } =>
                 {
                     if dry_run == true
                     {
@@ -225,7 +227,7 @@ impl TemplateManager
 
                         let sha = FileTracker::calculate_sha256(target)?;
                         let category = categorize_path(target, options);
-                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category);
+                        file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -235,7 +237,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, display } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display } =>
                 {
                     if dry_run == true
                     {
@@ -365,7 +367,7 @@ impl TemplateManager
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
                                     let category = categorize_path(target, options);
-                                    file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category);
+                                    file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
                                 }
                             }
                         }
@@ -431,7 +433,7 @@ impl TemplateManager
     /// Model: config `merge.model` > None (provider default used later).
     pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
     {
-        let config = Config::load().ok();
+        let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
 
         let provider = if let Some(ref c) = config &&
             let Some(p) = c.get("merge.provider")
@@ -446,7 +448,7 @@ impl TemplateManager
         {
             return Err(anyhow::anyhow!(
                 "No LLM provider configured or auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: slopctl \
-                 config --add merge.provider openai\nSupported: openai, anthropic, ollama, mistral"
+                 config --set merge.provider openai\nSupported: openai, anthropic, ollama, mistral"
             ));
         };
 
@@ -480,17 +482,24 @@ fn split_at_changelog(content: &str) -> Option<(&str, &str)>
 /// Classifies every entry in the content map as New, Unchanged, or Diverged.
 /// When the changelog marker is present in both files, only the template half
 /// is compared -- changelog-only differences are classified as Unchanged.
-fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> Vec<FileClass>
+fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &Path) -> Vec<FileClass>
 {
     let mut classified = Vec::with_capacity(content_map.len());
 
-    for (target, template_content) in content_map
+    for (target, resolved) in content_map
     {
         let display = target.strip_prefix(workspace).unwrap_or(target).display().to_string();
+        let template_content = &resolved.content;
 
         if target.exists() == false
         {
-            classified.push(FileClass::New { target: target.clone(), content: template_content.clone(), display });
+            classified.push(FileClass::New {
+                target: target.clone(),
+                content: template_content.clone(),
+                lang: resolved.lang.clone(),
+                agent: resolved.agent.clone(),
+                display
+            });
         }
         else if let Ok(current_content) = fs::read_to_string(target)
         {
@@ -511,6 +520,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                         template_content: tmpl_upper.to_string(),
                         user_content: user_upper.to_string(),
                         user_changelog: Some(user_lower.to_string()),
+                        lang: resolved.lang.clone(),
+                        agent: resolved.agent.clone(),
                         display
                     });
                 }
@@ -522,6 +533,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                     template_content: template_content.clone(),
                     user_content: current_content,
                     user_changelog: None,
+                    lang: resolved.lang.clone(),
+                    agent: resolved.agent.clone(),
                     display
                 });
             }
@@ -533,6 +546,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                 template_content: template_content.clone(),
                 user_content: String::new(),
                 user_changelog: None,
+                lang: resolved.lang.clone(),
+                agent: resolved.agent.clone(),
                 display
             });
         }
@@ -706,7 +721,15 @@ mod tests
     use std::collections::HashMap;
 
     use super::*;
-    use crate::template_engine::normalize_path;
+    use crate::{
+        file_tracker::{AGENT_ALL, LANG_NONE},
+        template_engine::normalize_path
+    };
+
+    fn rc(content: &str) -> ResolvedContent
+    {
+        ResolvedContent { content: content.to_string(), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }
+    }
 
     #[test]
     fn test_sidecar_path()
@@ -814,7 +837,7 @@ mod tests
 
         let target = workspace.join("new_file.md");
         let mut map = HashMap::new();
-        map.insert(target.clone(), "template content".to_string());
+        map.insert(target.clone(), rc("template content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -832,7 +855,7 @@ mod tests
         fs::write(&target, "same content")?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), "same content".to_string());
+        map.insert(normalize_path(&target), rc("same content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -850,7 +873,7 @@ mod tests
         fs::write(&target, "user customized content")?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), "new template content".to_string());
+        map.insert(normalize_path(&target), rc("new template content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -872,9 +895,9 @@ mod tests
         fs::write(&diverged_file, "user version")?;
 
         let mut map = HashMap::new();
-        map.insert(new_file, "template".to_string());
-        map.insert(normalize_path(&unchanged_file), "same".to_string());
-        map.insert(normalize_path(&diverged_file), "template version".to_string());
+        map.insert(new_file, rc("template"));
+        map.insert(normalize_path(&unchanged_file), rc("same"));
+        map.insert(normalize_path(&diverged_file), rc("template version"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 3);
@@ -944,9 +967,9 @@ mod tests
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, "c".to_string());
-        map.insert(file_a, "a".to_string());
-        map.insert(file_b, "b".to_string());
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified
@@ -1014,7 +1037,7 @@ mod tests
         fs::write(&target, &user)?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), template);
+        map.insert(normalize_path(&target), rc(&template));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -1034,7 +1057,7 @@ mod tests
         fs::write(&target, user)?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), template.to_string());
+        map.insert(normalize_path(&target), rc(template));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);

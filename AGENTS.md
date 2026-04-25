@@ -1,7 +1,7 @@
 
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-25 (v16.1.0)
+**Last updated:** 2026-04-25 (v17.0.0)
 
 <!-- {mission} -->
 
@@ -818,6 +818,57 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 
 ## Recent Updates & Decisions
 
+### 2026-04-25 (v17.0.0, config overhaul: key renames + workspace-scoped config)
+
+**Config key renames:**
+
+- **BREAKING**: renamed config keys `source.url` and `source.fallback` to `templates.uri` and `templates.fallbackUri`
+- Established convention: all configuration keys follow `<command>.<parameter>`, aligning the prefix with the subcommand that consumes it (`templates.uri` is consumed by `templates`, `merge.provider` by `merge`)
+- Chose `uri` (not `url`) and `fallbackUri` because both values can be either a remote URL (`https://...`) or a local filesystem path (`/path/to/templates`); `URI` is the umbrella term that covers both
+- Renamed `Config.source` field to `Config.templates` and `SourceConfig` struct to `TemplatesConfig` in `src/config.rs`; renamed `TemplatesConfig.url` -> `uri` and `TemplatesConfig.fallback` -> `fallback_uri` (with `#[serde(rename = "fallbackUri")]` so the on-disk YAML key matches the CLI key exactly)
+- No automatic migration: existing `~/.config/slopctl/config.yml` files with a `source:` stanza are silently ignored on load (serde drops unknown fields). Users with a configured `source.url` must re-set it with `slopctl config --set templates.uri <value>`
+
+**Workspace-scoped config:**
+
+- **BREAKING**: `slopctl config` now defaults to the **workspace** config (`.slopctl/config.yml`) for writes (`--set`, `--delete`). Pass `--global` (`-g`) to target the global config (`~/.config/slopctl/config.yml`)
+- Reads (`<key>` get, `--list`) without `--global` return the effective merged view: for each key, the workspace value wins; if not set there, the global value is used. With `--global`, only the global file is read
+- `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
+- `--delete` prints a cross-scope hint when the key is not found in the targeted scope but exists in the other scope
+- New `ConfigScope` enum and `EffectiveConfig` struct in `src/config.rs`: `EffectiveConfig::load(workspace)` returns both files merged; `get_with_origin` returns the value and its scope; `list_with_origin` returns a deterministic `BTreeMap`
+- `Config::load`/`save` split into `load_global`/`save_global`/`load_workspace`/`save_workspace`; old `load`/`save` kept as compatibility shims delegating to the global variants
+- Switched all consumer call sites to `EffectiveConfig`: `main.rs::resolve_source`, `merge.rs::resolve_provider_and_model`, `merge.rs::list_models`
+- `.slopctl/config.yml` is committed to the repo alongside `.slopctl/tracker.yml`
+**Tracker format switch (JSON to YAML):**
+
+- Switched FileTracker storage from `.slopctl/tracker.json` (JSON) to `.slopctl/tracker.yml` (YAML) so all slopctl-managed files use a single format (templates YAML, config YAML, tracker YAML)
+- Changed `TRACKER_FILE` constant, `serde_json` calls to `serde_yaml` in `FileTracker::new()` and `save()`
+- Updated `TemplateManager::is_workspace_initialized()` to check for `tracker.yml`
+- No auto-migration: existing workspaces with `tracker.json` need manual conversion
+- Legacy global tracker (`installed_files.json`) migration path remains JSON-based
+- Version bump: 16.1.1 to 17.0.0 (MAJOR - breaking config key rename + scope default change + tracker format change)
+
+**File provenance: `lang` and `agent` fields on tracked files:**
+
+- `FileMetadata.lang` changed from `Option<String>` to `String`; new `FileMetadata.agent: String` field added
+- Sentinel constants `LANG_NONE` ("none") and `AGENT_ALL` ("all") replace `None`/`Some` for language-agnostic and agent-agnostic files respectively
+- New `ResolvedFile` struct carries `source`, `target`, `lang`, `agent` through the template resolution pipeline; `ResolvedFiles.files` changed from `Vec<(PathBuf, PathBuf)>` to `Vec<ResolvedFile>`
+- New `ResolvedContent` struct wraps content + `lang` + `agent` in `build_target_content_map()` return value; merge command's `classify_files()` and both `record_installation` call sites now use per-file provenance instead of blindly stamping `options.lang`
+- `record_installation`, `try_adopt`, `migrate_from_global` signatures updated to accept `lang: String` and `agent: String`
+- `get_installed_language()` now checks `meta.lang != LANG_NONE` instead of `meta.lang.is_some()`
+- `remove --lang` guard updated to compare `meta.lang == lang_name` (String equality) instead of `meta.lang.as_deref() == Some(lang_name)`
+- Fixed `.slopctl/tracker.yml`: corrected `lang` on language-agnostic skills (`git-workflow`, `semantic-versioning` → `lang: none`), replaced `lang: null` with `lang: none`, added `agent` field to all entries
+- `validate_no_duplicate_targets`, `show_dry_run_files`, `copy_files_with_tracking`, `install_skills`, `collect_local_skill_files` updated to work with `ResolvedFile`
+
+### 2026-04-25 (v16.1.1, config CLI option rename)
+
+- Renamed `--add` (`-a`) to `--set` (`-s`) and `--remove` (`-r`) to `--delete` (`-d`) on the `config` subcommand for clearer semantics
+- Updated `handle_config` parameters and dispatch destructuring in `src/main.rs` to match the new field names
+- Updated inline help text, the empty-config hint, and the post-delete success message
+- Updated the LLM provider hint in `src/template_manager/merge.rs` to reference `config --set merge.provider`
+- Updated README.md config command section: usage, options table, and all examples
+- No behavior changes beyond the option names; follows the same precedent as v13.2.1 (`--unset` to `--remove`)
+- Version bump: 16.1.0 to 16.1.1 (PATCH - CLI option rename, matches v13.2.1 precedent)
+
 ### 2026-04-25 (v16.1.0, merge --verbose chat tracing)
 
 - Extended `merge --verbose` to dump the full LLM conversation per file in addition to the existing token usage and unchanged-file reporting
@@ -831,7 +882,7 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 
 ### 2026-04-19 (v16.0.0, workspace-local file tracker)
 
-- **BREAKING**: FileTracker storage moved from global `installed_files.json` to workspace-local `.slopctl/tracker.json`
+- **BREAKING**: FileTracker storage moved from global `installed_files.json` to workspace-local `.slopctl/tracker.yml`
 - FileTracker now takes a workspace path instead of global data dir; all paths stored as relative to workspace root
 - Removed `workspace` field from `FileMetadata` (no longer needed since tracker is workspace-scoped)
 - Removed `is_template_updated` method (unused)
