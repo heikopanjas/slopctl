@@ -1,4 +1,3 @@
-
 # Project Instructions for AI Coding Agents
 
 **Last updated:** 2026-04-25 (v17.0.0)
@@ -353,7 +352,7 @@ Load the `rust-build-commands` skill when building or running the project.
 - Use project-specific rustfmt configuration for consistency
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability
-  - `brace_style = "AlwaysNextLine"` - Opening braces on new lines
+  - `brace_style = "AlwaysNextLine"` - Opening braces on new line
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
@@ -713,7 +712,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 **Character Limits:**
 
 - **Subject line**: Maximum 50 characters (strict limit)
-- **Body lines**: Wrap at 72 characters per line
+- **Body lines**: Wrap at 72 characters maximum
 - **Total message**: Keep under 500 characters total
 - **Blank line**: Always add blank line between subject and body
 

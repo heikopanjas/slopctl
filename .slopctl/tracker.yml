@@ -1,49 +1,77 @@
+.cursor/commands/init-session.md:
+  original_sha: 21f4305fa05b0a465480784c61b7236343f613cd364236c3e9ca23e81d57ea53
+  template_version: 0
+  installed_date: 2026-04-19T16:05:42.374553+00:00
+  lang: none
+  agent: cursor
+  category: command
+.claude/skills/git-workflow/SKILL.md:
+  original_sha: f664bd947eb5b5c0f71d56a2d32393a4b24827c0c4b12bc0dd470eff7227d2b3
+  template_version: 5
+  installed_date: 2026-04-25T11:08:16.961870+00:00
+  lang: none
+  agent: all
+  category: skill
 .agents/skills/git-workflow/SKILL.md:
   original_sha: f664bd947eb5b5c0f71d56a2d32393a4b24827c0c4b12bc0dd470eff7227d2b3
   template_version: 5
-  installed_date: '2026-04-19T16:32:13.652681+00:00'
+  installed_date: 2026-04-19T16:32:13.652681+00:00
+  lang: none
+  agent: all
+  category: skill
+.agents/skills/semantic-versioning/SKILL.md:
+  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
+  template_version: 5
+  installed_date: 2026-04-19T16:32:13.653446+00:00
+  lang: none
+  agent: all
+  category: skill
+AGENTS.md:
+  original_sha: 4cbf643d41e27a41a048fc4ef5965df97e973f33c970f73a057c38ea866f68ef
+  template_version: 5
+  installed_date: 2026-04-25T11:09:20.981132+00:00
+  lang: none
+  agent: all
+  category: main
+.agents/skills/rust-coding-conventions/SKILL.md:
+  original_sha: 8ee985725d7288f8dd471c2975352b2e5e687e0d95a655f2a01a01a60283e2d2
+  template_version: 5
+  installed_date: 2026-04-19T16:32:13.653246+00:00
+  lang: rust
+  agent: all
+  category: skill
+.claude/commands/init-session.md:
+  original_sha: 4cabd84a1befddd96da29dd88a672976db8ad0078aaf3004eb531eb1ebbb4c03
+  template_version: 5
+  installed_date: 2026-04-25T11:08:16.961623+00:00
+  lang: none
+  agent: claude
+  category: agent
+CLAUDE.md:
+  original_sha: e63af7a5c3d4f5725dc90737c339b302c77eaddeeaa0c791a2b0947f41d69083
+  template_version: 5
+  installed_date: 2026-04-25T11:09:20.982472+00:00
+  lang: none
+  agent: claude
+  category: language
+.rustfmt.toml:
+  original_sha: e869010a8aecbf4eea29e7a4ee95d5e0f76865913be29497d106e4a33f168c34
+  template_version: 5
+  installed_date: 2026-04-19T16:32:20.909095+00:00
+  lang: rust
+  agent: all
+  category: language
+.claude/skills/semantic-versioning/SKILL.md:
+  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
+  template_version: 5
+  installed_date: 2026-04-25T11:08:16.962064+00:00
   lang: none
   agent: all
   category: skill
 .agents/skills/rust-build-commands/SKILL.md:
   original_sha: dea7d809af33ef34c5700736fda29b58f31d564266646ffda85d4f3d24c748d5
   template_version: 5
-  installed_date: '2026-04-19T16:32:13.652913+00:00'
+  installed_date: 2026-04-19T16:32:13.652913+00:00
   lang: rust
   agent: all
   category: skill
-.agents/skills/rust-coding-conventions/SKILL.md:
-  original_sha: 8ee985725d7288f8dd471c2975352b2e5e687e0d95a655f2a01a01a60283e2d2
-  template_version: 5
-  installed_date: '2026-04-19T16:32:13.653246+00:00'
-  lang: rust
-  agent: all
-  category: skill
-.agents/skills/semantic-versioning/SKILL.md:
-  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
-  template_version: 5
-  installed_date: '2026-04-19T16:32:13.653446+00:00'
-  lang: none
-  agent: all
-  category: skill
-.cursor/commands/init-session.md:
-  original_sha: 21f4305fa05b0a465480784c61b7236343f613cd364236c3e9ca23e81d57ea53
-  template_version: 0
-  installed_date: '2026-04-19T16:05:42.374553+00:00'
-  lang: none
-  agent: cursor
-  category: command
-.rustfmt.toml:
-  original_sha: e869010a8aecbf4eea29e7a4ee95d5e0f76865913be29497d106e4a33f168c34
-  template_version: 5
-  installed_date: '2026-04-19T16:32:20.909095+00:00'
-  lang: rust
-  agent: all
-  category: language
-AGENTS.md:
-  original_sha: e0bcaeaf6bf59f7addd74c98768f395e49e641807ed6b2bf388962a98a810279
-  template_version: 5
-  installed_date: '2026-04-19T16:34:37.060223+00:00'
-  lang: rust
-  agent: all
-  category: main
