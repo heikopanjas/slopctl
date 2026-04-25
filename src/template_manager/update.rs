@@ -47,13 +47,16 @@ impl TemplateManager
             Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
         );
 
+        let workspace = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&workspace);
+
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
 
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V5: slopctl config source.url https://github.com/heikopanjas/slopctl/tree/develop/templates/v5"
+                "V1 templates are no longer supported. Migrate to V5: slopctl config --set templates.uri https://github.com/heikopanjas/slopctl/tree/develop/templates/v5"
             )),
             | 2..=5 =>
             {

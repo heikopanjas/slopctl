@@ -4,7 +4,7 @@ use clap::Parser;
 use clap_complete::generate;
 use owo_colors::OwoColorize;
 use slopctl::{
-    Config, MergeOptions, Result, TemplateManager, UpdateOptions,
+    Config, EffectiveConfig, MergeOptions, Result, TemplateManager, UpdateOptions,
     cli::{Cli, Commands}
 };
 
@@ -14,16 +14,15 @@ const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/de
 /// Resolves template source URL from CLI argument, config, or default
 ///
 /// Returns (source_url, is_configured, fallback_url).
-/// Priority: CLI `from` argument > config `source.url` > default URL.
+/// Priority: CLI `from` argument > effective config `templates.uri` > default URL.
 ///
-/// # Arguments
-///
-/// * `from` - Optional CLI-provided source URL
+/// The effective config merges workspace + global with per-key precedence.
 fn resolve_source(from: Option<String>) -> (String, bool, Option<String>)
 {
-    let config = Config::load().ok();
-    let configured_source = config.as_ref().and_then(|c| c.get("source.url"));
-    let fallback_source = config.as_ref().and_then(|c| c.get("source.fallback"));
+    let cwd = std::env::current_dir().ok();
+    let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
+    let configured_source = effective.as_ref().and_then(|c| c.get("templates.uri"));
+    let fallback_source = effective.as_ref().and_then(|c| c.get("templates.fallbackUri"));
 
     let (source, is_configured) = if let Some(from_url) = from
     {
@@ -103,62 +102,153 @@ fn resolve_mission_content(value: &str) -> Result<String>
 }
 
 /// Handle config command operations
-fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Option<String>) -> Result<()>
+///
+/// Without `--global`, writes target the workspace config (`.slopctl/config.yml`)
+/// and reads show the merged effective view (workspace wins over global).
+/// With `--global`, all operations target the global config only.
+fn handle_config(key: Option<String>, set: Vec<String>, list: bool, delete: Option<String>, global: bool) -> Result<()>
 {
-    // Handle --list flag
+    let cwd = std::env::current_dir()?;
+
     if list == true
     {
-        let config = Config::load()?;
-        let values = config.list();
-
-        if values.is_empty() == true
+        if global == true
         {
-            println!("{} No configuration values set", "→".blue());
-            println!("{} Use 'slopctl config --add <key> <value>' to set a value", "→".blue());
-            println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
+            let config = Config::load_global()?;
+            let values = config.list();
+
+            if values.is_empty() == true
+            {
+                println!("{} No global configuration values set", "→".blue());
+                println!("{} Use 'slopctl config --global --set <key> <value>' to set a value", "→".blue());
+                println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
+            }
+            else
+            {
+                println!("{}", "Global configuration:".bold());
+                for (k, v) in &values
+                {
+                    println!("  {} = {}", k.green(), v.yellow());
+                }
+            }
         }
         else
         {
-            println!("{}", "Configuration:".bold());
-            for (k, v) in &values
+            let effective = EffectiveConfig::load(&cwd)?;
+            let values = effective.list_with_origin();
+
+            if values.is_empty() == true
             {
-                println!("  {} = {}", k.green(), v.yellow());
+                println!("{} No configuration values set", "→".blue());
+                println!("{} Use 'slopctl config --set <key> <value>' to set a workspace value", "→".blue());
+                println!("{} Use 'slopctl config --global --set <key> <value>' to set a global value", "→".blue());
+                println!("{} Valid keys: {}", "→".blue(), Config::valid_keys().join(", ").yellow());
+            }
+            else
+            {
+                println!("{}", "Configuration:".bold());
+                for (k, (v, scope)) in &values
+                {
+                    println!("  {} = {} {}", k.green(), v.yellow(), format!("[{}]", scope).dimmed());
+                }
             }
         }
         return Ok(());
     }
 
-    // Handle --add flag
-    if add.len() == 2
+    if set.len() == 2
     {
-        let mut config = Config::load()?;
-        config.set(&add[0], &add[1])?;
-        config.save()?;
-        println!("{} Set {} = {}", "✓".green(), add[0].yellow(), add[1].green());
-        return Ok(());
-    }
-
-    // Handle --remove flag
-    if let Some(remove_key) = remove
-    {
-        let mut config = Config::load()?;
-        config.unset(&remove_key)?;
-        config.save()?;
-        println!("{} Removed {}", "✓".green(), remove_key.yellow());
-        return Ok(());
-    }
-
-    // Handle get by key
-    if let Some(k) = key
-    {
-        let config = Config::load()?;
-        if let Some(v) = config.get(&k)
+        if global == true
         {
-            println!("{}", v);
+            let mut config = Config::load_global()?;
+            config.set(&set[0], &set[1])?;
+            config.save_global()?;
+            println!("{} Set {} = {} {}", "✓".green(), set[0].yellow(), set[1].green(), "[global]".dimmed());
         }
         else
         {
-            println!("{} Key '{}' is not set", "→".blue(), k.yellow());
+            let mut config = Config::load_workspace(&cwd)?;
+            config.set(&set[0], &set[1])?;
+            config.save_workspace(&cwd)?;
+            println!("{} Set {} = {} {}", "✓".green(), set[0].yellow(), set[1].green(), "[workspace]".dimmed());
+        }
+        return Ok(());
+    }
+
+    if let Some(delete_key) = delete
+    {
+        if global == true
+        {
+            let mut config = Config::load_global()?;
+            if config.get(&delete_key).is_none() == true
+            {
+                let ws = Config::load_workspace(&cwd)?;
+                if ws.get(&delete_key).is_some() == true
+                {
+                    println!("{} Key '{}' is not set in global config; it exists in workspace config — try without --global", "→".blue(), delete_key.yellow());
+                }
+                else
+                {
+                    println!("{} Key '{}' is not set in global config", "→".blue(), delete_key.yellow());
+                }
+            }
+            else
+            {
+                config.unset(&delete_key)?;
+                config.save_global()?;
+                println!("{} Deleted {} {}", "✓".green(), delete_key.yellow(), "[global]".dimmed());
+            }
+        }
+        else
+        {
+            let mut config = Config::load_workspace(&cwd)?;
+            if config.get(&delete_key).is_none() == true
+            {
+                let gl = Config::load_global()?;
+                if gl.get(&delete_key).is_some() == true
+                {
+                    println!("{} Key '{}' is not set in workspace config; it exists in global config — try --global", "→".blue(), delete_key.yellow());
+                }
+                else
+                {
+                    println!("{} Key '{}' is not set in workspace config", "→".blue(), delete_key.yellow());
+                }
+            }
+            else
+            {
+                config.unset(&delete_key)?;
+                config.save_workspace(&cwd)?;
+                println!("{} Deleted {} {}", "✓".green(), delete_key.yellow(), "[workspace]".dimmed());
+            }
+        }
+        return Ok(());
+    }
+
+    if let Some(k) = key
+    {
+        if global == true
+        {
+            let config = Config::load_global()?;
+            if let Some(v) = config.get(&k)
+            {
+                println!("{}", v);
+            }
+            else
+            {
+                println!("{} Key '{}' is not set in global config", "→".blue(), k.yellow());
+            }
+        }
+        else
+        {
+            let effective = EffectiveConfig::load(&cwd)?;
+            if let Some(v) = effective.get(&k)
+            {
+                println!("{}", v);
+            }
+            else
+            {
+                println!("{} Key '{}' is not set", "→".blue(), k.yellow());
+            }
         }
         return Ok(());
     }
@@ -167,10 +257,19 @@ fn handle_config(key: Option<String>, add: Vec<String>, list: bool, remove: Opti
     println!("{}", "slopctl config".bold());
     println!();
     println!("Usage:");
-    println!("  slopctl config --add <key> <value>  Set a configuration value");
-    println!("  slopctl config <key>                Get a configuration value");
-    println!("  slopctl config --list               List all configuration values");
-    println!("  slopctl config --remove <key>       Remove a configuration value");
+    println!("  slopctl config --set <key> <value>    Set a workspace configuration value");
+    println!("  slopctl config --global --set <k> <v> Set a global configuration value");
+    println!("  slopctl config <key>                  Get effective value (workspace > global)");
+    println!("  slopctl config --list                 List effective configuration");
+    println!("  slopctl config --global --list        List global configuration only");
+    println!("  slopctl config --delete <key>         Delete from workspace configuration");
+    println!("  slopctl config --global --delete <k>  Delete from global configuration");
+    println!();
+    println!("Workspace config: {}", Config::get_workspace_path(&cwd).display().to_string().yellow());
+    if let Ok(gp) = Config::get_global_path()
+    {
+        println!("Global config:    {}", gp.display().to_string().yellow());
+    }
     println!();
     println!("Valid keys:");
     for key in Config::valid_keys()
@@ -401,7 +500,7 @@ fn main()
         }
         | Commands::Doctor { fix, dry_run, verbose, smart } => manager.doctor(fix, dry_run, verbose, smart),
         | Commands::Status { verbose } => manager.status(verbose),
-        | Commands::Config { key, add, list, remove } => handle_config(key, add, list, remove)
+        | Commands::Config { key, set, list, delete, global } => handle_config(key, set, list, delete, global)
     };
 
     if let Err(e) = result

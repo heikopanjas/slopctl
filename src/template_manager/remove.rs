@@ -38,6 +38,7 @@ impl TemplateManager
     pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, skills: &[String], force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&current_dir);
         let config_file = self.config_dir.join("templates.yml");
         let has_agent_target = agent.is_some();
         let has_lang_target = lang.is_some();
@@ -53,7 +54,7 @@ impl TemplateManager
         // agent/template entry was removed after installation.
         if has_agent_target == true || remove_all == true
         {
-            let file_tracker = FileTracker::new(&self.config_dir)?;
+            let file_tracker = FileTracker::new(&current_dir)?;
 
             let bom = if config_file.exists() == true
             {
@@ -83,7 +84,7 @@ impl TemplateManager
                 if found_in_bom == false
                 {
                     println!("{} Agent '{}' not in templates.yml, using installation records", "→".blue(), agent_name.yellow());
-                    let agent_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "agent");
+                    let agent_entries = file_tracker.get_entries_by_category("agent");
                     for (path, _) in agent_entries
                     {
                         if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true
@@ -125,12 +126,13 @@ impl TemplateManager
 
                 // Supplement with tracked skill files that belong to this agent
                 // (covers paths outside the standard skill directory tree)
-                let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
-                for (path, _) in skill_entries
+                let skill_entries = file_tracker.get_entries_by_category("skill");
+                for (rel_path, _) in skill_entries
                 {
-                    if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true && files_to_remove.contains(&path) == false
+                    let abs_path = current_dir.join(&rel_path);
+                    if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, agent_name) == true && files_to_remove.contains(&abs_path) == false
                     {
-                        files_to_remove.push(path);
+                        files_to_remove.push(abs_path);
                     }
                 }
 
@@ -153,12 +155,13 @@ impl TemplateManager
                 }
 
                 // Supplement with tracked agent files not already collected from BoM
-                let agent_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "agent");
-                for (path, _) in agent_entries
+                let agent_entries = file_tracker.get_entries_by_category("agent");
+                for (rel_path, _) in agent_entries
                 {
-                    if path.exists() == true && files_to_remove.contains(&path) == false
+                    let abs_path = current_dir.join(&rel_path);
+                    if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                     {
-                        files_to_remove.push(path);
+                        files_to_remove.push(abs_path);
                     }
                 }
 
@@ -191,12 +194,13 @@ impl TemplateManager
                 }
 
                 // Supplement with tracked skill files not already collected from filesystem
-                let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
-                for (path, _) in skill_entries
+                let skill_entries = file_tracker.get_entries_by_category("skill");
+                for (rel_path, _) in skill_entries
                 {
-                    if path.exists() == true && files_to_remove.contains(&path) == false
+                    let abs_path = current_dir.join(&rel_path);
+                    if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                     {
-                        files_to_remove.push(path);
+                        files_to_remove.push(abs_path);
                     }
                 }
 
@@ -239,17 +243,18 @@ impl TemplateManager
             if found_in_config == false
             {
                 println!("{} Language '{}' not in templates.yml, using installation records", "→".blue(), lang_name.yellow());
-                let file_tracker = FileTracker::new(&self.config_dir)?;
-                let all_entries = file_tracker.get_workspace_entries(&current_dir);
-                for (path, meta) in all_entries
+                let file_tracker = FileTracker::new(&current_dir)?;
+                let all_entries = file_tracker.get_entries();
+                for (rel_path, meta) in all_entries
                 {
-                    if meta.lang.as_deref() == Some(lang_name) &&
+                    let abs_path = current_dir.join(&rel_path);
+                    if meta.lang == lang_name &&
                         meta.category != "main" &&
                         meta.category != "skill" &&
-                        path.exists() == true &&
-                        files_to_remove.contains(&path) == false
+                        abs_path.exists() == true &&
+                        files_to_remove.contains(&abs_path) == false
                     {
-                        files_to_remove.push(path);
+                        files_to_remove.push(abs_path);
                     }
                 }
             }
@@ -263,8 +268,8 @@ impl TemplateManager
             let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
             let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
 
-            let file_tracker = FileTracker::new(&self.config_dir)?;
-            let skill_entries = file_tracker.get_workspace_entries_by_category(&current_dir, "skill");
+            let file_tracker = FileTracker::new(&current_dir)?;
+            let skill_entries = file_tracker.get_entries_by_category("skill");
 
             for skill_name in skills
             {
@@ -291,18 +296,19 @@ impl TemplateManager
 
                 // Also sweep FileTracker for any tracked paths outside the standard dirs.
                 // Collect stale entries (tracked but missing on disk) for silent tracker cleanup.
-                for (path, _) in &skill_entries
+                for (rel_path, _) in &skill_entries
                 {
-                    if Self::extract_skill_name_from_path(path).as_deref() == Some(skill_name.as_str())
+                    if Self::extract_skill_name_from_path(rel_path).as_deref() == Some(skill_name.as_str())
                     {
-                        if path.exists() == true && files_to_remove.contains(path) == false
+                        let abs_path = current_dir.join(rel_path);
+                        if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                         {
-                            files_to_remove.push(path.clone());
+                            files_to_remove.push(abs_path);
                             found = true;
                         }
-                        else if path.exists() == false && stale_tracker_paths.contains(path) == false
+                        else if abs_path.exists() == false && stale_tracker_paths.contains(&abs_path) == false
                         {
-                            stale_tracker_paths.push(path.clone());
+                            stale_tracker_paths.push(abs_path);
                             found = true;
                         }
                     }
@@ -330,7 +336,7 @@ impl TemplateManager
         {
             if stale_tracker_paths.is_empty() == false && dry_run == false
             {
-                let mut file_tracker = FileTracker::new(&self.config_dir)?;
+                let mut file_tracker = FileTracker::new(&current_dir)?;
                 for path in &stale_tracker_paths
                 {
                     file_tracker.remove_entry(path);
@@ -368,7 +374,7 @@ impl TemplateManager
             return Ok(());
         }
 
-        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&current_dir)?;
 
         let mut removed_count = 0;
         for file in &files_to_remove
@@ -420,7 +426,11 @@ mod tests
     use std::{fs, path::PathBuf};
 
     use super::TemplateManager;
-    use crate::{bom::BillOfMaterials, file_tracker::FileTracker, template_manager::CWD_LOCK};
+    use crate::{
+        bom::BillOfMaterials,
+        file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
+        template_manager::CWD_LOCK
+    };
 
     #[test]
     fn test_path_belongs_to_cursor()
@@ -501,8 +511,8 @@ mod tests
         let agent_file = workspace.path().join(".cursorrules");
         fs::write(&agent_file, "test")?;
 
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -531,8 +541,8 @@ mod tests
         let lang_file = workspace.path().join(".rustfmt.toml");
         fs::write(&lang_file, "max_width = 100")?;
 
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into(), workspace.path());
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -564,10 +574,10 @@ mod tests
         fs::write(&main_file, "# Agents")?;
         fs::write(&skill_file, "# Skill")?;
 
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, Some("rust".into()), "language".into(), workspace.path());
-        tracker.record_installation(&main_file, "sha2".into(), 5, Some("rust".into()), "main".into(), workspace.path());
-        tracker.record_installation(&skill_file, "sha3".into(), 5, Some("rust".into()), "skill".into(), workspace.path());
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&main_file, "sha2".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&skill_file, "sha3".into(), 5, "rust".into(), AGENT_ALL.into(), "skill".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -655,8 +665,8 @@ mod tests
         fs::write(&codex_file, "Read AGENTS.md")?;
 
         // Track the codex instruction file so remove has something to find
-        let mut tracker = FileTracker::new(data_dir.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into(), workspace.path());
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;

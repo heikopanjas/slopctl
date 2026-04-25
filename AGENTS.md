@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-19 (v15.4.4)
+**Last updated:** 2026-04-25 (v17.0.1)
 
 <!-- {mission} -->
 
@@ -13,7 +13,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
-- **Serialization:** serde + serde_yaml for templates.yml, serde_json for file tracker
+- **Serialization:** serde + serde_yaml for templates.yml and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
@@ -33,7 +33,7 @@ confirmed your understanding.
 - Avoid making assumptions. If you need additional context to accurately answer the user, ask the user for the missing information. Be specific about which context you need.
 - Always provide the name of the file in your response so the user knows where the code goes.
 - Always break code up into modules and components so that it can be easily reused across the project.
-- All code you write MUST be fully optimized. ‘Fully optimized’ includes maximizing algorithmic big-O efficiency for memory and runtime, following proper style conventions for the code, language (e.g. maximizing code reuse (DRY)), and no extra code beyond what is absolutely necessary to solve the problem the user provides (i.e. no technical debt). If the code is not fully optimized, you will be fined $100.
+- All code you write MUST be fully optimized. 'Fully optimized' includes maximizing algorithmic big-O efficiency for memory and runtime, following proper style conventions for the code, language (e.g. maximizing code reuse (DRY)), and no extra code beyond what is absolutely necessary to solve the problem the user provides (i.e. no technical debt). If the code is not fully optimized, you will be fined $100.
 
 ### Working Together
 
@@ -116,7 +116,12 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 
 <!-- {languages} -->
 
-## Rust Coding Conventions
+## Rust Coding Standards
+
+Load the `rust-coding-conventions` skill before writing, reviewing, or refactoring Rust code.
+Load the `rust-build-commands` skill when building or running the project.
+
+### Rust Coding Conventions
 
 **General Principles:**
 
@@ -347,7 +352,7 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Use project-specific rustfmt configuration for consistency
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability
-  - `brace_style = "AlwaysNextLine"` - Opening braces on new lines
+  - `brace_style = "AlwaysNextLine"` - Opening braces on new line
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
@@ -632,16 +637,61 @@ cargo audit
 
 <!-- {integration} -->
 
+## Semantic Versioning Protocol
+
+**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
+
+Automatically bump the project version after every code change and include it in the same commit. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules.
+
+The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
+
+### Version Format: MAJOR.MINOR.PATCH
+
+**When to increment:**
+
+1. **PATCH version** (X.Y.Z → X.Y.Z+1)
+   - Bug fixes and minor corrections
+   - Performance improvements without API changes
+   - Documentation updates
+   - Internal refactoring that doesn't affect public API
+   - Example: `1.0.0` → `1.0.1`
+
+2. **MINOR version** (X.Y.Z → X.Y+1.0)
+   - New features added
+   - New CLI commands or options
+   - New functionality that maintains backward compatibility
+   - Example: `1.0.1` → `1.1.0`
+
+3. **MAJOR version** (X.Y.Z → X+1.0.0)
+   - Breaking changes to public API
+   - Removal of features or commands
+   - Changes that require user action or code updates
+   - Incompatible CLI changes
+   - Example: `1.1.0` → `2.0.0`
+
+### Process
+
+After making ANY code changes:
+
+1. Determine the type of change (fix, feature, or breaking change)
+2. Update the version in `Cargo.toml` accordingly
+3. Include the version change in the same commit as the code change
+4. Mention version bump in commit message footer if significant
+5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
+
+**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
+
 ## Commit Protocol (CRITICAL)
 
-- **NEVER commit automatically** - always wait for explicit confirmation
+- **NEVER commit automatically** — always wait for explicit user confirmation
+- Stage changes, write a conventional commits message (max 50-char subject, 72-char body lines), then commit
+- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 Whenever asked to commit changes:
 
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
 - Commit the changes
-- Load the `git-workflow` skill for the full message format, character limits, and examples before committing
 
 This is **CRITICAL**!
 
@@ -662,7 +712,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 **Character Limits:**
 
 - **Subject line**: Maximum 50 characters (strict limit)
-- **Body lines**: Wrap at 72 characters per line
+- **Body lines**: Wrap at 72 characters maximum
 - **Total message**: Keep under 500 characters total
 - **Blank line**: Always add blank line between subject and body
 
@@ -763,53 +813,96 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 - Repository uses `.gitattributes` to enforce LF for Rust source files (`*.rs`)
 - Be aware of CRLF vs LF differences when comparing file content or hashes
 
-## Semantic Versioning Protocol
-
-**AUTOMATICALLY track version changes using semantic versioning (SemVer) in Cargo.toml.**
-
-The current version is defined in `Cargo.toml` under `[package]` section as `version = "X.Y.Z"`.
-
-### Version Format: MAJOR.MINOR.PATCH
-
-**When to increment:**
-
-1. **PATCH version** (X.Y.Z → X.Y.Z+1)
-   - Bug fixes and minor corrections
-   - Performance improvements without API changes
-   - Documentation updates
-   - Internal refactoring that doesn't affect public API
-   - Example: `1.0.0` → `1.0.1`
-
-2. **MINOR version** (X.Y.Z → X.Y+1.0)
-   - New features added
-   - New CLI commands or options
-   - New functionality that maintains backward compatibility
-   - Example: `1.0.1` → `1.1.0`
-
-3. **MAJOR version** (X.Y.Z → X+1.0.0)
-   - Breaking changes to public API
-   - Removal of features or commands
-   - Changes that require user action or code updates
-   - Incompatible CLI changes
-   - Example: `1.1.0` → `2.0.0`
-
-### Process
-
-After making ANY code changes:
-
-1. Determine the type of change (fix, feature, or breaking change)
-2. Update the version in `Cargo.toml` accordingly
-3. Include the version change in the same commit as the code change
-4. Mention version bump in commit message footer if significant
-5. Load the `semantic-versioning` skill for the full PATCH/MINOR/MAJOR decision rules
-
-**Note:** Version changes should be included in the commit with the actual code changes, not as a separate commit.
-
----
-
-<!-- {changelog} -->
+---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-25 (v17.0.1, fix CI flaky test + shared ENV_LOCK)
+
+- Fixed `test_resolve_provider_auto_detects_from_env` failing in CI when the runner has API keys or a global config with `merge.provider` set
+- Root cause: the test relied on the host environment (ambient env vars and config files) to predict expected outcome, violating test isolation
+- Replaced with two fully deterministic tests that control their own environment:
+  - `test_resolve_provider_no_env_no_config_returns_error`: CWD to temp dir + clear all API key env vars, asserts `Err` with "No LLM provider" message
+  - `test_resolve_provider_detects_openai_from_env`: CWD to temp dir + set `OPENAI_API_KEY`, asserts `Ok` with provider "openai"
+- Both tests acquire `CWD_LOCK` then `ENV_LOCK` (consistent order to prevent deadlocks), save/restore all process-global state
+- Promoted `ENV_LOCK` from `llm.rs` test-local static to shared `pub(crate) static ENV_LOCK` in `lib.rs`; all env-var-manipulating tests now use the same lock across modules
+- Updated 4 tests in `llm.rs` to use `crate::ENV_LOCK` instead of the removed local static
+- Version bump: 17.0.0 to 17.0.1 (PATCH - test fix)
+
+### 2026-04-25 (v17.0.0, config overhaul: key renames + workspace-scoped config)
+
+**Config key renames:**
+
+- **BREAKING**: renamed config keys `source.url` and `source.fallback` to `templates.uri` and `templates.fallbackUri`
+- Established convention: all configuration keys follow `<command>.<parameter>`, aligning the prefix with the subcommand that consumes it (`templates.uri` is consumed by `templates`, `merge.provider` by `merge`)
+- Chose `uri` (not `url`) and `fallbackUri` because both values can be either a remote URL (`https://...`) or a local filesystem path (`/path/to/templates`); `URI` is the umbrella term that covers both
+- Renamed `Config.source` field to `Config.templates` and `SourceConfig` struct to `TemplatesConfig` in `src/config.rs`; renamed `TemplatesConfig.url` -> `uri` and `TemplatesConfig.fallback` -> `fallback_uri` (with `#[serde(rename = "fallbackUri")]` so the on-disk YAML key matches the CLI key exactly)
+- No automatic migration: existing `~/.config/slopctl/config.yml` files with a `source:` stanza are silently ignored on load (serde drops unknown fields). Users with a configured `source.url` must re-set it with `slopctl config --set templates.uri <value>`
+
+**Workspace-scoped config:**
+
+- **BREAKING**: `slopctl config` now defaults to the **workspace** config (`.slopctl/config.yml`) for writes (`--set`, `--delete`). Pass `--global` (`-g`) to target the global config (`~/.config/slopctl/config.yml`)
+- Reads (`<key>` get, `--list`) without `--global` return the effective merged view: for each key, the workspace value wins; if not set there, the global value is used. With `--global`, only the global file is read
+- `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
+- `--delete` prints a cross-scope hint when the key is not found in the targeted scope but exists in the other scope
+- New `ConfigScope` enum and `EffectiveConfig` struct in `src/config.rs`: `EffectiveConfig::load(workspace)` returns both files merged; `get_with_origin` returns the value and its scope; `list_with_origin` returns a deterministic `BTreeMap`
+- `Config::load`/`save` split into `load_global`/`save_global`/`load_workspace`/`save_workspace`; old `load`/`save` kept as compatibility shims delegating to the global variants
+- Switched all consumer call sites to `EffectiveConfig`: `main.rs::resolve_source`, `merge.rs::resolve_provider_and_model`, `merge.rs::list_models`
+- `.slopctl/config.yml` is committed to the repo alongside `.slopctl/tracker.yml`
+**Tracker format switch (JSON to YAML):**
+
+- Switched FileTracker storage from `.slopctl/tracker.json` (JSON) to `.slopctl/tracker.yml` (YAML) so all slopctl-managed files use a single format (templates YAML, config YAML, tracker YAML)
+- Changed `TRACKER_FILE` constant, `serde_json` calls to `serde_yaml` in `FileTracker::new()` and `save()`
+- Updated `TemplateManager::is_workspace_initialized()` to check for `tracker.yml`
+- No auto-migration: existing workspaces with `tracker.json` need manual conversion
+- Legacy global tracker (`installed_files.json`) migration path remains JSON-based
+- Version bump: 16.1.1 to 17.0.0 (MAJOR - breaking config key rename + scope default change + tracker format change)
+
+**File provenance: `lang` and `agent` fields on tracked files:**
+
+- `FileMetadata.lang` changed from `Option<String>` to `String`; new `FileMetadata.agent: String` field added
+- Sentinel constants `LANG_NONE` ("none") and `AGENT_ALL` ("all") replace `None`/`Some` for language-agnostic and agent-agnostic files respectively
+- New `ResolvedFile` struct carries `source`, `target`, `lang`, `agent` through the template resolution pipeline; `ResolvedFiles.files` changed from `Vec<(PathBuf, PathBuf)>` to `Vec<ResolvedFile>`
+- New `ResolvedContent` struct wraps content + `lang` + `agent` in `build_target_content_map()` return value; merge command's `classify_files()` and both `record_installation` call sites now use per-file provenance instead of blindly stamping `options.lang`
+- `record_installation`, `try_adopt`, `migrate_from_global` signatures updated to accept `lang: String` and `agent: String`
+- `get_installed_language()` now checks `meta.lang != LANG_NONE` instead of `meta.lang.is_some()`
+- `remove --lang` guard updated to compare `meta.lang == lang_name` (String equality) instead of `meta.lang.as_deref() == Some(lang_name)`
+- Fixed `.slopctl/tracker.yml`: corrected `lang` on language-agnostic skills (`git-workflow`, `semantic-versioning` → `lang: none`), replaced `lang: null` with `lang: none`, added `agent` field to all entries
+- `validate_no_duplicate_targets`, `show_dry_run_files`, `copy_files_with_tracking`, `install_skills`, `collect_local_skill_files` updated to work with `ResolvedFile`
+
+### 2026-04-25 (v16.1.1, config CLI option rename)
+
+- Renamed `--add` (`-a`) to `--set` (`-s`) and `--remove` (`-r`) to `--delete` (`-d`) on the `config` subcommand for clearer semantics
+- Updated `handle_config` parameters and dispatch destructuring in `src/main.rs` to match the new field names
+- Updated inline help text, the empty-config hint, and the post-delete success message
+- Updated the LLM provider hint in `src/template_manager/merge.rs` to reference `config --set merge.provider`
+- Updated README.md config command section: usage, options table, and all examples
+- No behavior changes beyond the option names; follows the same precedent as v13.2.1 (`--unset` to `--remove`)
+- Version bump: 16.1.0 to 16.1.1 (PATCH - CLI option rename, matches v13.2.1 precedent)
+
+### 2026-04-25 (v16.1.0, merge --verbose chat tracing)
+
+- Extended `merge --verbose` to dump the full LLM conversation per file in addition to the existing token usage and unchanged-file reporting
+- Before each diverged file is sent, prints a "Merging <file>" header followed by an "Outgoing messages" block listing every `ChatMessage` (system + user) tagged by role
+- During streaming, the response body is written to stdout chunk-by-chunk instead of the in-line "Merging X... Ns (chars)" progress line; the per-chunk progress line continues to render in non-verbose mode
+- After the stream ends, prints an "End response" footer to separate the model output from the next status line
+- Added `print_outgoing_messages()` and `print_incoming_footer()` helpers in `src/template_manager/merge.rs`
+- Updated CLI help text in `src/cli.rs` to describe the new behavior
+- No new dependencies; no changes to non-verbose output
+- Version bump: 16.0.0 to 16.1.0 (MINOR - additional verbose behavior, fully backwards compatible)
+
+### 2026-04-19 (v16.0.0, workspace-local file tracker)
+
+- **BREAKING**: FileTracker storage moved from global `installed_files.json` to workspace-local `.slopctl/tracker.yml`
+- FileTracker now takes a workspace path instead of global data dir; all paths stored as relative to workspace root
+- Removed `workspace` field from `FileMetadata` (no longer needed since tracker is workspace-scoped)
+- Removed `is_template_updated` method (unused)
+- Renamed workspace-scoped query methods: `get_workspace_entries` to `get_entries`, `get_workspace_entries_by_category` to `get_entries_by_category`, `get_installed_language_for_workspace` to `get_installed_language`
+- Added auto-migration: on first command in a workspace, entries are extracted from the global tracker, converted to relative paths, and saved locally; migrated entries are pruned from the global file
+- Added adoption of untracked files: after migration, scans workspace for known slopctl-managed files (agent instructions, skills, commands) and adopts any not yet tracked with `template_version: 0`
+- Added `TemplateManager::try_migrate_tracker()` called at all command entry points (update, list, doctor, purge, remove, merge, smart)
+- Added `TemplateManager::slopctl_dir()` and `is_workspace_initialized()` workspace helpers
+- Version bump: 15.4.4 to 16.0.0 (MAJOR - breaking tracker format and storage location)
 
 ### 2026-04-19 (v15.4.4, extract shared CLI module and fix man page generation)
 

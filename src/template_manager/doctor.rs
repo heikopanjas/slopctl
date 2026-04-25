@@ -56,7 +56,8 @@ impl TemplateManager
     pub fn doctor(&self, fix: bool, dry_run: bool, verbose: bool, smart: bool) -> Result<()>
     {
         let workspace = std::env::current_dir()?;
-        let mut tracker = FileTracker::new(&self.config_dir)?;
+        let _ = self.try_migrate_tracker(&workspace);
+        let mut tracker = FileTracker::new(&workspace)?;
 
         let issues = Self::collect_issues(&tracker, &workspace, verbose)?;
 
@@ -297,7 +298,7 @@ impl TemplateManager
     fn collect_issues(tracker: &FileTracker, workspace: &Path, verbose: bool) -> Result<Vec<DoctorIssue>>
     {
         let mut issues: Vec<DoctorIssue> = Vec::new();
-        let entries = tracker.get_workspace_entries(workspace);
+        let entries = tracker.get_entries();
         let has_entries = entries.is_empty() == false;
 
         if verbose == true && has_entries == true
@@ -306,9 +307,10 @@ impl TemplateManager
             println!();
         }
 
-        for (path, metadata) in entries
+        for (rel_path, metadata) in entries
         {
-            let rel = path.strip_prefix(workspace).unwrap_or(&path);
+            let path = workspace.join(&rel_path);
+            let rel = &rel_path;
             match tracker.check_modification(&path)?
             {
                 | FileStatus::Deleted =>
@@ -321,11 +323,21 @@ impl TemplateManager
                 }
                 | FileStatus::Modified =>
                 {
-                    if verbose == true
+                    if metadata.category == "main"
                     {
-                        println!("  {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow());
+                        if verbose == true
+                        {
+                            println!("  {} {} {}", "✓".green(), "OK:      ".green(), rel.display().to_string().dimmed());
+                        }
                     }
-                    issues.push(DoctorIssue { kind: IssueKind::ModifiedFile, path });
+                    else
+                    {
+                        if verbose == true
+                        {
+                            println!("  {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow());
+                        }
+                        issues.push(DoctorIssue { kind: IssueKind::ModifiedFile, path });
+                    }
                 }
                 | FileStatus::Unmodified =>
                 {
@@ -345,7 +357,7 @@ impl TemplateManager
                 }
                 | FileStatus::NotTracked =>
                 {
-                    // Should not occur via get_workspace_entries; ignore defensively
+                    // Should not occur via get_entries; ignore defensively
                 }
             }
         }
@@ -381,6 +393,7 @@ mod tests
     use std::fs;
 
     use super::*;
+    use crate::file_tracker::{AGENT_ALL, LANG_NONE};
 
     fn make_temp_dir() -> tempfile::TempDir
     {
@@ -422,7 +435,6 @@ mod tests
     fn test_collect_issues_empty_tracker()
     {
         let dir = make_temp_dir();
-        // Empty tracker (no installed_files.json) → no issues
         let tracker = FileTracker::new(dir.path()).unwrap();
         let issues = TemplateManager::collect_issues(&tracker, dir.path(), false).unwrap();
         assert!(issues.is_empty() == true);
@@ -433,8 +445,6 @@ mod tests
     {
         let dir = make_temp_dir();
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
-        // Should succeed with no issues when tracker is empty
-        // (doctor uses current_dir, not dir.path(), so we just test it doesn't error)
         let result = manager.doctor(false, false, false, false);
         assert!(result.is_ok() == true);
     }
@@ -443,21 +453,16 @@ mod tests
     fn test_issue_kind_missing_file()
     {
         let dir = make_temp_dir();
-        let data_dir = dir.path().join("data");
-        fs::create_dir_all(&data_dir).unwrap();
-
         let workspace = dir.path().join("workspace");
         fs::create_dir_all(&workspace).unwrap();
 
         let target = workspace.join("AGENTS.md");
 
-        // Create a tracker entry for a file that doesn't exist on disk
-        let mut tracker = FileTracker::new(&data_dir).unwrap();
-        tracker.record_installation(&target, "abc123".to_string(), 4, None, "main".to_string(), &workspace);
+        let mut tracker = FileTracker::new(&workspace).unwrap();
+        tracker.record_installation(&target, "abc123".into(), 4, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         tracker.save().unwrap();
 
-        // Reload and check
-        let tracker2 = FileTracker::new(&data_dir).unwrap();
+        let tracker2 = FileTracker::new(&workspace).unwrap();
         let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
         assert!(issues.len() == 1);
         assert!(matches!(issues[0].kind, IssueKind::MissingFile) == true);
@@ -467,9 +472,6 @@ mod tests
     fn test_issue_kind_unmerged_template()
     {
         let dir = make_temp_dir();
-        let data_dir = dir.path().join("data");
-        fs::create_dir_all(&data_dir).unwrap();
-
         let workspace = dir.path().join("workspace");
         fs::create_dir_all(&workspace).unwrap();
 
@@ -478,11 +480,11 @@ mod tests
         fs::write(&target, &content).unwrap();
 
         let sha = FileTracker::calculate_sha256(&target).unwrap();
-        let mut tracker = FileTracker::new(&data_dir).unwrap();
-        tracker.record_installation(&target, sha, 4, None, "main".to_string(), &workspace);
+        let mut tracker = FileTracker::new(&workspace).unwrap();
+        tracker.record_installation(&target, sha, 4, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         tracker.save().unwrap();
 
-        let tracker2 = FileTracker::new(&data_dir).unwrap();
+        let tracker2 = FileTracker::new(&workspace).unwrap();
         let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
         assert!(issues.len() == 1);
         assert!(matches!(issues[0].kind, IssueKind::UnmergedTemplate) == true);

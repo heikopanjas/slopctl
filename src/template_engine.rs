@@ -16,7 +16,7 @@ use owo_colors::OwoColorize;
 use crate::{
     Result, agent_defaults,
     bom::{self, TemplateConfig},
-    file_tracker::{FileStatus, FileTracker},
+    file_tracker::{AGENT_ALL, FileStatus, FileTracker, LANG_NONE},
     github,
     utils::{FileActionResponse, copy_file_with_mkdir, prompt_file_modification}
 };
@@ -60,6 +60,17 @@ pub struct TemplateContext
     pub template_version: u32
 }
 
+/// A single resolved file with its provenance metadata
+pub struct ResolvedFile
+{
+    pub source: PathBuf,
+    pub target: PathBuf,
+    /// Language name or `LANG_NONE` for language-agnostic files
+    pub lang:   String,
+    /// Agent name or `AGENT_ALL` for agent-agnostic files
+    pub agent:  String
+}
+
 /// All files, fragments, and directories resolved from templates.yml for a given set of options
 ///
 /// Produced by `TemplateEngine::resolve_all_files()` and consumed by both `update()` (init)
@@ -68,10 +79,18 @@ pub struct ResolvedFiles
 {
     /// Main AGENTS.md template context (source, target, fragments, version)
     pub context:     TemplateContext,
-    /// (source, target) file pairs for agent files, language files, integration files, skills
-    pub files:       Vec<(PathBuf, PathBuf)>,
+    /// Resolved file entries with provenance metadata
+    pub files:       Vec<ResolvedFile>,
     /// Directories to create (agent-declared workspace directories)
     pub directories: Vec<PathBuf>
+}
+
+/// A resolved file's content with provenance metadata for the merge command
+pub struct ResolvedContent
+{
+    pub content: String,
+    pub lang:    String,
+    pub agent:   String
 }
 
 /// Result of the file copy operation
@@ -138,18 +157,18 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
 /// # Errors
 ///
 /// Returns an error if two entries share the same target path
-pub fn validate_no_duplicate_targets(files: &[(PathBuf, PathBuf)]) -> Result<()>
+pub fn validate_no_duplicate_targets(files: &[ResolvedFile]) -> Result<()>
 {
     let mut seen_targets: HashMap<&Path, &Path> = HashMap::new();
-    for (source, target) in files
+    for entry in files
     {
-        if let Some(previous_source) = seen_targets.insert(target.as_path(), source.as_path())
+        if let Some(previous_source) = seen_targets.insert(entry.target.as_path(), entry.source.as_path())
         {
             return Err(anyhow::anyhow!(
                 "Duplicate target '{}': '{}' and '{}' both write to the same file",
-                target.display(),
+                entry.target.display(),
                 previous_source.display(),
-                source.display()
+                entry.source.display()
             ));
         }
     }
@@ -325,12 +344,12 @@ impl<'a> TemplateEngine<'a>
         }
         let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
 
-        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
         let mut fragments: Vec<(PathBuf, String)> = Vec::new();
 
         let temp_path = temp_dir.path();
         let mut process_errors: Vec<String> = Vec::new();
-        let mut process_entry = |source: &str, target: &str, category: &str| {
+        let mut process_entry = |source: &str, target: &str, category: &str, lang: &str, agent: &str| {
             let source_path = if github::is_url(source) == true
             {
                 match self.resolve_source_to_path(source, temp_path)
@@ -360,20 +379,20 @@ impl<'a> TemplateEngine<'a>
             else
             {
                 let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
-                files_to_copy.push((source_path, target_path));
+                files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
             }
         };
 
         for entry in &config.principles
         {
-            process_entry(&entry.source, &entry.target, "principles");
+            process_entry(&entry.source, &entry.target, "principles", LANG_NONE, AGENT_ALL);
         }
 
         if options.mission.is_none() == true
         {
             for entry in &config.mission
             {
-                process_entry(&entry.source, &entry.target, "mission");
+                process_entry(&entry.source, &entry.target, "mission", LANG_NONE, AGENT_ALL);
             }
         }
 
@@ -382,7 +401,7 @@ impl<'a> TemplateEngine<'a>
             let resolved_files = bom::resolve_language_files(lang, &config)?;
             for file_entry in &resolved_files
             {
-                process_entry(&file_entry.source, &file_entry.target, "languages");
+                process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
             }
         }
 
@@ -390,7 +409,7 @@ impl<'a> TemplateEngine<'a>
         {
             for file_entry in &integration_config.files
             {
-                process_entry(&file_entry.source, &file_entry.target, "integration");
+                process_entry(&file_entry.source, &file_entry.target, "integration", LANG_NONE, AGENT_ALL);
             }
         }
 
@@ -414,7 +433,7 @@ impl<'a> TemplateEngine<'a>
                 if source_path.exists()
                 {
                     let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                    files_to_copy.push((source_path, target_path));
+                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: LANG_NONE.to_string(), agent: agent_name.to_string() });
                 }
             }
 
@@ -438,7 +457,7 @@ impl<'a> TemplateEngine<'a>
             agent_config.skills.is_empty() == false &&
             let Some(ref dir) = agent_skill_dir
         {
-            self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, &mut files_to_copy)?;
+            self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, LANG_NONE, agent_name, &mut files_to_copy)?;
         }
 
         if let Some(lang) = options.lang
@@ -446,21 +465,28 @@ impl<'a> TemplateEngine<'a>
             let lang_skills = bom::resolve_language_skills(lang, &config)?;
             if lang_skills.is_empty() == false
             {
-                self.install_skills(lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), &cross_client_skill_dir, temp_path, &mut files_to_copy)?;
+                self.install_skills(
+                    lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
+                    &cross_client_skill_dir,
+                    temp_path,
+                    lang,
+                    AGENT_ALL,
+                    &mut files_to_copy
+                )?;
             }
         }
 
         if config.skills.is_empty() == false
         {
             let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
-            self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
+            self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
         }
 
         if options.skills.is_empty() == false
         {
             let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
             let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
-            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, &mut files_to_copy)?;
+            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
         }
 
         validate_no_duplicate_targets(&files_to_copy)?;
@@ -483,21 +509,21 @@ impl<'a> TemplateEngine<'a>
     /// # Errors
     ///
     /// Returns an error if file resolution or reading fails
-    pub fn build_target_content_map(&self, options: &UpdateOptions) -> Result<HashMap<PathBuf, String>>
+    pub fn build_target_content_map(&self, options: &UpdateOptions) -> Result<HashMap<PathBuf, ResolvedContent>>
     {
         let resolved = self.resolve_all_files(options)?;
-        let mut map: HashMap<PathBuf, String> = HashMap::new();
+        let mut map: HashMap<PathBuf, ResolvedContent> = HashMap::new();
 
         let fresh_main = Self::generate_fresh_main(&resolved.context, options)?;
         let main_target = normalize_path(&resolved.context.target);
-        map.insert(main_target, fresh_main);
+        map.insert(main_target, ResolvedContent { content: fresh_main, lang: options.lang.unwrap_or(LANG_NONE).to_string(), agent: AGENT_ALL.to_string() });
 
-        for (source, target) in &resolved.files
+        for entry in &resolved.files
         {
-            if source.exists() == true &&
-                let Ok(content) = fs::read_to_string(source)
+            if entry.source.exists() == true &&
+                let Ok(content) = fs::read_to_string(&entry.source)
             {
-                map.insert(normalize_path(target), content);
+                map.insert(normalize_path(&entry.target), ResolvedContent { content, lang: entry.lang.clone(), agent: entry.agent.clone() });
             }
         }
 
@@ -578,7 +604,7 @@ impl<'a> TemplateEngine<'a>
         let ctx = &resolved.context;
 
         let workspace = std::env::current_dir()?;
-        let mut file_tracker = FileTracker::new(self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
 
         let skip_agents_md = ctx.target.exists() && is_file_customized(&ctx.target)?;
 
@@ -598,7 +624,7 @@ impl<'a> TemplateEngine<'a>
             return Ok(());
         }
 
-        self.handle_main_template(ctx, options, skip_agents_md, &mut file_tracker, &workspace)?;
+        self.handle_main_template(ctx, options, skip_agents_md, &mut file_tracker)?;
 
         for dir_path in &resolved.directories
         {
@@ -606,7 +632,7 @@ impl<'a> TemplateEngine<'a>
             println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
         }
 
-        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options, &workspace)?;
+        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options)?;
 
         match copy_result
         {
@@ -675,7 +701,7 @@ impl<'a> TemplateEngine<'a>
     /// * `options` - Update options containing force and dry_run settings
     /// * `files_to_copy` - List of (source, target) file tuples
     /// * `directories` - List of directory paths
-    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[(PathBuf, PathBuf)], directories: &[PathBuf])
+    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[ResolvedFile], directories: &[PathBuf])
     {
         println!("\n{} Files that would be created/modified:", "→".blue());
 
@@ -692,15 +718,15 @@ impl<'a> TemplateEngine<'a>
             println!("  {} {} (would be created)", "●".green(), ctx.target.display());
         }
 
-        for (_, target) in files_to_copy
+        for entry in files_to_copy
         {
-            if target.exists()
+            if entry.target.exists()
             {
-                println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
+                println!("  {} {} (would be overwritten)", "●".yellow(), entry.target.display());
             }
             else
             {
-                println!("  {} {} (would be created)", "●".green(), target.display());
+                println!("  {} {} (would be created)", "●".green(), entry.target.display());
             }
         }
 
@@ -738,9 +764,7 @@ impl<'a> TemplateEngine<'a>
     /// # Errors
     ///
     /// Returns an error if file operations fail
-    fn handle_main_template(
-        &self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker, workspace: &Path
-    ) -> Result<()>
+    fn handle_main_template(&self, ctx: &TemplateContext, options: &UpdateOptions, skip_agents_md: bool, file_tracker: &mut FileTracker) -> Result<()>
     {
         if skip_agents_md && options.force == false
         {
@@ -765,7 +789,14 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(&ctx.target, sha, ctx.template_version, options.lang.map(|l| l.to_string()), "main".to_string(), workspace);
+        file_tracker.record_installation(
+            &ctx.target,
+            sha,
+            ctx.template_version,
+            options.lang.unwrap_or(LANG_NONE).to_string(),
+            AGENT_ALL.to_string(),
+            "main".to_string()
+        );
 
         Ok(())
     }
@@ -792,15 +823,17 @@ impl<'a> TemplateEngine<'a>
     ///
     /// Returns an error if file operations fail
     fn copy_files_with_tracking(
-        &self, files_to_copy: &[(PathBuf, PathBuf)], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions, workspace: &Path
+        &self, files_to_copy: &[ResolvedFile], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
     ) -> Result<CopyFilesResult>
     {
         println!("{} Copying templates to target directories", "→".blue());
 
         let mut skipped_files = Vec::new();
 
-        for (source, target) in files_to_copy
+        for entry in files_to_copy
         {
+            let source = &entry.source;
+            let target = &entry.target;
             let new_template_sha = FileTracker::calculate_sha256(source)?;
 
             let should_copy = if target.exists() == false || options.force == true
@@ -890,7 +923,7 @@ impl<'a> TemplateEngine<'a>
                     "language"
                 };
 
-                file_tracker.record_installation(target, new_template_sha, template_version, options.lang.map(|l| l.to_string()), category.to_string(), workspace);
+                file_tracker.record_installation(target, new_template_sha, template_version, entry.lang.clone(), entry.agent.clone(), category.to_string());
             }
         }
 
@@ -1026,15 +1059,15 @@ impl<'a> TemplateEngine<'a>
             vec![("cross-client".to_string(), cross_client)]
         };
 
-        let mut file_tracker = FileTracker::new(self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
         let temp_dir = tempfile::TempDir::new()?;
 
-        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
 
         let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
         for (_, skill_dir) in &skill_dirs
         {
-            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_dir.path(), &mut files_to_copy)?;
+            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_dir.path(), LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
         }
 
         validate_no_duplicate_targets(&files_to_copy)?;
@@ -1042,15 +1075,15 @@ impl<'a> TemplateEngine<'a>
         if options.dry_run == true
         {
             println!("\n{} Files that would be created/modified:", "→".blue());
-            for (_, target) in &files_to_copy
+            for entry in &files_to_copy
             {
-                if target.exists() == true
+                if entry.target.exists() == true
                 {
-                    println!("  {} {} (would be overwritten)", "●".yellow(), target.display());
+                    println!("  {} {} (would be overwritten)", "●".yellow(), entry.target.display());
                 }
                 else
                 {
-                    println!("  {} {} (would be created)", "●".green(), target.display());
+                    println!("  {} {} (would be created)", "●".green(), entry.target.display());
                 }
             }
             println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -1059,7 +1092,7 @@ impl<'a> TemplateEngine<'a>
 
         println!("{} Copying skill files", "→".blue());
 
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options, &workspace)?;
+        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
 
         match copy_result
         {
@@ -1105,7 +1138,7 @@ impl<'a> TemplateEngine<'a>
     /// * `skill_base_dir` - Resolved target directory for skills (e.g. `.cursor/skills` or `.agents/skills`)
     /// * `temp_dir` - Temporary directory for GitHub downloads
     /// * `files_to_copy` - Accumulator for (source, target) file pairs
-    fn install_skills<'b, I>(&self, skills: I, skill_base_dir: &Path, temp_dir: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
+    fn install_skills<'b, I>(&self, skills: I, skill_base_dir: &Path, temp_dir: &Path, lang: &str, agent: &str, files_to_copy: &mut Vec<ResolvedFile>) -> Result<()>
     where I: Iterator<Item = (&'b str, &'b str)>
     {
         for (skill_name, source) in skills
@@ -1137,7 +1170,12 @@ impl<'a> TemplateEngine<'a>
                                 {
                                     for (temp_path, rel_path) in downloaded
                                     {
-                                        files_to_copy.push((temp_path, target_base.join(rel_path)));
+                                        files_to_copy.push(ResolvedFile {
+                                            source: temp_path,
+                                            target: target_base.join(rel_path),
+                                            lang:   lang.to_string(),
+                                            agent:  agent.to_string()
+                                        });
                                     }
                                 }
                                 | Err(e) =>
@@ -1177,7 +1215,7 @@ impl<'a> TemplateEngine<'a>
                 {
                     let target_base = skill_base_dir.join(skill_name);
                     println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
-                    Self::collect_local_skill_files(&source_dir, &target_base, files_to_copy)?;
+                    Self::collect_local_skill_files(&source_dir, &target_base, lang, agent, files_to_copy)?;
                 }
                 else if source_dir.is_file() == true
                 {
@@ -1186,7 +1224,7 @@ impl<'a> TemplateEngine<'a>
                     if let Some(target) = target_path
                     {
                         println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
-                        files_to_copy.push((source_dir, target));
+                        files_to_copy.push(ResolvedFile { source: source_dir, target, lang: lang.to_string(), agent: agent.to_string() });
                     }
                 }
                 else
@@ -1200,7 +1238,7 @@ impl<'a> TemplateEngine<'a>
     }
 
     /// Recursively collect all files from a local skill directory
-    pub fn collect_local_skill_files(source_dir: &Path, target_base: &Path, files_to_copy: &mut Vec<(PathBuf, PathBuf)>) -> Result<()>
+    pub fn collect_local_skill_files(source_dir: &Path, target_base: &Path, lang: &str, agent: &str, files_to_copy: &mut Vec<ResolvedFile>) -> Result<()>
     {
         for entry in fs::read_dir(source_dir)?
         {
@@ -1211,13 +1249,13 @@ impl<'a> TemplateEngine<'a>
             {
                 if let Some(dir_name) = path.file_name()
                 {
-                    Self::collect_local_skill_files(&path, &target_base.join(dir_name), files_to_copy)?;
+                    Self::collect_local_skill_files(&path, &target_base.join(dir_name), lang, agent, files_to_copy)?;
                 }
             }
             else if path.is_file() == true &&
                 let Some(filename) = path.file_name()
             {
-                files_to_copy.push((path.clone(), target_base.join(filename)));
+                files_to_copy.push(ResolvedFile { source: path.clone(), target: target_base.join(filename), lang: lang.to_string(), agent: agent.to_string() });
             }
         }
 
@@ -1259,6 +1297,12 @@ mod tests
     use std::{fs, path::PathBuf};
 
     use super::*;
+    use crate::file_tracker::{AGENT_ALL, LANG_NONE};
+
+    fn rf(source: &str, target: &str) -> ResolvedFile
+    {
+        ResolvedFile { source: PathBuf::from(source), target: PathBuf::from(target), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }
+    }
 
     // -- load_template_config --
 
@@ -1676,17 +1720,14 @@ mod tests
     #[test]
     fn test_validate_no_duplicates_unique_targets()
     {
-        let files = vec![(PathBuf::from("a.txt"), PathBuf::from("/workspace/.gitignore")), (PathBuf::from("b.txt"), PathBuf::from("/workspace/.editorconfig"))];
+        let files = vec![rf("a.txt", "/workspace/.gitignore"), rf("b.txt", "/workspace/.editorconfig")];
         assert!(validate_no_duplicate_targets(&files).is_ok() == true);
     }
 
     #[test]
     fn test_validate_duplicate_targets_rejected()
     {
-        let files = vec![
-            (PathBuf::from("lang-gitignore.txt"), PathBuf::from("/workspace/.gitignore")),
-            (PathBuf::from("shared-gitignore.txt"), PathBuf::from("/workspace/.gitignore")),
-        ];
+        let files = vec![rf("lang-gitignore.txt", "/workspace/.gitignore"), rf("shared-gitignore.txt", "/workspace/.gitignore")];
         let err = validate_no_duplicate_targets(&files).unwrap_err();
         assert!(err.to_string().contains("Duplicate target") == true);
         assert!(err.to_string().contains(".gitignore") == true);
@@ -1697,10 +1738,7 @@ mod tests
     #[test]
     fn test_validate_same_source_different_targets()
     {
-        let files = vec![
-            (PathBuf::from("template.ini"), PathBuf::from("/workspace/.editorconfig")),
-            (PathBuf::from("template.ini"), PathBuf::from("/workspace/.other-config")),
-        ];
+        let files = vec![rf("template.ini", "/workspace/.editorconfig"), rf("template.ini", "/workspace/.other-config")];
         assert!(validate_no_duplicate_targets(&files).is_ok() == true);
     }
 
@@ -1787,14 +1825,21 @@ mod tests
 
         let engine = TemplateEngine::new(config_dir.path());
         let skill_base_dir = workspace_dir.path().join(".agents/skills");
-        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
 
         let source_str = skill_source.to_string_lossy().to_string();
-        let skills_input = vec![("test-skill".to_string(), source_str)];
-        engine.install_skills(skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+        let skills_input = [("test-skill".to_string(), source_str)];
+        engine.install_skills(
+            skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+            &skill_base_dir,
+            temp_dir.path(),
+            LANG_NONE,
+            AGENT_ALL,
+            &mut files_to_copy
+        )?;
 
         assert_eq!(files_to_copy.len(), 1);
-        assert_eq!(files_to_copy[0].1, skill_base_dir.join("test-skill/SKILL.md"));
+        assert_eq!(files_to_copy[0].target, skill_base_dir.join("test-skill/SKILL.md"));
         Ok(())
     }
 
@@ -1812,14 +1857,21 @@ mod tests
 
         let engine = TemplateEngine::new(config_dir.path());
         let skill_base_dir = workspace_dir.path().join(".agents/skills");
-        let mut files_to_copy: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
 
         let source_str = skill_source.to_string_lossy().to_string();
-        let skills_input = vec![("my-skill".to_string(), source_str)];
-        engine.install_skills(skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())), &skill_base_dir, temp_dir.path(), &mut files_to_copy)?;
+        let skills_input = [("my-skill".to_string(), source_str)];
+        engine.install_skills(
+            skills_input.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+            &skill_base_dir,
+            temp_dir.path(),
+            LANG_NONE,
+            AGENT_ALL,
+            &mut files_to_copy
+        )?;
 
         assert_eq!(files_to_copy.len(), 2);
-        let targets: Vec<PathBuf> = files_to_copy.iter().map(|(_, t)| t.clone()).collect();
+        let targets: Vec<PathBuf> = files_to_copy.iter().map(|e| e.target.clone()).collect();
         assert!(targets.contains(&skill_base_dir.join("my-skill/SKILL.md")) == true);
         assert!(targets.contains(&skill_base_dir.join("my-skill/scripts/setup.sh")) == true);
         Ok(())

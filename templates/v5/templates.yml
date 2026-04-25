@@ -84,7 +84,7 @@ shared:
 # Language-specific coding standards templates
 languages:
   c:
-    includes: [cmake]
+    includes: [ cmake ]
     files:
       - source: c-skills-hint.md
         target: '$instructions'
@@ -96,7 +96,7 @@ languages:
       - name: c-coding-conventions
         source: 'skills/c-coding-conventions'
   c++:
-    includes: [cmake]
+    includes: [ cmake ]
     files:
       - source: c++-skills-hint.md
         target: '$instructions'
@@ -141,7 +141,7 @@ languages:
         source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
 
   swiftui:
-    includes: [swift]
+    includes: [ swift ]
     skills:
       - name: swiftui-pro
         source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
@@ -184,5 +184,3 @@ skills:
     source: 'skills/git-workflow'
   - name: semantic-versioning
     source: 'skills/semantic-versioning'
-  - name: make-build-commands
-    source: 'skills/make-build-commands'
