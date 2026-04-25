@@ -11,10 +11,10 @@ use owo_colors::OwoColorize;
 
 use super::TemplateManager;
 use crate::{
-    Config, Result,
+    EffectiveConfig, Result,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
-    template_engine::{self, TemplateEngine, UpdateOptions}
+    template_engine::{self, ResolvedContent, TemplateEngine, UpdateOptions}
 };
 
 /// User-supplied overrides that control which templates are considered during merge
@@ -39,7 +39,7 @@ enum FileClass
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, display: String
+        target: PathBuf, content: String, lang: String, agent: String, display: String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -55,6 +55,8 @@ enum FileClass
         template_content: String,
         user_content:     String,
         user_changelog:   Option<String>,
+        lang:             String,
+        agent:            String,
         display:          String
     }
 }
@@ -94,7 +96,7 @@ impl TemplateManager
     {
         let (provider_name, model_name) = if let Some(p) = provider_override
         {
-            let config = Config::load().ok();
+            let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
             let model = config.as_ref().and_then(|c| c.get("merge.model"));
             let provider_enum = Provider::from_name(p)?;
             let effective_model = model.clone().unwrap_or_else(|| provider_enum.default_model().to_string());
@@ -144,7 +146,7 @@ impl TemplateManager
     /// * `options` - User-supplied overrides (lang, agent, mission, skills)
     /// * `dry_run` - If true, shows what would happen without making changes
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
-    /// * `verbose` - If true, prints token usage summary and reports unchanged files
+    /// * `verbose` - If true, prints token usage, reports unchanged files, and dumps the outgoing chat messages plus streams the incoming agent response to stdout
     ///
     /// # Errors
     ///
@@ -159,6 +161,7 @@ impl TemplateManager
         let content_map = engine.build_target_content_map(&update_options)?;
 
         let workspace = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&workspace);
         let classified = classify_files(&content_map, &workspace);
 
         let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
@@ -196,7 +199,7 @@ impl TemplateManager
             None
         };
 
-        let mut file_tracker = FileTracker::new(&self.config_dir)?;
+        let mut file_tracker = FileTracker::new(&workspace)?;
         let template_version = template_engine::load_template_config(&self.config_dir).map(|c| c.version).unwrap_or(0);
 
         let mut total_input: u64 = 0;
@@ -207,7 +210,7 @@ impl TemplateManager
         {
             match entry
             {
-                | FileClass::New { target, content, display } =>
+                | FileClass::New { target, content, lang, agent, display } =>
                 {
                     if dry_run == true
                     {
@@ -224,7 +227,7 @@ impl TemplateManager
 
                         let sha = FileTracker::calculate_sha256(target)?;
                         let category = categorize_path(target, options);
-                        file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                        file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -234,7 +237,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, display } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display } =>
                 {
                     if dry_run == true
                     {
@@ -283,10 +286,18 @@ impl TemplateManager
                         continue;
                     }
 
-                    print!("  {} Merging {}... ", "→".blue(), display.yellow());
-                    std::io::stdout().flush()?;
-
                     let messages = build_merge_messages(user_content, template_content);
+
+                    if verbose == true
+                    {
+                        print_outgoing_messages(display, &messages);
+                    }
+                    else
+                    {
+                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
+                        std::io::stdout().flush()?;
+                    }
+
                     let mut partial_file = fs::File::create(&partial)?;
                     let mut char_count: usize = 0;
                     let start = std::time::Instant::now();
@@ -294,11 +305,30 @@ impl TemplateManager
                     let response = llm.chat_stream(&messages, |chunk| {
                         let _ = partial_file.write_all(chunk.as_bytes());
                         char_count += chunk.len();
-                        let elapsed = start.elapsed().as_secs();
-                        let _ =
-                            write!(std::io::stdout(), "\r  {} Merging {}... {}s ({} chars)", "→".blue(), display.yellow(), elapsed, format_number(char_count as u64));
-                        let _ = std::io::stdout().flush();
+                        if verbose == true
+                        {
+                            let _ = write!(std::io::stdout(), "{}", chunk);
+                            let _ = std::io::stdout().flush();
+                        }
+                        else
+                        {
+                            let elapsed = start.elapsed().as_secs();
+                            let _ = write!(
+                                std::io::stdout(),
+                                "\r  {} Merging {}... {}s ({} chars)",
+                                "→".blue(),
+                                display.yellow(),
+                                elapsed,
+                                format_number(char_count as u64)
+                            );
+                            let _ = std::io::stdout().flush();
+                        }
                     });
+
+                    if verbose == true
+                    {
+                        print_incoming_footer();
+                    }
 
                     match response
                     {
@@ -337,7 +367,7 @@ impl TemplateManager
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
                                     let category = categorize_path(target, options);
-                                    file_tracker.record_installation(target, sha, template_version, options.lang.map(|l| l.to_string()), category, &workspace);
+                                    file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
                                 }
                             }
                         }
@@ -403,7 +433,7 @@ impl TemplateManager
     /// Model: config `merge.model` > None (provider default used later).
     pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
     {
-        let config = Config::load().ok();
+        let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
 
         let provider = if let Some(ref c) = config &&
             let Some(p) = c.get("merge.provider")
@@ -418,7 +448,7 @@ impl TemplateManager
         {
             return Err(anyhow::anyhow!(
                 "No LLM provider configured or auto-detected.\nSet an API key env var (OPENAI_API_KEY, ANTHROPIC_API_KEY, MISTRAL_API_KEY),\nor configure: slopctl \
-                 config --add merge.provider openai\nSupported: openai, anthropic, ollama, mistral"
+                 config --set merge.provider openai\nSupported: openai, anthropic, ollama, mistral"
             ));
         };
 
@@ -452,17 +482,24 @@ fn split_at_changelog(content: &str) -> Option<(&str, &str)>
 /// Classifies every entry in the content map as New, Unchanged, or Diverged.
 /// When the changelog marker is present in both files, only the template half
 /// is compared -- changelog-only differences are classified as Unchanged.
-fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> Vec<FileClass>
+fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &Path) -> Vec<FileClass>
 {
     let mut classified = Vec::with_capacity(content_map.len());
 
-    for (target, template_content) in content_map
+    for (target, resolved) in content_map
     {
         let display = target.strip_prefix(workspace).unwrap_or(target).display().to_string();
+        let template_content = &resolved.content;
 
         if target.exists() == false
         {
-            classified.push(FileClass::New { target: target.clone(), content: template_content.clone(), display });
+            classified.push(FileClass::New {
+                target: target.clone(),
+                content: template_content.clone(),
+                lang: resolved.lang.clone(),
+                agent: resolved.agent.clone(),
+                display
+            });
         }
         else if let Ok(current_content) = fs::read_to_string(target)
         {
@@ -483,6 +520,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                         template_content: tmpl_upper.to_string(),
                         user_content: user_upper.to_string(),
                         user_changelog: Some(user_lower.to_string()),
+                        lang: resolved.lang.clone(),
+                        agent: resolved.agent.clone(),
                         display
                     });
                 }
@@ -494,6 +533,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                     template_content: template_content.clone(),
                     user_content: current_content,
                     user_changelog: None,
+                    lang: resolved.lang.clone(),
+                    agent: resolved.agent.clone(),
                     display
                 });
             }
@@ -505,6 +546,8 @@ fn classify_files(content_map: &HashMap<PathBuf, String>, workspace: &Path) -> V
                 template_content: template_content.clone(),
                 user_content: String::new(),
                 user_changelog: None,
+                lang: resolved.lang.clone(),
+                agent: resolved.agent.clone(),
                 display
             });
         }
@@ -556,6 +599,33 @@ fn categorize_path(target: &Path, options: &MergeOptions) -> String
     {
         "language".to_string()
     }
+}
+
+/// Prints the outgoing chat messages to stdout for verbose mode
+///
+/// Emits a header with the file display name, then each message preceded by a
+/// `[role]` tag. The format is meant for human inspection, not machine parsing.
+fn print_outgoing_messages(display: &str, messages: &[ChatMessage])
+{
+    println!();
+    println!("{} {} {}", "──".dimmed(), format!("Merging {}", display).yellow().bold(), "──".dimmed());
+    println!("{}", "── Outgoing messages ──".dimmed());
+    for msg in messages
+    {
+        println!();
+        println!("{}", format!("[{}]", msg.role).cyan().bold());
+        println!("{}", msg.content);
+    }
+    println!();
+    println!("{}", "── Incoming response ──".dimmed());
+    println!();
+}
+
+/// Prints a closing separator after the streamed agent response
+fn print_incoming_footer()
+{
+    println!();
+    println!("{}", "── End response ──".dimmed());
 }
 
 /// Builds the LLM messages for a merge operation
@@ -651,7 +721,15 @@ mod tests
     use std::collections::HashMap;
 
     use super::*;
-    use crate::template_engine::normalize_path;
+    use crate::{
+        file_tracker::{AGENT_ALL, LANG_NONE},
+        template_engine::normalize_path
+    };
+
+    fn rc(content: &str) -> ResolvedContent
+    {
+        ResolvedContent { content: content.to_string(), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }
+    }
 
     #[test]
     fn test_sidecar_path()
@@ -673,19 +751,77 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_provider_auto_detects_from_env()
+    fn test_resolve_provider_no_env_no_config_returns_error()
     {
-        let result = TemplateManager::resolve_provider_and_model();
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() == true || std::env::var("OPENAI_API_KEY").is_ok() == true || std::env::var("MISTRAL_API_KEY").is_ok() == true
+        let saved_cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(&temp).unwrap();
+
+        let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = std::env::var("OPENAI_API_KEY").ok();
+        let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+
+        let result = TemplateManager::resolve_provider_and_model();
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
+
+        if let Some(k) = saved_a
         {
-            assert!(result.is_ok() == true);
+            unsafe { std::env::set_var("ANTHROPIC_API_KEY", k) };
         }
-        else
+        if let Some(k) = saved_o
         {
-            assert!(result.is_err() == true);
-            assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
+            unsafe { std::env::set_var("OPENAI_API_KEY", k) };
         }
+        if let Some(k) = saved_m
+        {
+            unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
+        }
+        std::env::set_current_dir(saved_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_resolve_provider_detects_openai_from_env()
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let saved_cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(&temp).unwrap();
+
+        let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = std::env::var("OPENAI_API_KEY").ok();
+        let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::set_var("OPENAI_API_KEY", "test-key") };
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+
+        let result = TemplateManager::resolve_provider_and_model();
+        assert!(result.is_ok() == true);
+        let (provider, _model) = result.unwrap();
+        assert_eq!(provider, "openai");
+
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+        if let Some(k) = saved_a
+        {
+            unsafe { std::env::set_var("ANTHROPIC_API_KEY", k) };
+        }
+        if let Some(k) = saved_o
+        {
+            unsafe { std::env::set_var("OPENAI_API_KEY", k) };
+        }
+        if let Some(k) = saved_m
+        {
+            unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
+        }
+        std::env::set_current_dir(saved_cwd).unwrap();
     }
 
     #[test]
@@ -759,7 +895,7 @@ mod tests
 
         let target = workspace.join("new_file.md");
         let mut map = HashMap::new();
-        map.insert(target.clone(), "template content".to_string());
+        map.insert(target.clone(), rc("template content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -777,7 +913,7 @@ mod tests
         fs::write(&target, "same content")?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), "same content".to_string());
+        map.insert(normalize_path(&target), rc("same content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -795,7 +931,7 @@ mod tests
         fs::write(&target, "user customized content")?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), "new template content".to_string());
+        map.insert(normalize_path(&target), rc("new template content"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -817,9 +953,9 @@ mod tests
         fs::write(&diverged_file, "user version")?;
 
         let mut map = HashMap::new();
-        map.insert(new_file, "template".to_string());
-        map.insert(normalize_path(&unchanged_file), "same".to_string());
-        map.insert(normalize_path(&diverged_file), "template version".to_string());
+        map.insert(new_file, rc("template"));
+        map.insert(normalize_path(&unchanged_file), rc("same"));
+        map.insert(normalize_path(&diverged_file), rc("template version"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 3);
@@ -889,9 +1025,9 @@ mod tests
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, "c".to_string());
-        map.insert(file_a, "a".to_string());
-        map.insert(file_b, "b".to_string());
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified
@@ -959,7 +1095,7 @@ mod tests
         fs::write(&target, &user)?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), template);
+        map.insert(normalize_path(&target), rc(&template));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
@@ -979,7 +1115,7 @@ mod tests
         fs::write(&target, user)?;
 
         let mut map = HashMap::new();
-        map.insert(normalize_path(&target), template.to_string());
+        map.insert(normalize_path(&target), rc(template));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);

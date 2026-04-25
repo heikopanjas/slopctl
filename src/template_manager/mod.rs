@@ -17,7 +17,12 @@ use std::{
 pub use merge::MergeOptions;
 use owo_colors::OwoColorize;
 
-use crate::{Result, download_manager::DownloadManager, utils::copy_dir_all};
+use crate::{
+    Result,
+    download_manager::DownloadManager,
+    file_tracker::{self, FileTracker, SLOPCTL_DIR},
+    utils::copy_dir_all
+};
 
 /// Manages template files for coding agent instructions
 ///
@@ -99,6 +104,56 @@ impl TemplateManager
         }
 
         Ok(())
+    }
+
+    /// Returns the path to the workspace-local `.slopctl/` directory
+    pub fn slopctl_dir(workspace: &Path) -> PathBuf
+    {
+        workspace.join(SLOPCTL_DIR)
+    }
+
+    /// Returns true if the workspace has a local tracker file
+    pub fn is_workspace_initialized(workspace: &Path) -> bool
+    {
+        Self::slopctl_dir(workspace).join("tracker.yml").exists()
+    }
+
+    /// Attempt migration from the global tracker and adopt untracked files
+    ///
+    /// If `.slopctl/tracker.yml` does not exist, runs two passes:
+    /// 1. Migrates matching entries from the global `installed_files.json`
+    /// 2. Scans the workspace for known slopctl-managed files (instructions, skills, commands) and adopts any that are not yet tracked
+    ///
+    /// Returns the total number of entries migrated + adopted.
+    pub fn try_migrate_tracker(&self, workspace: &Path) -> Result<usize>
+    {
+        if Self::is_workspace_initialized(workspace) == true
+        {
+            return Ok(0);
+        }
+
+        let mut tracker = FileTracker::new(workspace)?;
+        let mut total = 0usize;
+
+        let global_path = file_tracker::legacy_tracker_path(&self.config_dir);
+        if global_path.exists() == true
+        {
+            let migrated = tracker.migrate_from_global(&global_path)?;
+            if migrated > 0
+            {
+                println!("{} Migrated {} tracked file(s) from global tracker", "→".blue(), migrated);
+                total += migrated;
+            }
+        }
+
+        let adopted = tracker.adopt_untracked_files(workspace)?;
+        if adopted > 0
+        {
+            println!("{} Adopted {} existing file(s) into .slopctl/", "→".blue(), adopted);
+            total += adopted;
+        }
+
+        Ok(total)
     }
 
     /// Extract a skill name from an installed skill file path
