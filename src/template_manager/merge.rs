@@ -144,7 +144,7 @@ impl TemplateManager
     /// * `options` - User-supplied overrides (lang, agent, mission, skills)
     /// * `dry_run` - If true, shows what would happen without making changes
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
-    /// * `verbose` - If true, prints token usage summary and reports unchanged files
+    /// * `verbose` - If true, prints token usage, reports unchanged files, and dumps the outgoing chat messages plus streams the incoming agent response to stdout
     ///
     /// # Errors
     ///
@@ -284,10 +284,18 @@ impl TemplateManager
                         continue;
                     }
 
-                    print!("  {} Merging {}... ", "→".blue(), display.yellow());
-                    std::io::stdout().flush()?;
-
                     let messages = build_merge_messages(user_content, template_content);
+
+                    if verbose == true
+                    {
+                        print_outgoing_messages(display, &messages);
+                    }
+                    else
+                    {
+                        print!("  {} Merging {}... ", "→".blue(), display.yellow());
+                        std::io::stdout().flush()?;
+                    }
+
                     let mut partial_file = fs::File::create(&partial)?;
                     let mut char_count: usize = 0;
                     let start = std::time::Instant::now();
@@ -295,11 +303,30 @@ impl TemplateManager
                     let response = llm.chat_stream(&messages, |chunk| {
                         let _ = partial_file.write_all(chunk.as_bytes());
                         char_count += chunk.len();
-                        let elapsed = start.elapsed().as_secs();
-                        let _ =
-                            write!(std::io::stdout(), "\r  {} Merging {}... {}s ({} chars)", "→".blue(), display.yellow(), elapsed, format_number(char_count as u64));
-                        let _ = std::io::stdout().flush();
+                        if verbose == true
+                        {
+                            let _ = write!(std::io::stdout(), "{}", chunk);
+                            let _ = std::io::stdout().flush();
+                        }
+                        else
+                        {
+                            let elapsed = start.elapsed().as_secs();
+                            let _ = write!(
+                                std::io::stdout(),
+                                "\r  {} Merging {}... {}s ({} chars)",
+                                "→".blue(),
+                                display.yellow(),
+                                elapsed,
+                                format_number(char_count as u64)
+                            );
+                            let _ = std::io::stdout().flush();
+                        }
                     });
+
+                    if verbose == true
+                    {
+                        print_incoming_footer();
+                    }
 
                     match response
                     {
@@ -557,6 +584,33 @@ fn categorize_path(target: &Path, options: &MergeOptions) -> String
     {
         "language".to_string()
     }
+}
+
+/// Prints the outgoing chat messages to stdout for verbose mode
+///
+/// Emits a header with the file display name, then each message preceded by a
+/// `[role]` tag. The format is meant for human inspection, not machine parsing.
+fn print_outgoing_messages(display: &str, messages: &[ChatMessage])
+{
+    println!();
+    println!("{} {} {}", "──".dimmed(), format!("Merging {}", display).yellow().bold(), "──".dimmed());
+    println!("{}", "── Outgoing messages ──".dimmed());
+    for msg in messages
+    {
+        println!();
+        println!("{}", format!("[{}]", msg.role).cyan().bold());
+        println!("{}", msg.content);
+    }
+    println!();
+    println!("{}", "── Incoming response ──".dimmed());
+    println!();
+}
+
+/// Prints a closing separator after the streamed agent response
+fn print_incoming_footer()
+{
+    println!();
+    println!("{}", "── End response ──".dimmed());
 }
 
 /// Builds the LLM messages for a merge operation

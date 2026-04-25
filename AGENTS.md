@@ -1,7 +1,7 @@
 
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-19 (v16.0.0)
+**Last updated:** 2026-04-25 (v16.1.0)
 
 <!-- {mission} -->
 
@@ -817,6 +817,17 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-25 (v16.1.0, merge --verbose chat tracing)
+
+- Extended `merge --verbose` to dump the full LLM conversation per file in addition to the existing token usage and unchanged-file reporting
+- Before each diverged file is sent, prints a "Merging <file>" header followed by an "Outgoing messages" block listing every `ChatMessage` (system + user) tagged by role
+- During streaming, the response body is written to stdout chunk-by-chunk instead of the in-line "Merging X... Ns (chars)" progress line; the per-chunk progress line continues to render in non-verbose mode
+- After the stream ends, prints an "End response" footer to separate the model output from the next status line
+- Added `print_outgoing_messages()` and `print_incoming_footer()` helpers in `src/template_manager/merge.rs`
+- Updated CLI help text in `src/cli.rs` to describe the new behavior
+- No new dependencies; no changes to non-verbose output
+- Version bump: 16.0.0 to 16.1.0 (MINOR - additional verbose behavior, fully backwards compatible)
 
 ### 2026-04-19 (v16.0.0, workspace-local file tracker)
 

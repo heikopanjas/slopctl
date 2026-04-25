@@ -192,7 +192,7 @@ pub enum Commands
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool,
 
-        /// Show token usage summary after merging
+        /// Show token usage, list unchanged files, and print the outgoing/incoming chat messages for each merge
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
