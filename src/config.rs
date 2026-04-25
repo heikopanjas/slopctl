@@ -1,35 +1,67 @@
 //! Configuration management for slopctl
 //!
-//! Handles persistent configuration stored in:
-//! - `$XDG_CONFIG_HOME/slopctl/config.yml` (if XDG_CONFIG_HOME is set)
-//! - `$HOME/.config/slopctl/config.yml` (fallback)
+//! Supports two scopes:
+//! - **Workspace** — `<workspace>/.slopctl/config.yml` (next to `tracker.yml`)
+//! - **Global** — `$XDG_CONFIG_HOME/slopctl/config.yml` or `$HOME/.config/slopctl/config.yml`
+//!
+//! Consumer commands read an *effective* config that merges both scopes with
+//! per-key Git-style precedence: workspace wins, global is the fallback.
 
-use std::{collections::HashMap, env, fs, path::PathBuf};
+use std::{
+    collections::{BTreeMap, HashMap},
+    env, fmt, fs,
+    path::{Path, PathBuf}
+};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{Result, file_tracker::SLOPCTL_DIR};
+
+/// Which configuration file an operation targets
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigScope
+{
+    Global,
+    Workspace
+}
+
+impl fmt::Display for ConfigScope
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
+    {
+        match self
+        {
+            | Self::Global => write!(f, "global"),
+            | Self::Workspace => write!(f, "workspace")
+        }
+    }
+}
 
 /// Configuration structure for slopctl
 ///
-/// Uses a nested HashMap to support dotted key access (e.g., "source.url")
+/// Uses dotted keys following the convention `<command>.<parameter>`,
+/// e.g. `templates.uri`, `merge.provider`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Config
 {
     #[serde(default)]
-    pub source: SourceConfig,
+    pub templates: TemplatesConfig,
     #[serde(default)]
-    pub merge:  MergeConfig
+    pub merge:     MergeConfig
 }
 
-/// Source-related configuration
+/// Configuration for the `templates` command
+///
+/// `uri` and `fallback_uri` may be either a remote URL (e.g.
+/// `https://github.com/owner/repo/tree/branch/templates`) or a local
+/// filesystem path (e.g. `/path/to/templates` or `~/work/templates`).
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct SourceConfig
+pub struct TemplatesConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub url:      Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback: Option<String>
+    pub uri:          Option<String>,
+    #[serde(rename = "fallbackUri", skip_serializing_if = "Option::is_none")]
+    pub fallback_uri: Option<String>
 }
 
 /// Merge-related configuration for AI-assisted merging
@@ -46,11 +78,13 @@ pub struct MergeConfig
 
 impl Config
 {
-    /// Returns the path to the config file
+    // ── path helpers ──────────────────────────────────────────────
+
+    /// Returns the path to the **global** config file
     ///
     /// Uses `$XDG_CONFIG_HOME/slopctl/config.yml` if XDG_CONFIG_HOME is set,
     /// otherwise falls back to `$HOME/.config/slopctl/config.yml`
-    pub fn get_config_path() -> Result<PathBuf>
+    pub fn get_global_path() -> Result<PathBuf>
     {
         let config_dir = if let Ok(xdg_config) = env::var("XDG_CONFIG_HOME")
         {
@@ -68,67 +102,117 @@ impl Config
         Ok(config_dir.join("slopctl").join("config.yml"))
     }
 
-    /// Load configuration from file
-    ///
-    /// Returns default config if file doesn't exist
+    /// Returns the path to the **workspace-local** config file
+    pub fn get_workspace_path(workspace: &Path) -> PathBuf
+    {
+        workspace.join(SLOPCTL_DIR).join("config.yml")
+    }
+
+    /// Compatibility shim — delegates to [`Self::get_global_path`]
+    pub fn get_config_path() -> Result<PathBuf>
+    {
+        Self::get_global_path()
+    }
+
+    // ── load / save (global) ──────────────────────────────────────
+
+    /// Load the global configuration file (returns default if missing)
+    pub fn load_global() -> Result<Self>
+    {
+        let path = Self::get_global_path()?;
+        Self::load_from(&path)
+    }
+
+    /// Save to the global configuration file
+    pub fn save_global(&self) -> Result<()>
+    {
+        let path = Self::get_global_path()?;
+        Self::save_to(self, &path)
+    }
+
+    // ── load / save (workspace) ───────────────────────────────────
+
+    /// Load the workspace-local configuration file (returns default if missing)
+    pub fn load_workspace(workspace: &Path) -> Result<Self>
+    {
+        let path = Self::get_workspace_path(workspace);
+        Self::load_from(&path)
+    }
+
+    /// Save to the workspace-local configuration file
+    pub fn save_workspace(&self, workspace: &Path) -> Result<()>
+    {
+        let path = Self::get_workspace_path(workspace);
+        Self::save_to(self, &path)
+    }
+
+    // ── compatibility shims ───────────────────────────────────────
+
+    /// Compatibility shim — delegates to [`Self::load_global`]
     pub fn load() -> Result<Self>
     {
-        let config_path = Self::get_config_path()?;
+        Self::load_global()
+    }
 
-        require!(config_path.exists() == true, Ok(Self::default()));
+    /// Compatibility shim — delegates to [`Self::save_global`]
+    pub fn save(&self) -> Result<()>
+    {
+        self.save_global()
+    }
 
-        let content = fs::read_to_string(&config_path)?;
+    // ── internal helpers ──────────────────────────────────────────
+
+    fn load_from(path: &Path) -> Result<Self>
+    {
+        require!(path.exists() == true, Ok(Self::default()));
+
+        let content = fs::read_to_string(path)?;
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
     }
 
-    /// Save configuration to file
-    ///
-    /// Creates parent directories if they don't exist
-    pub fn save(&self) -> Result<()>
+    fn save_to(&self, path: &Path) -> Result<()>
     {
-        let config_path = Self::get_config_path()?;
-
-        if let Some(parent) = config_path.parent()
+        if let Some(parent) = path.parent()
         {
             fs::create_dir_all(parent)?;
         }
 
         let content = serde_yaml::to_string(self)?;
-        fs::write(&config_path, content)?;
+        fs::write(path, content)?;
         Ok(())
     }
 
-    /// Get a value by dotted key (e.g., "source.url")
+    /// Get a value by dotted key (e.g., "templates.uri")
     ///
     /// Returns None if key doesn't exist or path is invalid
     pub fn get(&self, key: &str) -> Option<String>
     {
         match key
         {
-            | "source.url" => self.source.url.clone(),
-            | "source.fallback" => self.source.fallback.clone(),
+            | "templates.uri" => self.templates.uri.clone(),
+            | "templates.fallbackUri" => self.templates.fallback_uri.clone(),
             | "merge.provider" => self.merge.provider.clone(),
             | "merge.model" => self.merge.model.clone(),
             | _ => None
         }
     }
 
-    /// Set a value by dotted key (e.g., "source.url")
+    /// Set a value by dotted key (e.g., "templates.uri")
     ///
     /// Returns error if key is not recognized
     pub fn set(&mut self, key: &str, value: &str) -> Result<()>
     {
         match key
         {
-            | "source.url" =>
+            | "templates.uri" =>
             {
-                self.source.url = Some(value.to_string());
+                self.templates.uri = Some(value.to_string());
                 Ok(())
             }
-            | "source.fallback" =>
+            | "templates.fallbackUri" =>
             {
-                self.source.fallback = Some(value.to_string());
+                self.templates.fallback_uri = Some(value.to_string());
                 Ok(())
             }
             | "merge.provider" =>
@@ -152,14 +236,14 @@ impl Config
     {
         match key
         {
-            | "source.url" =>
+            | "templates.uri" =>
             {
-                self.source.url = None;
+                self.templates.uri = None;
                 Ok(())
             }
-            | "source.fallback" =>
+            | "templates.fallbackUri" =>
             {
-                self.source.fallback = None;
+                self.templates.fallback_uri = None;
                 Ok(())
             }
             | "merge.provider" =>
@@ -183,14 +267,14 @@ impl Config
     {
         let mut values = HashMap::new();
 
-        if let Some(url) = &self.source.url
+        if let Some(uri) = &self.templates.uri
         {
-            values.insert("source.url".to_string(), url.clone());
+            values.insert("templates.uri".to_string(), uri.clone());
         }
 
-        if let Some(fallback) = &self.source.fallback
+        if let Some(fallback_uri) = &self.templates.fallback_uri
         {
-            values.insert("source.fallback".to_string(), fallback.clone());
+            values.insert("templates.fallbackUri".to_string(), fallback_uri.clone());
         }
 
         if let Some(provider) = &self.merge.provider
@@ -209,7 +293,65 @@ impl Config
     /// Get list of all valid config keys
     pub fn valid_keys() -> Vec<&'static str>
     {
-        vec!["source.url", "source.fallback", "merge.provider", "merge.model"]
+        vec!["templates.uri", "templates.fallbackUri", "merge.provider", "merge.model"]
+    }
+}
+
+/// Merged view of workspace + global config with per-key precedence
+///
+/// For every key the workspace value wins; if not set there, the global
+/// value is returned.  Consumer commands (`templates --update`, `merge`,
+/// `init`, `list-models`) use this to read configuration.
+pub struct EffectiveConfig
+{
+    pub workspace: Config,
+    pub global:    Config
+}
+
+impl EffectiveConfig
+{
+    /// Load both workspace and global config files
+    pub fn load(workspace: &Path) -> Result<Self>
+    {
+        let ws = Config::load_workspace(workspace)?;
+        let gl = Config::load_global()?;
+        Ok(Self { workspace: ws, global: gl })
+    }
+
+    /// Get a value with workspace-wins-over-global precedence
+    pub fn get(&self, key: &str) -> Option<String>
+    {
+        self.workspace.get(key).or_else(|| self.global.get(key))
+    }
+
+    /// Get a value together with its origin scope
+    pub fn get_with_origin(&self, key: &str) -> Option<(String, ConfigScope)>
+    {
+        if let Some(v) = self.workspace.get(key)
+        {
+            Some((v, ConfigScope::Workspace))
+        }
+        else
+        {
+            self.global.get(key).map(|v| (v, ConfigScope::Global))
+        }
+    }
+
+    /// Merged list of all set keys with their origin scope (deterministic order)
+    pub fn list_with_origin(&self) -> BTreeMap<String, (String, ConfigScope)>
+    {
+        let mut map = BTreeMap::new();
+
+        for (k, v) in self.global.list()
+        {
+            map.insert(k, (v, ConfigScope::Global));
+        }
+        for (k, v) in self.workspace.list()
+        {
+            map.insert(k, (v, ConfigScope::Workspace));
+        }
+
+        map
     }
 }
 
@@ -226,25 +368,34 @@ mod tests
     fn test_config_default()
     {
         let config = Config::default();
-        assert!(config.source.url.is_none() == true);
-        assert!(config.source.fallback.is_none() == true);
+        assert!(config.templates.uri.is_none() == true);
+        assert!(config.templates.fallback_uri.is_none() == true);
     }
 
     #[test]
-    fn test_config_get_set_url() -> anyhow::Result<()>
+    fn test_config_get_set_uri() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com")?;
-        assert_eq!(config.get("source.url").ok_or_else(|| anyhow::anyhow!("source.url not set"))?, "https://example.com");
+        config.set("templates.uri", "https://example.com")?;
+        assert_eq!(config.get("templates.uri").ok_or_else(|| anyhow::anyhow!("templates.uri not set"))?, "https://example.com");
         Ok(())
     }
 
     #[test]
-    fn test_config_get_set_fallback() -> anyhow::Result<()>
+    fn test_config_get_set_fallback_uri() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.fallback", "https://fallback.com")?;
-        assert_eq!(config.get("source.fallback").ok_or_else(|| anyhow::anyhow!("source.fallback not set"))?, "https://fallback.com");
+        config.set("templates.fallbackUri", "https://fallback.com")?;
+        assert_eq!(config.get("templates.fallbackUri").ok_or_else(|| anyhow::anyhow!("templates.fallbackUri not set"))?, "https://fallback.com");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_uri_accepts_local_path() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("templates.uri", "/local/path/to/templates")?;
+        assert_eq!(config.get("templates.uri").ok_or_else(|| anyhow::anyhow!("templates.uri not set"))?, "/local/path/to/templates");
         Ok(())
     }
 
@@ -264,22 +415,22 @@ mod tests
     }
 
     #[test]
-    fn test_config_unset_url() -> anyhow::Result<()>
+    fn test_config_unset_uri() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com")?;
-        config.unset("source.url")?;
-        assert!(config.get("source.url").is_none() == true);
+        config.set("templates.uri", "https://example.com")?;
+        config.unset("templates.uri")?;
+        assert!(config.get("templates.uri").is_none() == true);
         Ok(())
     }
 
     #[test]
-    fn test_config_unset_fallback() -> anyhow::Result<()>
+    fn test_config_unset_fallback_uri() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.fallback", "https://fallback.com")?;
-        config.unset("source.fallback")?;
-        assert!(config.get("source.fallback").is_none() == true);
+        config.set("templates.fallbackUri", "https://fallback.com")?;
+        config.unset("templates.fallbackUri")?;
+        assert!(config.get("templates.fallbackUri").is_none() == true);
         Ok(())
     }
 
@@ -302,13 +453,13 @@ mod tests
     fn test_config_list_populated() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com")?;
-        config.set("source.fallback", "https://fallback.com")?;
+        config.set("templates.uri", "https://example.com")?;
+        config.set("templates.fallbackUri", "https://fallback.com")?;
 
         let values = config.list();
         assert_eq!(values.len(), 2);
-        assert_eq!(values.get("source.url").ok_or_else(|| anyhow::anyhow!("source.url not in list"))?, "https://example.com");
-        assert_eq!(values.get("source.fallback").ok_or_else(|| anyhow::anyhow!("source.fallback not in list"))?, "https://fallback.com");
+        assert_eq!(values.get("templates.uri").ok_or_else(|| anyhow::anyhow!("templates.uri not in list"))?, "https://example.com");
+        assert_eq!(values.get("templates.fallbackUri").ok_or_else(|| anyhow::anyhow!("templates.fallbackUri not in list"))?, "https://fallback.com");
         Ok(())
     }
 
@@ -316,7 +467,7 @@ mod tests
     fn test_config_valid_keys()
     {
         let keys = Config::valid_keys();
-        assert_eq!(keys, vec!["source.url", "source.fallback", "merge.provider", "merge.model"]);
+        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "merge.provider", "merge.model"]);
     }
 
     #[test]
@@ -364,12 +515,22 @@ mod tests
     fn test_config_serde_round_trip() -> anyhow::Result<()>
     {
         let mut config = Config::default();
-        config.set("source.url", "https://example.com")?;
+        config.set("templates.uri", "https://example.com")?;
 
         let yaml = serde_yaml::to_string(&config)?;
         let loaded: Config = serde_yaml::from_str(&yaml)?;
-        assert_eq!(loaded.get("source.url").ok_or_else(|| anyhow::anyhow!("source.url not set"))?, "https://example.com");
-        assert!(loaded.get("source.fallback").is_none() == true);
+        assert_eq!(loaded.get("templates.uri").ok_or_else(|| anyhow::anyhow!("templates.uri not set"))?, "https://example.com");
+        assert!(loaded.get("templates.fallbackUri").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_serde_uses_camel_case_for_fallback_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("templates.fallbackUri", "https://fallback.com")?;
+        let yaml = serde_yaml::to_string(&config)?;
+        assert!(yaml.contains("fallbackUri:") == true, "expected serialized YAML to use camelCase key, got: {}", yaml);
         Ok(())
     }
 
@@ -381,11 +542,11 @@ mod tests
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
         let mut config = Config::default();
-        config.set("source.url", "https://test.com")?;
+        config.set("templates.uri", "https://test.com")?;
         config.save()?;
 
         let loaded = Config::load()?;
-        assert_eq!(loaded.get("source.url").ok_or_else(|| anyhow::anyhow!("source.url not set"))?, "https://test.com");
+        assert_eq!(loaded.get("templates.uri").ok_or_else(|| anyhow::anyhow!("templates.uri not set"))?, "https://test.com");
 
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
         Ok(())
@@ -399,7 +560,7 @@ mod tests
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
         let loaded = Config::load()?;
-        assert!(loaded.source.url.is_none() == true);
+        assert!(loaded.templates.uri.is_none() == true);
 
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
         Ok(())
@@ -414,5 +575,139 @@ mod tests
         assert_eq!(path, PathBuf::from("/tmp/test-xdg/slopctl/config.yml"));
         unsafe { env::remove_var("XDG_CONFIG_HOME") };
         Ok(())
+    }
+
+    // ── workspace-scoped and EffectiveConfig tests ────────────────
+
+    #[test]
+    fn test_config_workspace_path()
+    {
+        let ws = PathBuf::from("/tmp/my-project");
+        let path = Config::get_workspace_path(&ws);
+        assert_eq!(path, PathBuf::from("/tmp/my-project/.slopctl/config.yml"));
+    }
+
+    #[test]
+    fn test_config_workspace_save_and_load() -> anyhow::Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        let ws = dir.path();
+
+        let mut config = Config::default();
+        config.set("merge.provider", "anthropic")?;
+        config.save_workspace(ws)?;
+
+        let loaded = Config::load_workspace(ws)?;
+        assert_eq!(loaded.get("merge.provider").ok_or_else(|| anyhow::anyhow!("not set"))?, "anthropic");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_workspace_load_missing_returns_default() -> anyhow::Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        let loaded = Config::load_workspace(dir.path())?;
+        assert!(loaded.templates.uri.is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_config_workspace_wins() -> anyhow::Result<()>
+    {
+        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let global_dir = tempfile::TempDir::new()?;
+        let ws_dir = tempfile::TempDir::new()?;
+        unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
+
+        let mut global = Config::default();
+        global.set("templates.uri", "https://global.example.com")?;
+        global.set("merge.provider", "openai")?;
+        global.save_global()?;
+
+        let mut ws = Config::default();
+        ws.set("templates.uri", "https://workspace.example.com")?;
+        ws.save_workspace(ws_dir.path())?;
+
+        let effective = EffectiveConfig::load(ws_dir.path())?;
+        assert_eq!(effective.get("templates.uri").ok_or_else(|| anyhow::anyhow!("not set"))?, "https://workspace.example.com");
+        assert_eq!(effective.get("merge.provider").ok_or_else(|| anyhow::anyhow!("not set"))?, "openai");
+
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_config_get_with_origin() -> anyhow::Result<()>
+    {
+        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let global_dir = tempfile::TempDir::new()?;
+        let ws_dir = tempfile::TempDir::new()?;
+        unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
+
+        let mut global = Config::default();
+        global.set("merge.provider", "openai")?;
+        global.set("merge.model", "gpt-4o")?;
+        global.save_global()?;
+
+        let mut ws = Config::default();
+        ws.set("merge.model", "claude-opus-4-6")?;
+        ws.save_workspace(ws_dir.path())?;
+
+        let effective = EffectiveConfig::load(ws_dir.path())?;
+        let (val, scope) = effective.get_with_origin("merge.model").ok_or_else(|| anyhow::anyhow!("not set"))?;
+        assert_eq!(val, "claude-opus-4-6");
+        assert_eq!(scope, ConfigScope::Workspace);
+
+        let (val, scope) = effective.get_with_origin("merge.provider").ok_or_else(|| anyhow::anyhow!("not set"))?;
+        assert_eq!(val, "openai");
+        assert_eq!(scope, ConfigScope::Global);
+
+        assert!(effective.get_with_origin("templates.uri").is_none() == true);
+
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_config_list_with_origin_deterministic_order() -> anyhow::Result<()>
+    {
+        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let global_dir = tempfile::TempDir::new()?;
+        let ws_dir = tempfile::TempDir::new()?;
+        unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
+
+        let mut global = Config::default();
+        global.set("merge.provider", "openai")?;
+        global.set("templates.uri", "https://global.example.com")?;
+        global.save_global()?;
+
+        let mut ws = Config::default();
+        ws.set("templates.uri", "/local/path")?;
+        ws.set("merge.model", "claude-opus-4-6")?;
+        ws.save_workspace(ws_dir.path())?;
+
+        let effective = EffectiveConfig::load(ws_dir.path())?;
+        let list = effective.list_with_origin();
+
+        let keys: Vec<&String> = list.keys().collect();
+        assert_eq!(keys, vec!["merge.model", "merge.provider", "templates.uri"]);
+
+        let (val, scope) = list.get("templates.uri").ok_or_else(|| anyhow::anyhow!("missing"))?;
+        assert_eq!(val, "/local/path");
+        assert_eq!(*scope, ConfigScope::Workspace);
+
+        let (val, scope) = list.get("merge.provider").ok_or_else(|| anyhow::anyhow!("missing"))?;
+        assert_eq!(val, "openai");
+        assert_eq!(*scope, ConfigScope::Global);
+
+        unsafe { env::remove_var("XDG_CONFIG_HOME") };
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_scope_display()
+    {
+        assert_eq!(format!("{}", ConfigScope::Global), "global");
+        assert_eq!(format!("{}", ConfigScope::Workspace), "workspace");
     }
 }

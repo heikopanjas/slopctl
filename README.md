@@ -859,7 +859,7 @@ slopctl completions powershell > slopctl.ps1
 
 Merge customized workspace files with updated templates using AI assistance. `merge` runs the same workflow as `init` but resolves conflicts via an LLM instead of prompting the user. By default, merged content replaces the original file directly. Use `--preview` to write `.merged` sidecar files for manual review instead.
 
-The provider is resolved from the `merge.provider` config key, or auto-detected from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` — checked in that order). The model is resolved from the `merge.model` config key, or the provider's default. There are no `--provider`/`--model` CLI flags; configure them via `slopctl config --add merge.provider <name>` or env vars.
+The provider is resolved from the `merge.provider` config key, or auto-detected from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` — checked in that order). The model is resolved from the `merge.model` config key, or the provider's default. There are no `--provider`/`--model` CLI flags; configure them via `slopctl config --set merge.provider <name>` or env vars.
 
 **Usage:**
 
@@ -886,7 +886,7 @@ slopctl merge --list-models                      # List available models from th
 - `--list-models` / `-L` - List available models from the resolved provider
 - `--verbose` / `-v` - Show token usage summary after merging (input/output tokens, stop reason). Warns if any file was truncated due to max token limits.
 
-**Provider priority:** config `merge.provider` > environment auto-detect > error. Set with `slopctl config --add merge.provider <name>` or via API key env vars.
+**Provider priority:** config `merge.provider` > environment auto-detect > error. Set with `slopctl config --set merge.provider <name>` or via API key env vars.
 
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 
@@ -894,66 +894,91 @@ slopctl merge --list-models                      # List available models from th
 
 Manage persistent configuration settings using Git-style dotted keys.
 
+Configuration supports two scopes: **workspace** (per-project, stored in `.slopctl/config.yml`) and **global** (user-wide, stored in `~/.config/slopctl/config.yml`). Without the `--global` flag, writes target the workspace config. Reads return the *effective* merged value: workspace wins, global is the fallback.
+
 **Usage:**
 
 ```bash
-slopctl config --add <key> <value>  # Set a configuration value
-slopctl config <key>                # Get a configuration value
-slopctl config --list               # List all configuration values
-slopctl config --remove <key>       # Remove a configuration value
+slopctl config --set <key> <value>    # Set a workspace configuration value
+slopctl config --global --set <k> <v> # Set a global configuration value
+slopctl config <key>                  # Get effective value (workspace > global)
+slopctl config --list                 # List effective configuration with origin labels
+slopctl config --global --list        # List global configuration only
+slopctl config --delete <key>         # Delete from workspace configuration
+slopctl config --global --delete <k>  # Delete from global configuration
 ```
 
 **Options:**
 
-- `<key>` - Configuration key to get (e.g., source.url)
-- `--add <key> <value>` (`-a`) - Set a configuration value
+- `<key>` - Configuration key to get (e.g., templates.uri)
+- `--set <key> <value>` (`-s`) - Set a configuration value
 - `--list` (`-l`) - List all configuration values
-- `--remove <key>` (`-r`) - Remove a configuration key
+- `--delete <key>` (`-d`) - Delete a configuration key
+- `--global` (`-g`) - Operate on the global config instead of the workspace config
+
+Configuration keys follow the convention `<command>.<parameter>`, e.g. `templates.uri` configures the `templates` command and `merge.provider` configures the `merge` command.
+
+`templates.uri` and `templates.fallbackUri` accept either a remote URL or a local filesystem path, so the same key works for `https://github.com/...` sources and for `/local/path/to/templates`.
 
 **Examples:**
 
 ```bash
-# Set custom template source
-slopctl config --add source.url https://github.com/myteam/templates/tree/main/templates
+# Set a workspace-local template source (only affects this project)
+slopctl config --set templates.uri /Users/me/work/my-templates
 
-# Get current source URL
-slopctl config source.url
+# Set a global template source (shared across all projects)
+slopctl config --global --set templates.uri https://github.com/myteam/templates/tree/main/templates
 
-# List all configuration
+# Get effective value (workspace overrides global)
+slopctl config templates.uri
+
+# List effective configuration with [workspace] / [global] origin labels
 slopctl config --list
 
-# Remove custom source (revert to default)
-slopctl config --remove source.url
+# List global configuration only
+slopctl config --global --list
 
-# Set fallback source for resilience
-slopctl config --add source.fallback https://github.com/heikopanjas/slopctl/tree/develop/templates
+# Delete workspace override (falls back to global value)
+slopctl config --delete templates.uri
 
-# Set default LLM provider for merge
-slopctl config --add merge.provider anthropic
+# Delete from global config
+slopctl config --global --delete templates.uri
 
-# Set default model for merge
-slopctl config --add merge.model claude-sonnet-4-20250514
+# Set fallback source for resilience (global)
+slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl/tree/develop/templates
+
+# Set default LLM provider for merge (workspace-specific)
+slopctl config --set merge.provider anthropic
+
+# Set default model for merge (global default)
+slopctl config --global --set merge.model claude-sonnet-4-20250514
 ```
 
 **Valid Configuration Keys:**
 
-- `source.url` - Default template download URL (used by `templates --update` and `init` when `--from` not specified)
-- `source.fallback` - Fallback URL used when primary source fails or is unreachable
+- `templates.uri` - Default template source (URL or local filesystem path) used by `templates --update` and `init` when `--from` is not specified
+- `templates.fallbackUri` - Fallback source (URL or local filesystem path) used when the primary source fails or is unreachable
 - `merge.provider` - Default LLM provider for the `merge` command (openai, anthropic, ollama, mistral)
 - `merge.model` - Default model for the `merge` command (e.g., `gpt-4o`, `claude-sonnet-4-20250514`)
 
-**Configuration File Location:**
+**Configuration File Locations:**
 
-- Linux: `$XDG_CONFIG_HOME/slopctl/config.yml` or `~/.config/slopctl/config.yml`
-- macOS: `~/.config/slopctl/config.yml`
+- Workspace: `<project>/.slopctl/config.yml` (committed to repo alongside `tracker.yml`)
+- Global (Linux): `$XDG_CONFIG_HOME/slopctl/config.yml` or `~/.config/slopctl/config.yml`
+- Global (macOS): `~/.config/slopctl/config.yml`
+
+**Precedence:**
+
+Consumer commands (`templates --update`, `init`, `merge`, `list-models`) read the effective merged config. For each key, the workspace value wins; if not set there, the global value is used. This allows setting shared defaults globally while overriding per-project as needed.
 
 **Behavior:**
 
 - Configuration persists between sessions
-- `templates --update` command uses `source.url` if set and `--from` not specified
-- `init` command uses `source.url` when downloading missing global templates
-- If primary source fails and `source.fallback` is configured, automatically tries the fallback
+- `templates --update` command uses `templates.uri` if set and `--from` not specified
+- `init` command uses `templates.uri` when downloading missing global templates
+- If primary source fails and `templates.fallbackUri` is configured, automatically tries the fallback
 - Empty configuration file is valid (all defaults used)
+- `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
 
 ## Core Governance Principles
 

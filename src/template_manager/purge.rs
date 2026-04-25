@@ -188,7 +188,10 @@ mod tests
     use std::fs;
 
     use super::TemplateManager;
-    use crate::{file_tracker::FileTracker, template_manager::CWD_LOCK};
+    use crate::{
+        file_tracker::{FileTracker, LANG_NONE},
+        template_manager::CWD_LOCK
+    };
 
     #[test]
     fn test_purge_dry_run_no_files() -> anyhow::Result<()>
@@ -228,7 +231,7 @@ mod tests
 
         // Record the same file in FileTracker (workspace-local)
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, None, "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;
@@ -287,7 +290,7 @@ mod tests
         // Track the codex instruction file
         let codex_file = workspace.path().join("CODEX.md");
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, None, "agent".into());
+        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
         let original_dir = std::env::current_dir()?;

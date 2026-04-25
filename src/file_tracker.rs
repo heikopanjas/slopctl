@@ -8,6 +8,12 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Sentinel value for `FileMetadata.lang` when the file is language-agnostic
+pub const LANG_NONE: &str = "none";
+
+/// Sentinel value for `FileMetadata.agent` when the file is agent-agnostic
+pub const AGENT_ALL: &str = "all";
+
 /// Metadata about an installed template file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata
@@ -15,7 +21,8 @@ pub struct FileMetadata
     pub original_sha:     String,
     pub template_version: u32,
     pub installed_date:   String,
-    pub lang:             Option<String>,
+    pub lang:             String,
+    pub agent:            String,
     pub category:         String
 }
 
@@ -36,15 +43,15 @@ pub enum FileStatus
 /// Name of the workspace-local slopctl directory
 pub const SLOPCTL_DIR: &str = ".slopctl";
 
-/// Name of the tracker JSON file inside the slopctl directory
-const TRACKER_FILE: &str = "tracker.json";
+/// Name of the tracker YAML file inside the slopctl directory
+const TRACKER_FILE: &str = "tracker.yml";
 
 /// Legacy tracker filename used in the global template directory
 const LEGACY_TRACKER_FILE: &str = "installed_files.json";
 
 /// Tracks installed template files using SHA checksums
 ///
-/// Stores metadata in a workspace-local `.slopctl/tracker.json` file.
+/// Stores metadata in a workspace-local `.slopctl/tracker.yml` file.
 /// All paths are stored relative to the workspace root.
 pub struct FileTracker
 {
@@ -90,7 +97,7 @@ impl FileTracker
 
     /// Create a new FileTracker for a workspace
     ///
-    /// Loads existing tracker data from `.slopctl/tracker.json` in the
+    /// Loads existing tracker data from `.slopctl/tracker.yml` in the
     /// workspace root. Creates the `.slopctl/` directory if it does not exist.
     ///
     /// # Arguments
@@ -108,7 +115,7 @@ impl FileTracker
         let metadata = if metadata_path.exists() == true
         {
             let contents = fs::read_to_string(&metadata_path)?;
-            serde_json::from_str(&contents).unwrap_or_else(|_| HashMap::new())
+            serde_yaml::from_str(&contents).unwrap_or_else(|_| HashMap::new())
         }
         else
         {
@@ -154,14 +161,15 @@ impl FileTracker
     /// * `file_path` - Path to the installed file (absolute or relative to workspace)
     /// * `original_sha` - SHA-256 of the file at install time
     /// * `template_version` - Template format version used
-    /// * `lang` - Language name if this file belongs to a language install
+    /// * `lang` - Language name or `LANG_NONE` for language-agnostic files
+    /// * `agent` - Agent name or `AGENT_ALL` for agent-agnostic files
     /// * `category` - Category tag (e.g. "main", "agent", "language", "skill")
-    pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: Option<String>, category: String)
+    pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: String, agent: String, category: String)
     {
         let now = chrono::Utc::now().to_rfc3339();
         let relative_key = self.to_relative_key(file_path);
 
-        self.metadata.insert(relative_key, FileMetadata { original_sha, template_version, installed_date: now, lang, category });
+        self.metadata.insert(relative_key, FileMetadata { original_sha, template_version, installed_date: now, lang, agent, category });
     }
 
     /// Check the modification status of a file
@@ -210,14 +218,14 @@ impl FileTracker
 
     /// Returns the installed language for this workspace
     ///
-    /// Scans all tracked entries for one with a `lang` field set.
+    /// Scans all tracked entries for one with a real language value (not `LANG_NONE`).
     pub fn get_installed_language(&self) -> Option<String>
     {
         for meta in self.metadata.values()
         {
-            if meta.lang.is_some() == true
+            if meta.lang != LANG_NONE
             {
-                return meta.lang.clone();
+                return Some(meta.lang.clone());
             }
         }
 
@@ -265,7 +273,7 @@ impl FileTracker
         let agents_md = workspace.join("AGENTS.md");
         if agents_md.exists() == true
         {
-            adopted += self.try_adopt(&agents_md, None, "main")?;
+            adopted += self.try_adopt(&agents_md, LANG_NONE, AGENT_ALL, "main")?;
         }
 
         // Adopt agent instruction files (category "agent") for all known agents
@@ -280,7 +288,7 @@ impl FileTracker
                         let path = workspace.join(instr.path);
                         if path.exists() == true
                         {
-                            adopted += self.try_adopt(&path, None, "agent")?;
+                            adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "agent")?;
                         }
                     }
                 }
@@ -305,7 +313,7 @@ impl FileTracker
                             crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
                             for file in files
                             {
-                                adopted += self.try_adopt(&file, None, "skill")?;
+                                adopted += self.try_adopt(&file, LANG_NONE, AGENT_ALL, "skill")?;
                             }
                         }
                     }
@@ -326,7 +334,7 @@ impl FileTracker
                     crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
                     for file in files
                     {
-                        adopted += self.try_adopt(&file, None, "skill")?;
+                        adopted += self.try_adopt(&file, LANG_NONE, AGENT_ALL, "skill")?;
                     }
                 }
             }
@@ -347,7 +355,7 @@ impl FileTracker
                         let path = entry.path();
                         if path.is_file() == true
                         {
-                            adopted += self.try_adopt(&path, None, "command")?;
+                            adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "command")?;
                         }
                     }
                 }
@@ -365,7 +373,7 @@ impl FileTracker
     /// Try to adopt a single file if not already tracked
     ///
     /// Returns 1 if the file was adopted, 0 if it was already tracked.
-    fn try_adopt(&mut self, file_path: &Path, lang: Option<String>, category: &str) -> anyhow::Result<usize>
+    fn try_adopt(&mut self, file_path: &Path, lang: &str, agent: &str, category: &str) -> anyhow::Result<usize>
     {
         let key = self.to_relative_key(file_path);
         if self.metadata.contains_key(&key) == true
@@ -376,7 +384,14 @@ impl FileTracker
         let sha = Self::calculate_sha256(file_path)?;
         let now = chrono::Utc::now().to_rfc3339();
 
-        self.metadata.insert(key, FileMetadata { original_sha: sha, template_version: 0, installed_date: now, lang, category: category.to_string() });
+        self.metadata.insert(key, FileMetadata {
+            original_sha:     sha,
+            template_version: 0,
+            installed_date:   now,
+            lang:             lang.to_string(),
+            agent:            agent.to_string(),
+            category:         category.to_string()
+        });
 
         Ok(1)
     }
@@ -391,8 +406,8 @@ impl FileTracker
             fs::create_dir_all(parent)?;
         }
 
-        let json = serde_json::to_string_pretty(&self.metadata)?;
-        fs::write(&self.metadata_path, json)?;
+        let yaml = serde_yaml::to_string(&self.metadata)?;
+        fs::write(&self.metadata_path, yaml)?;
         Ok(())
     }
 
@@ -457,7 +472,8 @@ impl FileTracker
                     original_sha:     legacy.original_sha.clone(),
                     template_version: legacy.template_version,
                     installed_date:   legacy.installed_date.clone(),
-                    lang:             legacy.lang.clone(),
+                    lang:             legacy.lang.clone().unwrap_or_else(|| LANG_NONE.to_string()),
+                    agent:            AGENT_ALL.to_string(),
                     category:         legacy.category.clone()
                 });
 
@@ -529,7 +545,7 @@ mod tests
 
         let original_sha = FileTracker::calculate_sha256(&test_file)?;
 
-        tracker.record_installation(&test_file, original_sha.clone(), 1, Some("rust".to_string()), "language".to_string());
+        tracker.record_installation(&test_file, original_sha.clone(), 1, "rust".into(), AGENT_ALL.into(), "language".into());
 
         let status = tracker.check_modification(&test_file)?;
         assert_eq!(status, FileStatus::Unmodified);
@@ -555,7 +571,7 @@ mod tests
         let project_file = workspace.join("AGENTS.md");
         fs::write(&project_file, b"test")?;
 
-        tracker.record_installation(&project_file, "sha123".to_string(), 1, Some("rust".to_string()), "main".to_string());
+        tracker.record_installation(&project_file, "sha123".into(), 1, "rust".into(), AGENT_ALL.into(), "main".into());
         let lang = tracker.get_installed_language();
         assert_eq!(lang, Some("rust".to_string()));
 
@@ -573,7 +589,7 @@ mod tests
             let test_file = workspace.join("test.txt");
             fs::write(&test_file, b"Test")?;
             let sha = FileTracker::calculate_sha256(&test_file)?;
-            tracker.record_installation(&test_file, sha, 1, None, "test".to_string());
+            tracker.record_installation(&test_file, sha, 1, LANG_NONE.into(), AGENT_ALL.into(), "test".into());
             tracker.save()?;
         }
 
@@ -596,15 +612,15 @@ mod tests
 
         let agent_file = workspace.join(".cursorrules");
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "cursor".into(), "agent".into());
 
         let skill_file = workspace.join(".cursor/skills/my-skill/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "cursor".into(), "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "main".into());
+        tracker.record_installation(&lang_file, "sha3".into(), 3, "rust".into(), AGENT_ALL.into(), "main".into());
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 3);
@@ -623,15 +639,15 @@ mod tests
 
         let agent_file = workspace.join(".cursorrules");
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, None, "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "cursor".into(), "agent".into());
 
         let skill_file = workspace.join(".cursor/skills/foo/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, None, "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "cursor".into(), "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, Some("rust".into()), "language".into());
+        tracker.record_installation(&lang_file, "sha3".into(), 3, "rust".into(), AGENT_ALL.into(), "language".into());
 
         let skills = tracker.get_entries_by_category("skill");
         assert_eq!(skills.len(), 1);
@@ -657,7 +673,7 @@ mod tests
 
         let file = workspace.join("AGENTS.md");
         fs::write(&file, b"test")?;
-        tracker.record_installation(&file, "sha1".into(), 5, None, "main".into());
+        tracker.record_installation(&file, "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 1);
@@ -677,7 +693,7 @@ mod tests
 
         let file = workspace.join(".cursor/skills/my-skill/SKILL.md");
         fs::write(&file, b"skill")?;
-        tracker.record_installation(&file, "sha1".into(), 5, None, "skill".into());
+        tracker.record_installation(&file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "skill".into());
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 1);
@@ -832,7 +848,7 @@ mod tests
         fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
 
         let mut tracker = FileTracker::new(workspace)?;
-        tracker.record_installation(&workspace.join("AGENTS.md"), "sha1".into(), 5, None, "main".into());
+        tracker.record_installation(&workspace.join("AGENTS.md"), "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         assert_eq!(tracker.get_entries().len(), 1);
 
         let adopted = tracker.adopt_untracked_files(workspace)?;
