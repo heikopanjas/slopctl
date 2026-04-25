@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-25 (v17.0.0)
+**Last updated:** 2026-04-25 (v17.0.1)
 
 <!-- {mission} -->
 
@@ -816,6 +816,18 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-04-25 (v17.0.1, fix CI flaky test + shared ENV_LOCK)
+
+- Fixed `test_resolve_provider_auto_detects_from_env` failing in CI when the runner has API keys or a global config with `merge.provider` set
+- Root cause: the test relied on the host environment (ambient env vars and config files) to predict expected outcome, violating test isolation
+- Replaced with two fully deterministic tests that control their own environment:
+  - `test_resolve_provider_no_env_no_config_returns_error`: CWD to temp dir + clear all API key env vars, asserts `Err` with "No LLM provider" message
+  - `test_resolve_provider_detects_openai_from_env`: CWD to temp dir + set `OPENAI_API_KEY`, asserts `Ok` with provider "openai"
+- Both tests acquire `CWD_LOCK` then `ENV_LOCK` (consistent order to prevent deadlocks), save/restore all process-global state
+- Promoted `ENV_LOCK` from `llm.rs` test-local static to shared `pub(crate) static ENV_LOCK` in `lib.rs`; all env-var-manipulating tests now use the same lock across modules
+- Updated 4 tests in `llm.rs` to use `crate::ENV_LOCK` instead of the removed local static
+- Version bump: 17.0.0 to 17.0.1 (PATCH - test fix)
 
 ### 2026-04-25 (v17.0.0, config overhaul: key renames + workspace-scoped config)
 

@@ -751,19 +751,77 @@ mod tests
     }
 
     #[test]
-    fn test_resolve_provider_auto_detects_from_env()
+    fn test_resolve_provider_no_env_no_config_returns_error()
     {
-        let result = TemplateManager::resolve_provider_and_model();
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() == true || std::env::var("OPENAI_API_KEY").is_ok() == true || std::env::var("MISTRAL_API_KEY").is_ok() == true
+        let saved_cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(&temp).unwrap();
+
+        let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = std::env::var("OPENAI_API_KEY").ok();
+        let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+
+        let result = TemplateManager::resolve_provider_and_model();
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
+
+        if let Some(k) = saved_a
         {
-            assert!(result.is_ok() == true);
+            unsafe { std::env::set_var("ANTHROPIC_API_KEY", k) };
         }
-        else
+        if let Some(k) = saved_o
         {
-            assert!(result.is_err() == true);
-            assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
+            unsafe { std::env::set_var("OPENAI_API_KEY", k) };
         }
+        if let Some(k) = saved_m
+        {
+            unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
+        }
+        std::env::set_current_dir(saved_cwd).unwrap();
+    }
+
+    #[test]
+    fn test_resolve_provider_detects_openai_from_env()
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let saved_cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(&temp).unwrap();
+
+        let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
+        let saved_o = std::env::var("OPENAI_API_KEY").ok();
+        let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
+        unsafe { std::env::set_var("OPENAI_API_KEY", "test-key") };
+        unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+
+        let result = TemplateManager::resolve_provider_and_model();
+        assert!(result.is_ok() == true);
+        let (provider, _model) = result.unwrap();
+        assert_eq!(provider, "openai");
+
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
+        if let Some(k) = saved_a
+        {
+            unsafe { std::env::set_var("ANTHROPIC_API_KEY", k) };
+        }
+        if let Some(k) = saved_o
+        {
+            unsafe { std::env::set_var("OPENAI_API_KEY", k) };
+        }
+        if let Some(k) = saved_m
+        {
+            unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
+        }
+        std::env::set_current_dir(saved_cwd).unwrap();
     }
 
     #[test]

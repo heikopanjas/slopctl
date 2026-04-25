@@ -589,7 +589,7 @@ mod tests
     #[test]
     fn test_llm_client_missing_api_key()
     {
-        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved = env::var("OPENAI_API_KEY").ok();
         unsafe { env::remove_var("OPENAI_API_KEY") };
 
@@ -615,7 +615,7 @@ mod tests
     #[test]
     fn test_detect_from_env_anthropic()
     {
-        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved_a = env::var("ANTHROPIC_API_KEY").ok();
         let saved_o = env::var("OPENAI_API_KEY").ok();
         let saved_m = env::var("MISTRAL_API_KEY").ok();
@@ -646,7 +646,7 @@ mod tests
     #[test]
     fn test_detect_from_env_openai()
     {
-        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved_a = env::var("ANTHROPIC_API_KEY").ok();
         let saved_o = env::var("OPENAI_API_KEY").ok();
         let saved_m = env::var("MISTRAL_API_KEY").ok();
@@ -677,7 +677,7 @@ mod tests
     #[test]
     fn test_detect_from_env_none()
     {
-        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved_a = env::var("ANTHROPIC_API_KEY").ok();
         let saved_o = env::var("OPENAI_API_KEY").ok();
         let saved_m = env::var("MISTRAL_API_KEY").ok();
@@ -712,7 +712,4 @@ mod tests
         assert_eq!(Provider::Ollama.models_endpoint(), "http://localhost:11434/api/tags");
         assert_eq!(Provider::Mistral.models_endpoint(), "https://api.mistral.ai/v1/models");
     }
-
-    /// Serializes tests that modify environment variables
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

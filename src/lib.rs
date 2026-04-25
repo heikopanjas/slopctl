@@ -48,6 +48,11 @@ pub use utils::{
     FileActionResponse, collect_files_recursive, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents
 };
 
+/// Serializes tests that modify environment variables (process-global state).
+/// Shared across all test modules in the crate.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests
 {
