@@ -728,7 +728,7 @@ slopctl doctor [--fix] [--dry-run] [--verbose] [--smart]
 |------|-----------|--------|
 | **Missing** | File is tracked but no longer exists on disk (stale tracker entry) | `✗` |
 | **Unmerged** | AGENTS.md (main file) exists but still contains the template marker | `✗` |
-| **Modified** | File exists but SHA changed since installation (informational) | `!` |
+| **Modified** | File exists but SHA changed since installation (informational; main files like AGENTS.md are excluded since customization is expected) | `!` |
 
 **What `--fix` repairs:**
 
@@ -1579,4 +1579,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: April 10, 2026 (v13.3.0)
+Last updated: April 25, 2026 (v17.0.0)

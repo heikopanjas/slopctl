@@ -14,7 +14,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
-- **Serialization:** serde + serde_yaml for templates.yml, serde_json for file tracker
+- **Serialization:** serde + serde_yaml for templates.yml and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
