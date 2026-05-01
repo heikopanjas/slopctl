@@ -75,6 +75,9 @@ pub struct ResolvedFile
 ///
 /// Produced by `TemplateEngine::resolve_all_files()` and consumed by both `update()` (init)
 /// and the merge command.
+///
+/// Holds an owned `TempDir` for any GitHub-downloaded sources so the temp files
+/// remain on disk until the consumer has finished copying or reading them.
 pub struct ResolvedFiles
 {
     /// Main AGENTS.md template context (source, target, fragments, version)
@@ -82,7 +85,9 @@ pub struct ResolvedFiles
     /// Resolved file entries with provenance metadata
     pub files:       Vec<ResolvedFile>,
     /// Directories to create (agent-declared workspace directories)
-    pub directories: Vec<PathBuf>
+    pub directories: Vec<PathBuf>,
+    /// RAII guard keeping any GitHub-downloaded source files alive
+    _temp_dir:       tempfile::TempDir
 }
 
 /// A resolved file's content with provenance metadata for the merge command
@@ -493,7 +498,7 @@ impl<'a> TemplateEngine<'a>
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
 
-        Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create })
+        Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create, _temp_dir: temp_dir })
     }
 
     /// Builds a map from resolved workspace target path to fresh template content
@@ -1992,6 +1997,80 @@ languages:
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    /// Regression test for v17.0.2: GitHub-downloaded source files must remain on disk
+    /// after `resolve_all_files()` returns
+    ///
+    /// Before the fix, the `tempfile::TempDir` created inside `resolve_all_files()` was
+    /// dropped at function exit, deleting every GitHub-downloaded file referenced by
+    /// `ResolvedFiles.files`. The subsequent `copy_files_with_tracking()` then failed
+    /// with a bare `os error 2` (No such file or directory).
+    ///
+    /// The fix moves ownership of the `TempDir` into `ResolvedFiles._temp_dir` so it
+    /// lives until the consumer (init or merge) finishes. This test installs HTTP
+    /// hooks via `github::set_test_hooks`, drives the GitHub-skill code path through
+    /// `resolve_all_files()`, and asserts the source files still exist on the
+    /// returned `ResolvedFiles`.
+    #[test]
+    fn test_resolve_all_files_keeps_github_skill_temp_files_alive() -> anyhow::Result<()>
+    {
+        struct CwdGuard
+        {
+            original: PathBuf
+        }
+        impl Drop for CwdGuard
+        {
+            fn drop(&mut self)
+            {
+                let _ = std::env::set_current_dir(&self.original);
+            }
+        }
+
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+
+        let _restore = CwdGuard { original: std::env::current_dir()? };
+        std::env::set_current_dir(workspace.path())?;
+
+        fs::write(config_dir.path().join("AGENTS.md"), format!("{}\n# Test\n", TEMPLATE_MARKER))?;
+        let yml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nlanguages: {}\n";
+        fs::write(config_dir.path().join("templates.yml"), yml)?;
+
+        let _hooks = github::set_test_hooks(
+            Box::new(|_url| {
+                Ok(vec![github::GitHubContentEntry {
+                    name:         "SKILL.md".into(),
+                    entry_type:   "file".into(),
+                    download_url: Some("https://raw.githubusercontent.com/foo/bar/main/SKILL.md".into()),
+                    path:         "SKILL.md".into()
+                }])
+            }),
+            Box::new(|_url| Ok(b"# Mock Skill\n".to_vec()))
+        );
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let skills: Vec<String> = vec!["foo/bar".to_string()];
+        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
+
+        let resolved = engine.resolve_all_files(&options)?;
+
+        let github_files: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).collect();
+
+        assert!(github_files.is_empty() == false, "expected GitHub-sourced skill file in ResolvedFiles");
+
+        for entry in &github_files
+        {
+            assert!(
+                entry.source.exists() == true,
+                "GitHub-sourced temp file missing after resolve_all_files() returned: {} (this is the v17.0.2 TempDir-lifetime bug)",
+                entry.source.display()
+            );
+        }
+
         Ok(())
     }
 }
