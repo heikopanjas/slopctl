@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-01 (v17.0.3)
+**Last updated:** 2026-05-01 (v17.0.4)
 
 <!-- {mission} -->
 
@@ -797,10 +797,13 @@ The development environment uses **PowerShell on Windows**. All shell commands e
   "@
   ```
 
-- **Use multiple `-m` flags** for multi-line git commit messages:
+- **Single `-m` flag for the body of git commits**: each `-m` creates a separate paragraph with a blank line between it and the next, which breaks bullet lists. Put the subject in the first `-m` and the entire body (with embedded newlines) in a second `-m` using a PowerShell here-string, or write the message to a file and use `git commit -F <file>`:
 
   ```powershell
-  git commit -m "subject line" -m "- body point one" -m "- body point two"
+  git commit -m "subject line" -m @"
+  - body point one
+  - body point two
+  "@
   ```
 
 - **Use semicolons** (`;`) to chain commands, not `&&`
@@ -821,6 +824,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-01 (v17.0.4, fix multi-m commit body formatting guidance)
+
+- Fixed misleading guidance in the Windows/PowerShell section that recommended `git commit -m subject -m bullet1 -m bullet2 -m bullet3`; each `-m` flag creates a separate paragraph with a blank line between it and the next, which breaks bullet lists in the body
+- Replaced with: subject in the first `-m`, **entire body** with embedded newlines in a second `-m` (PowerShell here-string `@"..."@`, or `git commit -F <file>` for cross-shell safety)
+- Mirrored the fix into [templates/v5/skills/git-workflow/SKILL.md](templates/v5/skills/git-workflow/SKILL.md) under a new "Invoking git commit safely" subsection covering zsh/bash (`$'...'`), PowerShell (here-string), and cross-shell (`-F file`) approaches
+- Triggered by an actual occurrence: commit `a159c5c` (later amended to `634a2c8`) had blank lines between every bullet because the guidance was followed literally
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.3 to 17.0.4 (PATCH - documentation fix)
 
 ### 2026-05-01 (v17.0.3, prefer Option over sentinel enum variants)
 
