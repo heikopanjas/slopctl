@@ -6,6 +6,7 @@
 //! remote sources on-the-fly.
 
 use std::{
+    cell::RefCell,
     fs,
     io::{self, Write},
     path::{Path, PathBuf}
@@ -15,6 +16,56 @@ use owo_colors::OwoColorize;
 use serde::Deserialize;
 
 use crate::Result;
+
+/// Test injection hooks for HTTP-bound GitHub calls
+///
+/// When set (typically by tests via [`set_test_hooks`]), the hooks intercept
+/// [`list_directory_contents`] and [`download_file`] before any real network
+/// I/O happens. In production, both hooks remain `None` and the cost is a
+/// single thread-local read per call.
+type ListContentsHook = Box<dyn Fn(&GitHubUrl) -> Result<Vec<GitHubContentEntry>>>;
+type DownloadFileHook = Box<dyn Fn(&str) -> Result<Vec<u8>>>;
+
+thread_local! {
+    static LIST_CONTENTS_HOOK: RefCell<Option<ListContentsHook>> = const { RefCell::new(None) };
+    static DOWNLOAD_FILE_HOOK: RefCell<Option<DownloadFileHook>> = const { RefCell::new(None) };
+}
+
+/// RAII guard that clears the test hooks when dropped
+///
+/// Ensures hooks installed by one test do not leak into another even if the
+/// test panics or returns early.
+pub struct TestHookGuard
+{
+    _private: ()
+}
+
+impl Drop for TestHookGuard
+{
+    fn drop(&mut self)
+    {
+        LIST_CONTENTS_HOOK.with(|h| *h.borrow_mut() = None);
+        DOWNLOAD_FILE_HOOK.with(|h| *h.borrow_mut() = None);
+    }
+}
+
+/// Install test hooks for `list_directory_contents` and `download_file`
+///
+/// The hooks are thread-local; each test runs on its own thread under
+/// `cargo test`, so installations do not collide between tests. The returned
+/// guard clears the hooks on drop, so callers must keep it alive for the
+/// duration of the test.
+///
+/// # Arguments
+///
+/// * `list` - Replacement for [`list_directory_contents`]
+/// * `download` - Replacement for [`download_file`] (and therefore [`download_github_file`])
+pub fn set_test_hooks(list: ListContentsHook, download: DownloadFileHook) -> TestHookGuard
+{
+    LIST_CONTENTS_HOOK.with(|h| *h.borrow_mut() = Some(list));
+    DOWNLOAD_FILE_HOOK.with(|h| *h.borrow_mut() = Some(download));
+    TestHookGuard { _private: () }
+}
 
 /// A single entry returned by the GitHub Contents API
 #[derive(Debug, Deserialize)]
@@ -225,6 +276,11 @@ pub fn expand_shorthand(input: &str) -> String
 /// Returns an error if the API request fails or returns non-200
 pub fn list_directory_contents(github_url: &GitHubUrl) -> Result<Vec<GitHubContentEntry>>
 {
+    if let Some(result) = LIST_CONTENTS_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(github_url)))
+    {
+        return result;
+    }
+
     let api_url = github_url.contents_api_url();
 
     let client = reqwest::blocking::Client::new();
@@ -251,15 +307,22 @@ pub fn list_directory_contents(github_url: &GitHubUrl) -> Result<Vec<GitHubConte
 /// Returns an error if the download or file write fails
 pub fn download_file(url: &str, dest_path: &Path) -> Result<()>
 {
-    let client = reqwest::blocking::Client::new();
-    let response = client.get(url).header("User-Agent", "slopctl").send()?;
-
-    if response.status().is_success() == false
+    let content = if let Some(result) = DOWNLOAD_FILE_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(url)))
     {
-        return Err(anyhow::anyhow!("Failed to download {}: HTTP {}", url, response.status()));
+        result?
     }
+    else
+    {
+        let client = reqwest::blocking::Client::new();
+        let response = client.get(url).header("User-Agent", "slopctl").send()?;
 
-    let content = response.bytes()?;
+        if response.status().is_success() == false
+        {
+            return Err(anyhow::anyhow!("Failed to download {}: HTTP {}", url, response.status()));
+        }
+
+        response.bytes()?.to_vec()
+    };
 
     if let Some(parent) = dest_path.parent()
     {

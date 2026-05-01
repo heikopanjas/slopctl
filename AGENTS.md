@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-25 (v17.0.1)
+**Last updated:** 2026-05-01 (v17.0.3)
 
 <!-- {mission} -->
 
@@ -323,6 +323,11 @@ Load the `rust-build-commands` skill when building or running the project.
       return Err("Missing value".into());
   };
   ```
+
+- Prefer `Option<T>` over sentinel enum variants. Do not add `Invalid`, `Unknown`, or `None` variants to an enum solely to avoid wrapping it in `Option`. `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time, whereas sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm.
+  - ❌ Incorrect: `enum Color { Invalid, Red, Green, Blue }` returned from a parser
+  - ✅ Correct: `enum Color { Red, Green, Blue }` with `Option<Color>` at the boundary
+  - Exception: when "unknown" is a meaningful domain state — e.g. forward-compatible protocol parsing where unrecognized variants must round-trip — model it explicitly (`HttpVersion::Unknown(String)`). This is "modeling the domain accurately," not "avoiding `Option`."
 
 **CLI Design with clap:**
 
@@ -816,6 +821,31 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-01 (v17.0.3, prefer Option over sentinel enum variants)
+
+- Added new convention to the Enums and Pattern Matching section: prefer `Option<T>` over adding `Invalid`/`Unknown`/`None` sentinel variants to enums
+- Rationale: `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time; sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm, working against Rust's "make illegal states unrepresentable" principle
+- Documented narrow exception: when "unknown" is a meaningful domain state (e.g. forward-compatible protocol parsing where unrecognized variants must round-trip), model it explicitly with a payload-carrying variant like `HttpVersion::Unknown(String)`
+- Mirrored the rule into [templates/v5/skills/rust-coding-conventions/SKILL.md](templates/v5/skills/rust-coding-conventions/SKILL.md) so future installs receive it
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.2 to 17.0.3 (PATCH - convention addition, no behavior change)
+
+### 2026-05-01 (v17.0.2, fix TempDir dropped before GitHub-sourced files copied)
+
+- Fixed `init` (and `merge`) failing with bare `os error 2` (No such file or directory) whenever a skill or template entry was sourced from a GitHub URL
+- Root cause: `TemplateEngine::resolve_all_files()` created a `tempfile::TempDir`, downloaded GitHub sources into it, pushed the temp paths into `ResolvedFiles.files`, and then returned. The `TempDir` was dropped at function exit, deleting all downloaded files before `copy_files_with_tracking()` ran. The same flaw silently truncated `build_target_content_map()` (used by `merge`), which skipped GitHub-sourced entries via `if entry.source.exists()`
+- Reproduced with `slopctl init --lang swift`: local skills (`swift-coding-conventions`, `swift-build-commands`) succeeded because they live in `config_dir`, but the GitHub-fetched `swift-concurrency-pro` skill failed at copy time
+- Fix: added `_temp_dir: tempfile::TempDir` field to `ResolvedFiles` so the temp directory is owned by the result struct and lives until the consumer (init or merge) finishes. RAII guard with leading underscore signals "holds resource alive, never read"
+- Hardened `utils::copy_file_with_mkdir` to wrap `fs::create_dir_all` and `fs::copy` errors with `anyhow::anyhow!` context including the source and target paths, so future failures show which file failed instead of a bare ENOENT
+- Added test injection infrastructure for GitHub HTTP calls in `github.rs`:
+  - Two thread-local hooks (`LIST_CONTENTS_HOOK`, `DOWNLOAD_FILE_HOOK`) checked at the top of `list_directory_contents()` and `download_file()` before any real `reqwest` call. In production both stay `None` and the cost is one thread-local read per call
+  - `pub fn set_test_hooks(list, download) -> TestHookGuard`: tests install the hooks; the returned RAII guard clears them on drop so they cannot leak between tests
+  - Tests can drive the entire GitHub-skill code path (discover_skills, download_directory_from_entries, download_file) without network I/O
+- Added regression test `test_resolve_all_files_keeps_github_skill_temp_files_alive` that mocks the GitHub Contents API and raw download endpoint, calls `resolve_all_files()` with a `--skill foo/bar` ad-hoc skill, and asserts every GitHub-sourced `entry.source.exists()` is `true` after the function returns. Verified to fail loudly under the buggy code (panics with the temp path that no longer exists) and pass under the fix
+- Test isolation: uses `CWD_LOCK` and an inline `CwdGuard` Drop helper to restore cwd even on assertion panic
+- Pre-existing test-suite flakiness (~25% failure rate under parallel execution due to other tests mutating process-global cwd/env without consistent locking) is unchanged by this work and remains a known issue
+- Version bump: 17.0.1 to 17.0.2 (PATCH - bug fix)
 
 ### 2026-04-25 (v17.0.1, fix CI flaky test + shared ENV_LOCK)
 

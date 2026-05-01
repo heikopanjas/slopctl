@@ -35,37 +35,37 @@ version: 5
 # Main instruction file - single source of truth for all agents
 main:
   source: AGENTS.md
-  target: '$workspace/AGENTS.md'
+  target: "$workspace/AGENTS.md"
 
 # Agent-specific instruction files and prompts/commands
 agents:
   claude:
     instructions:
       - source: claude/CLAUDE.md
-        target: '$workspace/CLAUDE.md'
+        target: "$workspace/CLAUDE.md"
     prompts:
       - source: claude/commands/init-session.md
-        target: '$workspace/.claude/commands/init-session.md'
+        target: "$workspace/.claude/commands/init-session.md"
 
   copilot:
     instructions:
       - source: copilot/copilot-instructions.md
-        target: '$workspace/.github/copilot-instructions.md'
+        target: "$workspace/.github/copilot-instructions.md"
     prompts:
       - source: copilot/prompts/init-session.prompt.md
-        target: '$workspace/.github/prompts/init-session.prompt.md'
+        target: "$workspace/.github/prompts/init-session.prompt.md"
 
   codex: {}
 
   cursor:
     instructions:
       - source: cursor/cursorrules
-        target: '$workspace/.cursorrules'
+        target: "$workspace/.cursorrules"
     prompts:
       - source: cursor/commands/init-session.md
-        target: '$workspace/.cursor/commands/init-session.md'
+        target: "$workspace/.cursor/commands/init-session.md"
     directories:
-      - target: '$workspace/.cursor/plans'
+      - target: "$workspace/.cursor/plans"
 
 # Reusable file groups shared across multiple languages
 # Each group has `files` (FileMapping list) and optional `skills` (SkillDefinition list).
@@ -74,12 +74,12 @@ shared:
   cmake:
     files:
       - source: cmake-skills-hint.md
-        target: '$instructions'
+        target: "$instructions"
       - source: cmake-git-ignore.txt
-        target: '$workspace/.gitignore'
+        target: "$workspace/.gitignore"
     skills:
       - name: cmake-build-commands
-        source: 'skills/cmake-build-commands'
+        source: "skills/cmake-build-commands"
 
 # Language-specific coding standards templates
 languages:
@@ -87,90 +87,92 @@ languages:
     includes: [ cmake ]
     files:
       - source: c-skills-hint.md
-        target: '$instructions'
+        target: "$instructions"
       - source: c-format-instructions.yml
-        target: '$workspace/.clang-format'
+        target: "$workspace/.clang-format"
       - source: c-editor-config.ini
-        target: '$workspace/.editorconfig'
+        target: "$workspace/.editorconfig"
     skills:
       - name: c-coding-conventions
-        source: 'skills/c-coding-conventions'
+        source: "skills/c-coding-conventions"
   c++:
     includes: [ cmake ]
     files:
       - source: c++-skills-hint.md
-        target: '$instructions'
+        target: "$instructions"
       - source: c++-format-instructions.yml
-        target: '$workspace/.clang-format'
+        target: "$workspace/.clang-format"
       - source: c++-editor-config.ini
-        target: '$workspace/.editorconfig'
+        target: "$workspace/.editorconfig"
     skills:
       - name: c++-coding-conventions
-        source: 'skills/c++-coding-conventions'
+        source: "skills/c++-coding-conventions"
   rust:
     files:
       - source: rust-skills-hint.md
-        target: '$instructions'
+        target: "$instructions"
       - source: rust-format-instructions.toml
-        target: '$workspace/.rustfmt.toml'
+        target: "$workspace/.rustfmt.toml"
       - source: rust-editor-config.ini
-        target: '$workspace/.editorconfig'
+        target: "$workspace/.editorconfig"
       - source: rust-git-ignore.txt
-        target: '$workspace/.gitignore'
+        target: "$workspace/.gitignore"
     skills:
       - name: rust-coding-conventions
-        source: 'skills/rust-coding-conventions'
+        source: "skills/rust-coding-conventions"
       - name: rust-build-commands
-        source: 'skills/rust-build-commands'
+        source: "skills/rust-build-commands"
   swift:
     files:
       - source: swift-skills-hint.md
-        target: '$instructions'
+        target: "$instructions"
       - source: swift-format-instructions.json
-        target: '$workspace/.swift-format'
+        target: "$workspace/.swift-format"
       - source: swift-editor-config.ini
-        target: '$workspace/.editorconfig'
+        target: "$workspace/.editorconfig"
       - source: swift-git-ignore.txt
-        target: '$workspace/.gitignore'
+        target: "$workspace/.gitignore"
     skills:
       - name: swift-coding-conventions
-        source: 'skills/swift-coding-conventions'
+        source: "skills/swift-coding-conventions"
       - name: swift-build-commands
-        source: 'skills/swift-build-commands'
+        source: "skills/swift-build-commands"
       - name: swift-concurrency-pro
-        source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
+        source: "https://github.com/twostraws/Swift-Concurrency-Agent-Skill"
+      - name: swift-testing-pro
+        source: "https://github.com/twostraws/Swift-Testing-Agent-Skill"
 
   swiftui:
     includes: [ swift ]
     skills:
       - name: swiftui-pro
-        source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
+        source: "https://github.com/twostraws/SwiftUI-Agent-Skill"
 
 # Integration templates for specific tools/workflows
 integration:
   git:
     files:
       - source: git-workflow-summary.md
-        target: '$instructions'
+        target: "$instructions"
       - source: git-attributes-common.txt
-        target: '$workspace/.gitattributes'
+        target: "$workspace/.gitattributes"
   versioning:
     files:
       - source: semantic-versioning-summary.md
-        target: '$instructions'
+        target: "$instructions"
 
 # General templates that apply to all projects
 principles:
   - source: core-principles.md
-    target: '$instructions'
+    target: "$instructions"
   - source: best-practices.md
-    target: '$instructions'
+    target: "$instructions"
 
 mission:
   - source: mission-statement.md
-    target: '$instructions'
+    target: "$instructions"
   - source: technology-stack.md
-    target: '$instructions'
+    target: "$instructions"
 
 # Agent-agnostic skills (installed based on --agent or to cross-client .agents/skills/)
 #
@@ -181,6 +183,6 @@ mission:
 # or languages.<name>.skills respectively (see V4 additions above).
 skills:
   - name: git-workflow
-    source: 'skills/git-workflow'
+    source: "skills/git-workflow"
   - name: semantic-versioning
-    source: 'skills/semantic-versioning'
+    source: "skills/semantic-versioning"
