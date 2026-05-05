@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-01 (v17.0.4)
+**Last updated:** 2026-05-05 (v17.1.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,22 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-05 (v17.1.0, skill-aware AGENTS.md merge)
+
+- Extended the `merge` command to make AGENTS.md skill-aware: when AGENTS.md is diverged, the LLM additionally receives every SKILL.md in the resolved template set and is instructed to drop AGENTS.md content already covered by a skill (skill becomes the canonical source)
+- Rationale: as more conventions migrate from inline AGENTS.md prose into skills (per the 2026-04-03 templates-to-skills migration), users' customised AGENTS.md files keep duplicating content the skills now own; the merge step is the natural place to deduplicate
+- Behaviour is purely additive: all existing merge functionality (classification, changelog marker handling, streaming, `--preview`/`--dry-run`/`--verbose`, partial recovery, token accounting, FileTracker updates) is unchanged; non-AGENTS.md diverged files still use the legacy prompt verbatim
+- Implementation in [src/template_manager/merge.rs](src/template_manager/merge.rs):
+  - New free fn `collect_skills(content_map)` filters entries whose target file name is `SKILL.md`, takes the parent directory name as the skill name, and returns sorted `(name, content)` pairs
+  - Added `is_main: bool` field to `FileClass::Diverged`; set inside `classify_files()` via `target.file_name() == Some("AGENTS.md")`
+  - `build_merge_messages()` signature changed to take `skills: &[(String, String)]`; an empty slice produces a byte-identical message to v17.0.4 (proven by `test_build_merge_messages_no_skills_matches_legacy`); a non-empty slice appends an `<available_skills>` block listing each `### name` plus full SKILL.md content and a closing instruction to remove duplicates
+  - Added rule 9 to `MERGE_SYSTEM_PROMPT` describing skill-priority deduplication; tweaked rule 1's parenthetical to permit removals when content is now covered by a skill while reaffirming rule 8's append-only changelog guarantee
+  - In `merge()` loop: `collect_skills()` is called once after `classify_files()`; the diverged arm passes `&skills` only when `is_main == true`, otherwise `&[]`
+- Decisions (from clarifying questions): scope = AGENTS.md only; skills considered = every SKILL.md in the resolved template set (regardless of disk state); skill payload = full SKILL.md content per skill (no referenced sub-files)
+- Added 5 new tests: `test_collect_skills_filters_skill_md_only`, `test_collect_skills_extracts_parent_dir_name`, `test_collect_skills_empty_map_returns_empty`, `test_build_merge_messages_includes_skills_block`, `test_build_merge_messages_no_skills_matches_legacy`, `test_classify_files_marks_agents_md_as_main`
+- No CLI flags, options, or output formats changed
+- Version bump: 17.0.4 to 17.1.0 (MINOR - additive merge behaviour, fully backwards compatible)
 
 ### 2026-05-01 (v17.0.4, fix multi-m commit body formatting guidance)
 

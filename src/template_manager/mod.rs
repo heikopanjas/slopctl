@@ -180,6 +180,50 @@ impl TemplateManager
 #[cfg(test)]
 pub(crate) static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// One-time-cached "known good" cwd for test isolation.
+///
+/// Initialised by `cwd_test_guard()` on its first invocation. Used as the
+/// recovery target whenever a previous test panicked while inside a tempdir
+/// that has since been removed (which would otherwise make `current_dir()`
+/// fail with ENOENT and cascade across the suite).
+#[cfg(test)]
+static ORIGINAL_CWD: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// RAII guard that holds `CWD_LOCK` and restores cwd on drop
+#[cfg(test)]
+pub(crate) struct CwdTestGuard
+{
+    _lock: std::sync::MutexGuard<'static, ()>
+}
+
+#[cfg(test)]
+impl Drop for CwdTestGuard
+{
+    fn drop(&mut self)
+    {
+        if let Some(orig) = ORIGINAL_CWD.get()
+        {
+            let _ = std::env::set_current_dir(orig);
+        }
+    }
+}
+
+/// Test helper: locks `CWD_LOCK`, restores cwd to a known-good directory, and
+/// returns a guard that re-restores cwd on drop.
+///
+/// Use at the top of any test that calls `std::env::set_current_dir`. The
+/// helper recovers transparently if a previous test panicked inside a tempdir
+/// that has been cleaned up (cwd points at a deleted inode), by resetting cwd
+/// to the cached startup directory before the new test runs.
+#[cfg(test)]
+pub(crate) fn cwd_test_guard() -> CwdTestGuard
+{
+    let lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let orig = ORIGINAL_CWD.get_or_init(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
+    let _ = std::env::set_current_dir(orig);
+    CwdTestGuard { _lock: lock }
+}
+
 #[cfg(test)]
 mod tests
 {

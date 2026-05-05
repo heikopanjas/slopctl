@@ -429,7 +429,7 @@ mod tests
     use crate::{
         bom::BillOfMaterials,
         file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
-        template_manager::CWD_LOCK
+        template_manager::cwd_test_guard
     };
 
     #[test]
@@ -484,7 +484,7 @@ mod tests
     #[test]
     fn test_remove_lang_unknown_no_error() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = cwd_test_guard();
 
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -500,8 +500,6 @@ mod tests
     #[test]
     fn test_remove_agent_falls_back_to_file_tracker() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -515,13 +513,11 @@ mod tests
         tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("cursor"), None, &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -530,8 +526,6 @@ mod tests
     #[test]
     fn test_remove_lang_falls_back_to_file_tracker() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -545,13 +539,11 @@ mod tests
         tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, Some("rust"), &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -560,8 +552,6 @@ mod tests
     #[test]
     fn test_remove_lang_fallback_excludes_main_and_skill() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -580,13 +570,11 @@ mod tests
         tracker.record_installation(&skill_file, "sha3".into(), 5, "rust".into(), AGENT_ALL.into(), "skill".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, Some("rust"), &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -595,8 +583,6 @@ mod tests
     #[test]
     fn test_remove_agent_discovers_untracked_skill_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -612,13 +598,11 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("cursor"), None, &[], true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -628,8 +612,6 @@ mod tests
     #[test]
     fn test_remove_all_discovers_untracked_skill_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -639,13 +621,11 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, None, &[], true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -655,8 +635,6 @@ mod tests
     #[test]
     fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -669,7 +647,7 @@ mod tests
         tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         // Use dry-run to inspect what would be removed without side effects.
@@ -678,8 +656,6 @@ mod tests
         // .system and other workspaces' skills).
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("codex"), None, &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
