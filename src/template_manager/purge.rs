@@ -190,24 +190,20 @@ mod tests
     use super::TemplateManager;
     use crate::{
         file_tracker::{FileTracker, LANG_NONE},
-        template_manager::CWD_LOCK
+        template_manager::cwd_test_guard
     };
 
     #[test]
     fn test_purge_dry_run_no_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.purge(false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -216,8 +212,6 @@ mod tests
     #[test]
     fn test_purge_deduplicates_bom_and_tracker_paths() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -234,13 +228,11 @@ mod tests
         tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.purge(true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         // The file should have been removed exactly once (no double-removal error)
@@ -251,8 +243,6 @@ mod tests
     #[test]
     fn test_purge_discovers_untracked_skill_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -262,13 +252,11 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.purge(true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         // The untracked skill file should have been discovered and removed
@@ -279,8 +267,6 @@ mod tests
     #[test]
     fn test_purge_skips_userprofile_skill_dir_scan() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -293,15 +279,13 @@ mod tests
         tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         // Purge should succeed without scanning ~/.codex/skills (userprofile dir).
         // Only workspace-scoped dirs and FileTracker entries are used.
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.purge(true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         // The tracked codex file should be removed

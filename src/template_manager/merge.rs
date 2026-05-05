@@ -57,16 +57,19 @@ enum FileClass
         user_changelog:   Option<String>,
         lang:             String,
         agent:            String,
-        display:          String
+        display:          String,
+        /// True when this file is the main AGENTS.md; enables skill-aware merging
+        is_main:          bool
     }
 }
 
 /// System prompt instructing the LLM how to perform the merge
-const MERGE_SYSTEM_PROMPT: &str = "\
+const MERGE_SYSTEM_PROMPT: &str =
+    "\
 You are a file merge assistant that combines user-customized configuration files with updated templates. Follow these rules strictly:
 
 1. PRESERVE all user customizations: added sections, modified content, custom notes, project-specific information, and any user-authored text. The merged output must \
-                                   be ADDITIVE — never shorter than the user's current file unless removing an exact duplicate.
+     be ADDITIVE — never shorter than the user's current file unless removing an exact duplicate or content now covered by an <available_skills> entry (see rule 9).
 2. INCORPORATE all new content from the updated template: new sections, updated instructions, structural changes, and new conventions.
 3. When both files define the same section, prefer the user's version but integrate any genuinely new information from the template.
 4. Maintain the overall document structure and formatting of the user's file.
@@ -74,8 +77,11 @@ You are a file merge assistant that combines user-customized configuration files
 6. If the template introduces a new section that the user's file does not have, insert it in a natural location that matches the template's ordering.
 7. Do NOT remove any user content unless it directly contradicts a template change (in which case prefer the template's factual updates but keep user customizations).
 8. CRITICAL: Changelog, history, and log sections (such as 'Recent Updates & Decisions') must be preserved IN FULL. Every single entry must appear in the output \
-                                   exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or \
-                                   condensed.";
+     exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or condensed.
+9. SKILL DEDUPLICATION: When the user message contains an <available_skills> block, each entry inside it is the canonical source for the topic it covers. If any \
+     guidance, conventions, build commands, coding rules, or other instructions in <current_file> are already covered by a skill, REMOVE the duplicated content from \
+     the merged output and rely on the skill instead. You may keep a brief one-line reference naming the skill, but do not retain duplicated prose. This rule does \
+     NOT override rule 8: changelog sections are still preserved in full.";
 
 impl TemplateManager
 {
@@ -163,6 +169,7 @@ impl TemplateManager
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
         let classified = classify_files(&content_map, &workspace);
+        let skills = collect_skills(&content_map);
 
         let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
         let diverged_count = classified.iter().filter(|c| matches!(c, FileClass::Diverged { .. })).count();
@@ -237,7 +244,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display, is_main } =>
                 {
                     if dry_run == true
                     {
@@ -286,7 +293,14 @@ impl TemplateManager
                         continue;
                     }
 
-                    let messages = build_merge_messages(user_content, template_content);
+                    let messages = if *is_main == true
+                    {
+                        build_merge_messages(user_content, template_content, &skills)
+                    }
+                    else
+                    {
+                        build_merge_messages(user_content, template_content, &[])
+                    };
 
                     if verbose == true
                     {
@@ -490,6 +504,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
     {
         let display = target.strip_prefix(workspace).unwrap_or(target).display().to_string();
         let template_content = &resolved.content;
+        let is_main = target.file_name().is_some_and(|n| n == "AGENTS.md");
 
         if target.exists() == false
         {
@@ -522,7 +537,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                         user_changelog: Some(user_lower.to_string()),
                         lang: resolved.lang.clone(),
                         agent: resolved.agent.clone(),
-                        display
+                        display,
+                        is_main
                     });
                 }
             }
@@ -535,7 +551,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                     user_changelog: None,
                     lang: resolved.lang.clone(),
                     agent: resolved.agent.clone(),
-                    display
+                    display,
+                    is_main
                 });
             }
         }
@@ -548,7 +565,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 user_changelog: None,
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
-                display
+                display,
+                is_main
             });
         }
     }
@@ -629,16 +647,68 @@ fn print_incoming_footer()
 }
 
 /// Builds the LLM messages for a merge operation
-fn build_merge_messages(user_content: &str, template_content: &str) -> Vec<ChatMessage>
+///
+/// When `skills` is non-empty, an `<available_skills>` block is appended to the
+/// user message and the LLM is instructed to remove duplicated content from the
+/// merged output (skill becomes the canonical source). With an empty slice the
+/// produced messages are byte-identical to the legacy v17.0.4 format.
+fn build_merge_messages(user_content: &str, template_content: &str, skills: &[(String, String)]) -> Vec<ChatMessage>
 {
-    vec![ChatMessage { role: "system".to_string(), content: MERGE_SYSTEM_PROMPT.to_string() }, ChatMessage {
-        role:    "user".to_string(),
-        content: format!(
+    let user_body = if skills.is_empty() == true
+    {
+        format!(
             "<current_file>\n{}\n</current_file>\n\n<updated_template>\n{}\n</updated_template>\n\nMerge these files. Preserve all user customizations while \
              incorporating template updates. Output ONLY the merged file content.",
             user_content, template_content
         )
-    }]
+    }
+    else
+    {
+        let mut skills_block = String::from("<available_skills>\n");
+        for (name, content) in skills
+        {
+            skills_block.push_str("### ");
+            skills_block.push_str(name);
+            skills_block.push_str("\n\n");
+            skills_block.push_str(content);
+            skills_block.push_str("\n\n");
+        }
+        skills_block.push_str("</available_skills>");
+
+        format!(
+            "<current_file>\n{}\n</current_file>\n\n<updated_template>\n{}\n</updated_template>\n\n{}\n\nMerge these files. Preserve all user customizations while \
+             incorporating template updates. Additionally, if any guidance in <current_file> is already covered by an entry in <available_skills>, REMOVE the \
+             duplicated prose from the merged output and rely on the skill instead (the skill is the canonical source). Output ONLY the merged file content.",
+            user_content, template_content, skills_block
+        )
+    };
+
+    vec![ChatMessage { role: "system".to_string(), content: MERGE_SYSTEM_PROMPT.to_string() }, ChatMessage { role: "user".to_string(), content: user_body }]
+}
+
+/// Collects every SKILL.md present in the resolved template set
+///
+/// Returns `(skill_name, skill_md_content)` pairs sorted by skill name. The
+/// skill name is the parent directory name of each `SKILL.md` target. Used by
+/// the merge command to make AGENTS.md skill-aware.
+fn collect_skills(content_map: &HashMap<PathBuf, ResolvedContent>) -> Vec<(String, String)>
+{
+    let mut skills: Vec<(String, String)> = content_map
+        .iter()
+        .filter_map(|(target, resolved)| {
+            if target.file_name().is_some_and(|n| n == "SKILL.md") == true &&
+                let Some(name) = target.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+            {
+                Some((name.to_string(), resolved.content.clone()))
+            }
+            else
+            {
+                None
+            }
+        })
+        .collect();
+    skills.sort_by(|a, b| a.0.cmp(&b.0));
+    skills
 }
 
 /// Reassembles a merged template half with the user's original changelog.
@@ -741,31 +811,36 @@ mod tests
     #[test]
     fn test_build_merge_messages()
     {
-        let messages = build_merge_messages("user content", "template content");
+        let messages = build_merge_messages("user content", "template content", &[]);
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "system");
         assert!(messages[0].content.contains("file merge assistant") == true);
         assert_eq!(messages[1].role, "user");
         assert!(messages[1].content.contains("user content") == true);
         assert!(messages[1].content.contains("template content") == true);
+        assert!(messages[1].content.contains("<available_skills>") == false);
     }
 
     #[test]
     fn test_resolve_provider_no_env_no_config_returns_error()
     {
-        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cwd = crate::template_manager::cwd_test_guard();
         let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        let saved_cwd = std::env::current_dir().unwrap();
         let temp = tempfile::tempdir().unwrap();
         std::env::set_current_dir(&temp).unwrap();
 
         let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
         let saved_o = std::env::var("OPENAI_API_KEY").ok();
         let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        let saved_xdg = std::env::var("XDG_CONFIG_HOME").ok();
         unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
         unsafe { std::env::remove_var("OPENAI_API_KEY") };
         unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+        // Isolate the global config so a developer's ~/.config/slopctl/config.yml
+        // (which may set merge.provider) cannot leak into this test.
+        let config_temp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
         let result = TemplateManager::resolve_provider_and_model();
         assert!(result.is_err() == true);
@@ -783,25 +858,35 @@ mod tests
         {
             unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
         }
-        std::env::set_current_dir(saved_cwd).unwrap();
+        if let Some(v) = saved_xdg
+        {
+            unsafe { std::env::set_var("XDG_CONFIG_HOME", v) };
+        }
+        else
+        {
+            unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        }
     }
 
     #[test]
     fn test_resolve_provider_detects_openai_from_env()
     {
-        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _cwd = crate::template_manager::cwd_test_guard();
         let _env = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-        let saved_cwd = std::env::current_dir().unwrap();
         let temp = tempfile::tempdir().unwrap();
         std::env::set_current_dir(&temp).unwrap();
 
         let saved_a = std::env::var("ANTHROPIC_API_KEY").ok();
         let saved_o = std::env::var("OPENAI_API_KEY").ok();
         let saved_m = std::env::var("MISTRAL_API_KEY").ok();
+        let saved_xdg = std::env::var("XDG_CONFIG_HOME").ok();
         unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
         unsafe { std::env::set_var("OPENAI_API_KEY", "test-key") };
         unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+        // Isolate global config so merge.provider/merge.model cannot leak in.
+        let config_temp = tempfile::tempdir().unwrap();
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
         let result = TemplateManager::resolve_provider_and_model();
         assert!(result.is_ok() == true);
@@ -821,7 +906,14 @@ mod tests
         {
             unsafe { std::env::set_var("MISTRAL_API_KEY", k) };
         }
-        std::env::set_current_dir(saved_cwd).unwrap();
+        if let Some(v) = saved_xdg
+        {
+            unsafe { std::env::set_var("XDG_CONFIG_HOME", v) };
+        }
+        else
+        {
+            unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        }
     }
 
     #[test]
@@ -1080,6 +1172,108 @@ mod tests
         let merged = "full merged content";
         let result = reassemble(merged, &None);
         assert_eq!(result, "full merged content");
+    }
+
+    #[test]
+    fn test_collect_skills_filters_skill_md_only()
+    {
+        let mut map = HashMap::new();
+        map.insert(PathBuf::from("/ws/.agents/skills/git-workflow/SKILL.md"), rc("git skill body"));
+        map.insert(PathBuf::from("/ws/AGENTS.md"), rc("agents body"));
+        map.insert(PathBuf::from("/ws/conventions.md"), rc("conv body"));
+        map.insert(PathBuf::from("/ws/.agents/skills/semver/SKILL.md"), rc("semver skill body"));
+
+        let skills = collect_skills(&map);
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].0, "git-workflow");
+        assert_eq!(skills[0].1, "git skill body");
+        assert_eq!(skills[1].0, "semver");
+        assert_eq!(skills[1].1, "semver skill body");
+    }
+
+    #[test]
+    fn test_collect_skills_extracts_parent_dir_name()
+    {
+        let mut map = HashMap::new();
+        map.insert(PathBuf::from("/ws/.cursor/skills/my-skill/SKILL.md"), rc("body"));
+        let skills = collect_skills(&map);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].0, "my-skill");
+    }
+
+    #[test]
+    fn test_collect_skills_empty_map_returns_empty()
+    {
+        let map: HashMap<PathBuf, ResolvedContent> = HashMap::new();
+        assert!(collect_skills(&map).is_empty() == true);
+    }
+
+    #[test]
+    fn test_build_merge_messages_includes_skills_block()
+    {
+        let skills = vec![("git-workflow".to_string(), "git skill body".to_string()), ("semver".to_string(), "semver skill body".to_string())];
+        let messages = build_merge_messages("user content", "template content", &skills);
+        assert_eq!(messages.len(), 2);
+        let user_msg = &messages[1].content;
+        assert!(user_msg.contains("<available_skills>") == true);
+        assert!(user_msg.contains("</available_skills>") == true);
+        assert!(user_msg.contains("### git-workflow") == true);
+        assert!(user_msg.contains("### semver") == true);
+        assert!(user_msg.contains("git skill body") == true);
+        assert!(user_msg.contains("semver skill body") == true);
+        assert!(user_msg.contains("REMOVE") == true);
+        assert!(user_msg.contains("canonical source") == true);
+    }
+
+    #[test]
+    fn test_build_merge_messages_no_skills_matches_legacy()
+    {
+        let messages = build_merge_messages("u", "t", &[]);
+        let expected_user = "<current_file>\nu\n</current_file>\n\n<updated_template>\nt\n</updated_template>\n\nMerge these files. Preserve all user customizations \
+                             while incorporating template updates. Output ONLY the merged file content.";
+        assert_eq!(messages[1].content, expected_user);
+    }
+
+    #[test]
+    fn test_classify_files_marks_agents_md_as_main() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let agents = workspace.join("AGENTS.md");
+        let other = workspace.join("CLAUDE.md");
+        fs::write(&agents, "user agents")?;
+        fs::write(&other, "user claude")?;
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&agents), rc("template agents"));
+        map.insert(normalize_path(&other), rc("template claude"));
+
+        let classified = classify_files(&map, workspace);
+        assert_eq!(classified.len(), 2);
+
+        let mut saw_main = false;
+        let mut saw_non_main = false;
+        for c in &classified
+        {
+            if let FileClass::Diverged { target, is_main, .. } = c
+            {
+                let name = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "AGENTS.md"
+                {
+                    assert!(*is_main == true);
+                    saw_main = true;
+                }
+                else if name == "CLAUDE.md"
+                {
+                    assert!(*is_main == false);
+                    saw_non_main = true;
+                }
+            }
+        }
+        assert!(saw_main == true);
+        assert!(saw_non_main == true);
+        Ok(())
     }
 
     #[test]
