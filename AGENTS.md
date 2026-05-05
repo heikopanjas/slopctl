@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-05 (v17.1.0)
+**Last updated:** 2026-05-05 (v17.1.1)
 
 <!-- {mission} -->
 
@@ -824,6 +824,21 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-05 (v17.1.1, fix purge silently deleting customized AGENTS.md)
+
+- Fixed `purge` deleting a customized (user-modified) AGENTS.md while simultaneously printing the "AGENTS.md has been customized and was not deleted" preservation message
+- Root cause: AGENTS.md is normally tracked in `FileTracker` (and may also appear in the BoM agent-file sweep), so it was added to `files_to_purge` *before* the AGENTS.md skip-decision block ran. The skip block only set the `agents_md_skipped` flag and never removed the file from the deletion queue, so the deletion loop happily unlinked the customized file and the user got a contradictory success message
+- Also fixed an incidental brittleness: the prior "already in list?" check used `f.ends_with("AGENTS.md")` which would match any path whose final component happens to be `AGENTS.md` (e.g. nested workspace files); replaced with canonical-path equality so symlinked workspace roots (macOS `/var` -> `/private/var`) and unrelated `AGENTS.md` files behave correctly
+- Implementation in [src/template_manager/purge.rs](src/template_manager/purge.rs):
+  - Extracted file-collection + AGENTS.md decision into a new private helper `TemplateManager::collect_purge_targets(current_dir, force) -> Result<(Vec<PathBuf>, bool, PathBuf)>` returning `(files_to_purge, agents_md_skipped, agents_md_path)`. Splitting collection from deletion makes the logic unit-testable without hitting the interactive `confirm_action` stdin prompt that `purge(false, false)` would otherwise trigger
+  - When `agents_md_customized == true && force == false`: set `agents_md_skipped = true` AND `files_to_purge.retain(|f| canonical(f) != canonical(agents_md))` so any prior tracker/BoM-sourced entry is dropped
+  - When AGENTS.md is *not* being skipped, the "already in list?" guard uses canonical-path equality instead of `ends_with`
+  - Canonicalization wrapped with `unwrap_or_else(|_| path.clone())` so a missing/inaccessible file does not panic; it simply falls through to an unequal comparison
+- Added regression test `test_purge_preserves_customized_agents_md_when_tracked`: writes a customized AGENTS.md (no `TEMPLATE_MARKER`), records it in `FileTracker`, then asserts that `collect_purge_targets(force=false)` returns `agents_md_skipped == true` AND no canonical match for AGENTS.md in the queue; also asserts `force=true` queues the file as expected. Verified to fail under the buggy code and pass under the fix
+- Test uses the helper directly to avoid the `confirm_action` stdin read that would otherwise short-circuit `purge(false, false)` to "Operation cancelled" before reaching the deletion loop, masking the bug
+- No CLI flags, options, or output formats changed; `--dry-run` output is also corrected as a side effect (previously listed AGENTS.md under "Files that would be deleted" *and* under the skip line)
+- Version bump: 17.1.0 to 17.1.1 (PATCH - bug fix)
 
 ### 2026-05-05 (v17.1.0, skill-aware AGENTS.md merge)
 
