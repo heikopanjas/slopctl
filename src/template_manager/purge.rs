@@ -1,6 +1,9 @@
 //! Template purge command
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf}
+};
 
 use owo_colors::OwoColorize;
 
@@ -33,83 +36,7 @@ impl TemplateManager
         let current_dir = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&current_dir);
 
-        let mut files_to_purge: Vec<PathBuf> = Vec::new();
-        let mut agents_md_skipped = false;
-
-        // Collect agent files from BoM (template-defined), canonicalized to
-        // absolute paths so they dedup correctly against FileTracker entries.
-        let config_file = self.config_dir.join("templates.yml");
-        if config_file.exists() == true &&
-            let Ok(bom) = BillOfMaterials::from_config(&config_file)
-        {
-            for agent in &bom.get_agent_names()
-            {
-                if let Some(files) = bom.get_agent_files(agent)
-                {
-                    for file in files
-                    {
-                        if file.exists() == true &&
-                            let Ok(canonical) = fs::canonicalize(file)
-                        {
-                            files_to_purge.push(canonical);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
-        let file_tracker = FileTracker::new(&current_dir)?;
-        for (rel_path, _) in file_tracker.get_entries()
-        {
-            let abs_path = current_dir.join(&rel_path);
-            if abs_path.exists() == true
-            {
-                files_to_purge.push(abs_path);
-            }
-        }
-
-        // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
-        // placed skills. Userprofile-based dirs (e.g. codex ~/.codex/skills) are excluded —
-        // those are user-global and may contain agent-internal files. FileTracker entries
-        // above already cover userprofile skills that slopctl installed.
-        let userprofile = dirs::home_dir().unwrap_or_default();
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
-        for dir in &skill_search_dirs
-        {
-            if dir.exists() == true &&
-                let Ok(entries) = fs::read_dir(dir)
-            {
-                for entry in entries.flatten()
-                {
-                    if entry.path().is_dir() == true
-                    {
-                        let mut skill_files = Vec::new();
-                        let _ = collect_files_recursive(&entry.path(), &mut skill_files);
-                        files_to_purge.extend(skill_files);
-                    }
-                }
-            }
-        }
-
-        files_to_purge.sort();
-        files_to_purge.dedup();
-
-        // Check AGENTS.md
-        let agents_md_path = current_dir.join("AGENTS.md");
-        if agents_md_path.exists() == true
-        {
-            let agents_md_customized = template_engine::is_file_customized(&agents_md_path)?;
-
-            if agents_md_customized == true && force == false
-            {
-                agents_md_skipped = true;
-            }
-            else if files_to_purge.iter().any(|f| f.ends_with("AGENTS.md")) == false
-            {
-                files_to_purge.push(agents_md_path.clone());
-            }
-        }
+        let (files_to_purge, agents_md_skipped, agents_md_path) = self.collect_purge_targets(&current_dir, force)?;
 
         if files_to_purge.is_empty() == true && agents_md_skipped == false
         {
@@ -179,6 +106,113 @@ impl TemplateManager
         }
 
         Ok(())
+    }
+
+    /// Collects every workspace file slopctl is responsible for, plus the AGENTS.md
+    /// preservation decision.
+    ///
+    /// Pulls candidates from three sources, deduplicates them, then resolves the
+    /// AGENTS.md handling: if AGENTS.md is customized and `force` is false it is
+    /// removed from the list and `agents_md_skipped` is set; otherwise it is added
+    /// (if not already present via the BoM/tracker sweep).
+    ///
+    /// Returns `(files_to_purge, agents_md_skipped, agents_md_path)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading AGENTS.md fails.
+    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<(Vec<PathBuf>, bool, PathBuf)>
+    {
+        let mut files_to_purge: Vec<PathBuf> = Vec::new();
+
+        // Collect agent files from BoM (template-defined), canonicalized to
+        // absolute paths so they dedup correctly against FileTracker entries.
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(&config_file)
+        {
+            for agent in &bom.get_agent_names()
+            {
+                if let Some(files) = bom.get_agent_files(agent)
+                {
+                    for file in files
+                    {
+                        if file.exists() == true &&
+                            let Ok(canonical) = fs::canonicalize(file)
+                        {
+                            files_to_purge.push(canonical);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
+        let file_tracker = FileTracker::new(current_dir)?;
+        for (rel_path, _) in file_tracker.get_entries()
+        {
+            let abs_path = current_dir.join(&rel_path);
+            if abs_path.exists() == true
+            {
+                files_to_purge.push(abs_path);
+            }
+        }
+
+        // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
+        // placed skills. Userprofile-based dirs (e.g. codex ~/.codex/skills) are excluded —
+        // those are user-global and may contain agent-internal files. FileTracker entries
+        // above already cover userprofile skills that slopctl installed.
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(current_dir, &userprofile);
+        for dir in &skill_search_dirs
+        {
+            if dir.exists() == true &&
+                let Ok(entries) = fs::read_dir(dir)
+            {
+                for entry in entries.flatten()
+                {
+                    if entry.path().is_dir() == true
+                    {
+                        let mut skill_files = Vec::new();
+                        let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                        files_to_purge.extend(skill_files);
+                    }
+                }
+            }
+        }
+
+        files_to_purge.sort();
+        files_to_purge.dedup();
+
+        // Resolve AGENTS.md handling
+        let agents_md_path = current_dir.join("AGENTS.md");
+        let mut agents_md_skipped = false;
+        if agents_md_path.exists() == true
+        {
+            let agents_md_customized = template_engine::is_file_customized(&agents_md_path)?;
+            let agents_md_canonical = fs::canonicalize(&agents_md_path).unwrap_or_else(|_| agents_md_path.clone());
+
+            if agents_md_customized == true && force == false
+            {
+                agents_md_skipped = true;
+                // AGENTS.md may already be in files_to_purge via the FileTracker or
+                // BoM sweep above. Drop those entries so we honour the "skipped"
+                // promise instead of silently deleting the customized file.
+                files_to_purge.retain(|f| {
+                    let canonical = fs::canonicalize(f).unwrap_or_else(|_| f.clone());
+                    canonical != agents_md_canonical
+                });
+            }
+            else if files_to_purge.iter().any(|f| {
+                let canonical = fs::canonicalize(f).unwrap_or_else(|_| f.clone());
+                canonical == agents_md_canonical
+            }) == false
+            {
+                files_to_purge.push(agents_md_path.clone());
+            }
+        }
+
+        Ok((files_to_purge, agents_md_skipped, agents_md_path))
     }
 }
 
@@ -290,6 +324,44 @@ mod tests
         assert!(result.is_ok() == true);
         // The tracked codex file should be removed
         assert!(codex_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_preserves_customized_agents_md_when_tracked() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Customized AGENTS.md = no TEMPLATE_MARKER present
+        let agents_md = workspace.path().join("AGENTS.md");
+        fs::write(&agents_md, "# My customized instructions\n")?;
+
+        // Track it (this is the bug trigger: tracker entry would queue it for deletion)
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha1".into(), 5, LANG_NONE.into(), "all".into(), "main".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        // force = false: customized AGENTS.md must be skipped AND removed from
+        // files_to_purge. Otherwise the deletion loop would silently delete it
+        // while the user is told it was preserved.
+        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), false)?;
+        assert!(skipped == true, "customized AGENTS.md should be flagged as skipped");
+        let agents_md_canonical = fs::canonicalize(&agents_md)?;
+        let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
+        assert!(queued == false, "customized AGENTS.md must not appear in files_to_purge");
+
+        // With force = true the same file is allowed through
+        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), true)?;
+        assert!(skipped == false);
+        let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
+        assert!(queued == true, "with --force AGENTS.md must be queued for deletion");
+
         Ok(())
     }
 }
