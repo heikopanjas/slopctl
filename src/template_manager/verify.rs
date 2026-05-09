@@ -217,8 +217,8 @@ impl TemplateManager
             check_source_skill(&self.config_dir, &skill.source, &mut checked, &mut local_issues);
         }
 
-        // principles and mission fragments
-        for mapping in config.principles.iter().chain(config.mission.iter())
+        // preamble, principles, and mission fragments
+        for mapping in config.preamble.iter().chain(config.principles.iter()).chain(config.mission.iter())
         {
             check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
         }
