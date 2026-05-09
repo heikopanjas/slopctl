@@ -444,16 +444,19 @@ fn main()
                 Ok(())
             }
         }
-        | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
-        | Commands::Remove { agent, lang, all, skill, force, dry_run } =>
+        | Commands::Remove { agent, lang, all, skill, purge, force, dry_run } =>
         {
-            if all == true && (agent.is_some() == true || lang.is_some() == true)
+            if purge == true
+            {
+                manager.remove_purge(force, dry_run)
+            }
+            else if all == true && (agent.is_some() == true || lang.is_some() == true)
             {
                 Err(anyhow::anyhow!("Cannot specify --agent or --lang together with --all"))
             }
             else if all == false && agent.is_none() == true && lang.is_none() == true && skill.is_empty() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --skill"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, --skill, or --purge"))
             }
             else
             {

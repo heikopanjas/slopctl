@@ -94,41 +94,36 @@ pub enum Commands
         #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
-    /// Purge all slopctl files from project
-    Purge
-    {
-        /// Force purge without confirmation
-        #[arg(short, long, default_value = "false")]
-        force: bool,
-
-        /// Preview changes without applying them
-        #[arg(short = 'n', long, default_value = "false")]
-        dry_run: bool
-    },
-    /// Remove agent-specific files or skills from current directory
+    /// Remove installed files from the current workspace
     Remove
     {
         /// AI coding agent (e.g., claude, copilot, codex, cursor)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "purge")]
         agent: Option<String>,
 
         /// Programming language or framework (e.g., rust, c++, swift)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "purge")]
         lang: Option<String>,
 
-        /// Remove all agent-specific files and skills
-        #[arg(long, default_value = "false")]
+        /// Remove all agent files and skills; AGENTS.md is kept
+        #[arg(long, default_value = "false", conflicts_with = "purge")]
         all: bool,
 
         /// Remove skill(s) by name (repeatable)
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "purge")]
         skill: Vec<String>,
 
-        /// Force removal without confirmation
+        /// Remove everything slopctl installed, including AGENTS.md.
+        /// A customized AGENTS.md is preserved unless --force is also given.
+        #[arg(long, default_value = "false")]
+        purge: bool,
+
+        /// Skip confirmation prompt.
+        /// With --purge: also deletes a customized AGENTS.md.
         #[arg(short, long, default_value = "false")]
         force: bool,
 
-        /// Preview changes without applying them
+        /// Preview what would be removed without making changes
         #[arg(short = 'n', long, default_value = "false")]
         dry_run: bool
     },
