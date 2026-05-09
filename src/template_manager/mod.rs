@@ -6,6 +6,7 @@ mod merge;
 mod remove;
 mod smart;
 mod update;
+mod verify;
 
 use std::{
     ffi::OsStr,
