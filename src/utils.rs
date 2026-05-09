@@ -78,9 +78,9 @@ pub fn copy_file_with_mkdir(source: &Path, target: &Path) -> Result<()>
 {
     if let Some(parent) = target.parent()
     {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", parent.display(), e))?;
     }
-    fs::copy(source, target)?;
+    fs::copy(source, target).map_err(|e| anyhow::anyhow!("Failed to copy {} to {}: {}", source.display(), target.display(), e))?;
     Ok(())
 }
 

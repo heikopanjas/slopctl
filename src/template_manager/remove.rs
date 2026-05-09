@@ -1,6 +1,9 @@
 //! Template remove command
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf}
+};
 
 use owo_colors::OwoColorize;
 
@@ -133,6 +136,49 @@ impl TemplateManager
                     if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, agent_name) == true && files_to_remove.contains(&abs_path) == false
                     {
                         files_to_remove.push(abs_path);
+                    }
+                }
+
+                // For cross-client agents, decide what happens to .agents/skills/.
+                // If this is the last cross-client agent in the workspace, collect its
+                // contents for deletion so orphaned skills don't accumulate.
+                // If another cross-client agent is still installed, preserve the directory
+                // and print an informational note so the user knows why it was skipped.
+                if agent_defaults::reads_cross_client_skills(agent_name) == true
+                {
+                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents(&current_dir)
+                        .into_iter()
+                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills(other) == true)
+                        .collect();
+
+                    let cross_client_dir = resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, &current_dir, &userprofile);
+
+                    if other_cross_client.is_empty() == true
+                    {
+                        if cross_client_dir.exists() == true &&
+                            let Ok(entries) = fs::read_dir(&cross_client_dir)
+                        {
+                            for entry in entries.flatten()
+                            {
+                                if entry.path().is_dir() == true
+                                {
+                                    let mut skill_files = Vec::new();
+                                    let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                                    for f in skill_files
+                                    {
+                                        if files_to_remove.contains(&f) == false
+                                        {
+                                            files_to_remove.push(f);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        let agents_list = other_cross_client.join(", ");
+                        println!("{} Keeping {} (still in use by: {})", "→".blue(), agent_defaults::CROSS_CLIENT_SKILL_DIR, agents_list.yellow());
                     }
                 }
 
@@ -407,6 +453,196 @@ impl TemplateManager
         Ok(())
     }
 
+    /// Remove all slopctl-installed files from the current workspace, including AGENTS.md
+    ///
+    /// This is the `--purge` mode of `remove`. It discovers files from three sources
+    /// (BoM, FileTracker, filesystem scan) and removes them all. AGENTS.md is included
+    /// unless it has been customized and `force` is false.
+    ///
+    /// # Arguments
+    ///
+    /// * `force` - Skip confirmation prompt; also deletes a customized AGENTS.md
+    /// * `dry_run` - Preview what would be removed without making changes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if file deletion fails or the current directory cannot be determined
+    pub fn remove_purge(&self, force: bool, dry_run: bool) -> Result<()>
+    {
+        let current_dir = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&current_dir);
+
+        let (files_to_purge, agents_md_skipped, agents_md_path) = self.collect_purge_targets(&current_dir, force)?;
+
+        if files_to_purge.is_empty() == true && agents_md_skipped == false
+        {
+            println!("{} No slopctl files found to purge", "→".blue());
+            return Ok(());
+        }
+
+        if dry_run == true
+        {
+            println!("\n{} Files that would be deleted:", "→".blue());
+
+            for file in &files_to_purge
+            {
+                println!("  {} {}", "●".red(), file.display());
+            }
+
+            if agents_md_skipped == true
+            {
+                println!("  {} {} (skipped - customized, use --force)", "○".yellow(), agents_md_path.display());
+            }
+
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+
+        if force == false && confirm_action(&format!("{} Are you sure you want to purge all slopctl files? (y/N): ", "?".yellow()))? == false
+        {
+            println!("{} Operation cancelled", "→".blue());
+            return Ok(());
+        }
+
+        let mut file_tracker = FileTracker::new(&current_dir)?;
+
+        let mut purged_count = 0;
+        for file in &files_to_purge
+        {
+            println!("{} Removing {}", "→".blue(), file.display().to_string().yellow());
+            if let Err(e) = remove_file_and_cleanup_parents(file)
+            {
+                eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+            }
+            else
+            {
+                purged_count += 1;
+                file_tracker.remove_entry(file);
+            }
+        }
+
+        file_tracker.save()?;
+
+        if agents_md_skipped == true
+        {
+            println!("{} AGENTS.md has been customized and was not deleted", "→".yellow());
+            println!("{} Use --force to delete it anyway", "→".yellow());
+        }
+
+        if purged_count == 0
+        {
+            println!("{} No slopctl files found to purge", "→".blue());
+        }
+        else
+        {
+            println!("{} Purged {} file(s) successfully", "✓".green(), purged_count);
+        }
+
+        Ok(())
+    }
+
+    /// Collects every workspace file slopctl is responsible for, plus the AGENTS.md
+    /// preservation decision.
+    ///
+    /// Pulls candidates from three sources (BoM, FileTracker, filesystem scan),
+    /// deduplicates them, then resolves the AGENTS.md handling: if AGENTS.md is
+    /// customized and `force` is false it is removed from the list and
+    /// `agents_md_skipped` is set; otherwise it is added if not already present.
+    ///
+    /// Returns `(files_to_purge, agents_md_skipped, agents_md_path)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading AGENTS.md fails.
+    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<(Vec<PathBuf>, bool, PathBuf)>
+    {
+        let mut files_to_purge: Vec<PathBuf> = Vec::new();
+
+        // Collect agent files from BoM (template-defined), canonicalized to
+        // absolute paths so they dedup correctly against FileTracker entries.
+        let config_file = self.config_dir.join("templates.yml");
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(&config_file)
+        {
+            for agent in &bom.get_agent_names()
+            {
+                if let Some(files) = bom.get_agent_files(agent)
+                {
+                    for file in files
+                    {
+                        if file.exists() == true &&
+                            let Ok(canonical) = fs::canonicalize(file)
+                        {
+                            files_to_purge.push(canonical);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
+        let file_tracker = FileTracker::new(current_dir)?;
+        for (rel_path, _) in file_tracker.get_entries()
+        {
+            let abs_path = current_dir.join(&rel_path);
+            if abs_path.exists() == true
+            {
+                files_to_purge.push(abs_path);
+            }
+        }
+
+        // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
+        // placed skills. Userprofile-based dirs (e.g. codex ~/.codex/skills) are excluded.
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(current_dir, &userprofile);
+        for dir in &skill_search_dirs
+        {
+            if dir.exists() == true &&
+                let Ok(entries) = fs::read_dir(dir)
+            {
+                for entry in entries.flatten()
+                {
+                    if entry.path().is_dir() == true
+                    {
+                        let mut skill_files = Vec::new();
+                        let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                        files_to_purge.extend(skill_files);
+                    }
+                }
+            }
+        }
+
+        files_to_purge.sort();
+        files_to_purge.dedup();
+
+        // Resolve AGENTS.md handling
+        let agents_md_path = current_dir.join("AGENTS.md");
+        let mut agents_md_skipped = false;
+        if agents_md_path.exists() == true
+        {
+            let agents_md_customized = template_engine::is_file_customized(&agents_md_path)?;
+            let agents_md_canonical = fs::canonicalize(&agents_md_path).unwrap_or_else(|_| agents_md_path.clone());
+
+            if agents_md_customized == true && force == false
+            {
+                agents_md_skipped = true;
+                files_to_purge.retain(|f| {
+                    let canonical = fs::canonicalize(f).unwrap_or_else(|_| f.clone());
+                    canonical != agents_md_canonical
+                });
+            }
+            else if files_to_purge.iter().any(|f| {
+                let canonical = fs::canonicalize(f).unwrap_or_else(|_| f.clone());
+                canonical == agents_md_canonical
+            }) == false
+            {
+                files_to_purge.push(agents_md_path.clone());
+            }
+        }
+
+        Ok((files_to_purge, agents_md_skipped, agents_md_path))
+    }
+
     /// Check if a file path belongs to a specific agent's directory tree
     ///
     /// Matches paths containing the agent name in a directory component
@@ -429,7 +665,7 @@ mod tests
     use crate::{
         bom::BillOfMaterials,
         file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
-        template_manager::CWD_LOCK
+        template_manager::cwd_test_guard
     };
 
     #[test]
@@ -484,7 +720,7 @@ mod tests
     #[test]
     fn test_remove_lang_unknown_no_error() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = cwd_test_guard();
 
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
@@ -500,8 +736,6 @@ mod tests
     #[test]
     fn test_remove_agent_falls_back_to_file_tracker() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -515,13 +749,11 @@ mod tests
         tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("cursor"), None, &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -530,8 +762,6 @@ mod tests
     #[test]
     fn test_remove_lang_falls_back_to_file_tracker() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -545,13 +775,11 @@ mod tests
         tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, Some("rust"), &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -560,8 +788,6 @@ mod tests
     #[test]
     fn test_remove_lang_fallback_excludes_main_and_skill() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -580,13 +806,11 @@ mod tests
         tracker.record_installation(&skill_file, "sha3".into(), 5, "rust".into(), AGENT_ALL.into(), "skill".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, Some("rust"), &[], false, true);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -595,8 +819,6 @@ mod tests
     #[test]
     fn test_remove_agent_discovers_untracked_skill_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -612,13 +834,11 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("cursor"), None, &[], true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -628,8 +848,6 @@ mod tests
     #[test]
     fn test_remove_all_discovers_untracked_skill_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
@@ -639,13 +857,11 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(None, None, &[], true, false);
-
-        std::env::set_current_dir(original_dir)?;
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -653,14 +869,134 @@ mod tests
     }
 
     #[test]
-    fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
+    fn test_remove_purge_dry_run_no_files() -> anyhow::Result<()>
     {
-        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Create CODEX.md so codex is detected as installed
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove_purge(false, true);
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_purge_deduplicates_bom_and_tracker_paths() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nagents:\n  cursor:\n    instructions:\n      - source: cursorrules.md\n        target: $workspace/.cursorrules\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let agent_file = workspace.path().join(".cursorrules");
+        fs::write(&agent_file, "test")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove_purge(true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(agent_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_purge_discovers_untracked_skill_files() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let skill_dir = workspace.path().join(".agents/skills/my-skill");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# My Skill")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove_purge(true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_purge_skips_userprofile_skill_dir_scan() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Track a codex-agent file; purge should delete it without scanning ~/.codex/skills
+        let codex_file = workspace.path().join("CODEX.md");
+        fs::write(&codex_file, "Read AGENTS.md")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove_purge(true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(codex_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_purge_preserves_customized_agents_md_when_tracked() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let agents_md = workspace.path().join("AGENTS.md");
+        fs::write(&agents_md, "# My customized instructions\n")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha1".into(), 5, LANG_NONE.into(), "all".into(), "main".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), false)?;
+        assert!(skipped == true, "customized AGENTS.md should be flagged as skipped");
+        let agents_md_canonical = fs::canonicalize(&agents_md)?;
+        let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
+        assert!(queued == false, "customized AGENTS.md must not appear in files_to_purge");
+
+        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), true)?;
+        assert!(skipped == false);
+        let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
+        assert!(queued == true, "with --force AGENTS.md must be queued for deletion");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Track a codex agent file so remove --agent codex has something to find
         let codex_file = workspace.path().join("CODEX.md");
         fs::write(&codex_file, "Read AGENTS.md")?;
 
@@ -669,7 +1005,7 @@ mod tests
         tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
         tracker.save()?;
 
-        let original_dir = std::env::current_dir()?;
+        let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         // Use dry-run to inspect what would be removed without side effects.
@@ -679,9 +1015,64 @@ mod tests
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let result = manager.remove(Some("codex"), None, &[], false, true);
 
-        std::env::set_current_dir(original_dir)?;
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_cross_client_agent_preserves_cross_client_skills_when_other_agent_installed() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create detection markers for two cross-client agents (cursor and codex)
+        fs::create_dir_all(workspace.path().join(".cursor"))?;
+        fs::create_dir_all(workspace.path().join(".codex"))?;
+
+        // Place a cross-client skill
+        let skill_dir = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Git Workflow")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        // Remove cursor in dry-run mode; codex is still installed so the guard fires
+        let result = manager.remove(Some("cursor"), None, &[], false, true);
 
         assert!(result.is_ok() == true);
+        // The cross-client skill must be preserved because codex still needs it
+        assert!(skill_file.exists() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_cross_client_agent_cleans_cross_client_skills_when_last_agent() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create a detection marker for cursor only (the last cross-client agent)
+        fs::create_dir_all(workspace.path().join(".cursor"))?;
+
+        // Place a cross-client skill
+        let skill_dir = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Git Workflow")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        // Remove cursor with force; no other cross-client agents so .agents/skills/ is cleaned
+        let result = manager.remove(Some("cursor"), None, &[], true, false);
+
+        assert!(result.is_ok() == true);
+        // The cross-client skill must be deleted because cursor was the last cross-client agent
+        assert!(skill_file.exists() == false);
         Ok(())
     }
 }

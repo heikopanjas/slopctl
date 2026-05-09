@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-04-25 (v17.0.1)
+**Last updated:** 2026-05-09 (v18.5.0)
 
 <!-- {mission} -->
 
@@ -323,6 +323,11 @@ Load the `rust-build-commands` skill when building or running the project.
       return Err("Missing value".into());
   };
   ```
+
+- Prefer `Option<T>` over sentinel enum variants. Do not add `Invalid`, `Unknown`, or `None` variants to an enum solely to avoid wrapping it in `Option`. `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time, whereas sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm.
+  - ❌ Incorrect: `enum Color { Invalid, Red, Green, Blue }` returned from a parser
+  - ✅ Correct: `enum Color { Red, Green, Blue }` with `Option<Color>` at the boundary
+  - Exception: when "unknown" is a meaningful domain state — e.g. forward-compatible protocol parsing where unrecognized variants must round-trip — model it explicitly (`HttpVersion::Unknown(String)`). This is "modeling the domain accurately," not "avoiding `Option`."
 
 **CLI Design with clap:**
 
@@ -792,10 +797,13 @@ The development environment uses **PowerShell on Windows**. All shell commands e
   "@
   ```
 
-- **Use multiple `-m` flags** for multi-line git commit messages:
+- **Single `-m` flag for the body of git commits**: each `-m` creates a separate paragraph with a blank line between it and the next, which breaks bullet lists. Put the subject in the first `-m` and the entire body (with embedded newlines) in a second `-m` using a PowerShell here-string, or write the message to a file and use `git commit -F <file>`:
 
   ```powershell
-  git commit -m "subject line" -m "- body point one" -m "- body point two"
+  git commit -m "subject line" -m @"
+  - body point one
+  - body point two
+  "@
   ```
 
 - **Use semicolons** (`;`) to chain commands, not `&&`
@@ -816,6 +824,162 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.5.0, guard .agents/skills/ in remove --agent)
+
+- Extended `remove --agent <name>` to manage `.agents/skills/` correctly when removing a cross-client agent (`reads_cross_client_skills == true`)
+- New behavior: after collecting the agent's native skill files, detect which other installed agents also support `.agents/skills/`
+  - If **none remain**: also collect `.agents/skills/` contents for deletion — prevents orphaned cross-client skills accumulating when the last cross-client agent is removed
+  - If **others remain**: skip `.agents/skills/` deletion and print `→ Keeping .agents/skills/ (still in use by: <agents>)` — explicit guard so other agents' shared skills are not destroyed
+- Non-cross-client agents (Claude, Vibe) are unaffected; their skills live only in their native directory
+- `remove --all` and `remove --purge` already delete `.agents/skills/` via `get_workspace_skill_search_dirs` and are unchanged
+- Added 2 regression tests: `test_remove_cross_client_agent_preserves_cross_client_skills_when_other_agent_installed` and `test_remove_cross_client_agent_cleans_cross_client_skills_when_last_agent`
+- Version bump: 18.4.0 to 18.5.0 (MINOR — new cleanup + guard behaviour in `remove --agent`)
+
+### 2026-05-09 (v18.4.0, cross-client skill routing for non-compliant agents)
+
+- Added `reads_cross_client_skills: bool` field to `AgentDefaults` in `agent_defaults.rs`
+  - `true` (read `.agents/skills/`): Cursor, Codex, Copilot, OpenCode
+  - `false` (native dir only): Claude Code, Mistral Vibe
+- Added `reads_cross_client_skills(agent: &str) -> bool` public helper; unknown agents default to `true`
+- Updated `CROSS_CLIENT_SKILL_DIR` doc comment to clarify it is not universal
+- Changed language skill routing in `resolve_all_files` (`template_engine.rs`):
+  - Previously lang skills always went to `.agents/skills/` regardless of agent
+  - Now: if `--agent` is specified and the agent has `reads_cross_client_skills = false`, lang skills go to the agent's native skill dir (e.g. `.claude/skills/`, `.vibe/skills/`)
+  - Cursor, Codex, Copilot, OpenCode: unchanged — lang skills still go to `.agents/skills/`
+- Added cross-client adoption step in `resolve_all_files`: when installing an agent that doesn't read cross-client, any existing skill directories in `.agents/skills/` are copied into the agent's native skill dir (skipping files already present); source files remain in `.agents/skills/` for other agents that do read it
+- Reference: `docs/coding-agent-config-locations-v3.md` — cross-agent standards section
+- Added 4 new unit tests: `test_reads_cross_client_skills_per_agent`, `test_lang_skills_route_to_native_dir_for_claude`, `test_lang_skills_route_to_cross_client_for_cursor`, `test_adopt_cross_client_skills_to_claude`
+- Version bump: 18.3.0 → 18.4.0 (MINOR — new routing behaviour, no CLI changes)
+
+### 2026-05-09 (v18.3.0, new agents + preamble + simplified instruction model)
+
+- Added **Mistral Vibe** and **OpenCode** agents to `agent_defaults.rs` and `templates/v5/templates.yml`
+  - Vibe: detected via `.vibe/` directory; skills at `$workspace/.vibe/skills`; prompts at `$userprofile/.vibe/prompts`
+  - OpenCode: detected via `opencode.json`; skills at `$workspace/.opencode/skills`
+- Removed agent-specific instruction stubs (`CLAUDE.md`, `.cursorrules`) from the sample templates — all agents in the spec now read `AGENTS.md` natively; stubs were identical boilerplate
+- Introduced `<!-- {preamble} -->` as a new AGENTS.md insertion point processed before `<!-- {mission} -->`; backed by `preamble.md` template fragment, `preamble:` section in `templates.yml`, new `preamble` field on `TemplateConfig` in `bom.rs`, and a new loop in `resolve_all_files` in `template_engine.rs`; the `/init-session` guard moves from per-agent stubs into this shared preamble fragment
+- Kept `copilot-instructions.md` (★-stable Copilot instruction path) but replaced the init-session guard with a minimal reference to AGENTS.md; content is now a clean hook for future Copilot-specific overrides
+- Renamed `InstructionFile` → `WorkspaceMarker` and `instruction_files` → `workspace_markers` throughout `agent_defaults.rs`; detection markers are now native agent-created paths (directories or config files) rather than slopctl-installed files:
+  - Claude: `.claude/` directory (Claude Code creates this)
+  - Cursor: `.cursor/` directory (Cursor IDE creates this)
+  - Copilot: `.github/copilot-instructions.md` (slopctl-installed; Copilot has no native marker)
+  - Codex: `.codex/` directory (Codex creates this)
+  - Vibe: `.vibe/` directory (Vibe creates this)
+  - OpenCode: `opencode.json` (OpenCode creates this)
+- Updated `adopt_untracked_files` in `file_tracker.rs` to use `workspace_markers` and `is_file()` guard so directory markers are not mistakenly adopted as managed files
+- Reference: `docs/coding-agent-config-locations-v3.md`
+- Version bump: 18.2.1 → 18.3.0 (MINOR — new agents, simplified template model, no CLI changes)
+
+### 2026-05-09 (v18.2.1, relax cross-language verify duplicates)
+
+- Fixed `templates --verify` incorrectly treating duplicate workspace targets across different languages as catalog errors
+- Rationale: `init` and `merge` operate on one language at a time, so `rust` and `swift` both targeting `$workspace/.editorconfig` is valid template catalog data; the conflict is only real when a single resolved language install set contains the duplicate
+- `collect_duplicate_target_issues()` now combines non-language duplicate checks with per-language checks driven by `bom::resolve_language_files(lang, config)`, which expands shared includes and preserves the real same-language duplicate validation used during install
+- `$instructions` remains exempt because it is a cumulative AGENTS.md fragment target
+- Added regression tests covering allowed cross-language duplicate targets and rejected same-language duplicate targets
+- Version bump: 18.2.0 to 18.2.1 (PATCH - verifier bug fix)
+
+### 2026-05-09 (v18.2.0, guard init against second language)
+
+- Added explicit policy for language installation conflicts: `init` remains single-language and does not silently add a second language to an already initialized workspace
+- Rationale: language templates can write exclusive workspace files such as `.editorconfig`, `.gitignore`, `.clang-format`, `.rustfmt.toml`, and `.swift-format`; these files can contain singleton or contradictory configuration and should not be merged by appending or resolved by implicit first-wins ordering
+- `TemplateManager::update()` now checks the workspace-local `FileTracker` after migration/adoption and before template resolution; if `options.lang` differs from the tracked installed language, it returns actionable guidance instead of writing files
+- Guidance points users to `slopctl merge --lang <new>` for AI-assisted conflict resolution when adding another language, or `slopctl remove --lang <old>` before replacing the language
+- Same-language re-init remains allowed; agent-only and skill-only flows are unchanged; tracker entries with `lang: none` do not block language init
+- Kept `--lang` as a single-value option on both `init` and `merge`; no repeatable multi-language CLI was introduced
+- Added tests for blocking a different installed language, allowing the same language, and ignoring `lang: none` entries
+- Version bump: 18.1.0 to 18.2.0 (MINOR - new user-facing init guard and policy)
+
+### 2026-05-09 (v18.1.0, templates --verify)
+
+- Added `--verify` (`-V`) flag to the `templates` subcommand
+- Performs three sequential checks printed with colored output:
+  - **C – YAML structure**: parses `templates.yml`, validates version in `2..=5`, checks `main.source` is set, checks for duplicate targets across all sections
+  - **A – Local file integrity**: every non-URL `source` file referenced in `templates.yml` (main, agent instructions/prompts, language files, shared groups, integration files, principles, mission) and every local-path skill directory must exist in the local template cache; URL-based sources are skipped (fetched at install time)
+  - **B – Source freshness**: fetches `templates.yml` from the configured source (GitHub URL or local path) and byte-compares it with the local copy; a mismatch recommends `slopctl templates --update`; network failures are reported as warnings, not hard errors
+- Returns non-zero exit code if any issue is found (useful for CI)
+- `--from` flag now applies to both `--update` and `--verify` (manual guard in `main.rs` replaces the clap `requires = "update"` attribute)
+- All three flags (`--update`, `--verify`, `--list`) can be combined freely; execution order is `--update` → `--verify` → `--list`
+- New `src/template_manager/verify.rs` with `verify()`, `verify_yaml_structure()`, `verify_local_integrity()`, `verify_source_freshness()` on `TemplateManager`, plus free functions `collect_duplicate_target_issues`, `fetch_remote_templates_yml`, `check_source_file`, `check_source_skill`
+- 9 new unit tests covering all sections
+- Version bump: 18.0.0 to 18.1.0 (MINOR - new CLI flag)
+
+### 2026-05-09 (v18.0.0, merge purge subcommand into remove --purge)
+
+- **BREAKING**: removed the `purge` subcommand; its functionality is now `slopctl remove --purge`
+- Design rationale: `remove --all` and `purge` were nearly identical; the only difference is that `purge` also removes AGENTS.md. Adding `--purge` to `remove` makes the relationship explicit in a single command with layered semantics: `--all` removes agent files and skills (keeps AGENTS.md); `--purge` removes everything including AGENTS.md (customized AGENTS.md is preserved unless `--force` is also given)
+- `--purge` is mutually exclusive with `--agent`, `--lang`, `--skill`, and `--all` (enforced by clap `conflicts_with`)
+- `--force` semantics are now layered: alone it skips the confirmation prompt; combined with `--purge` it additionally overrides the customized-AGENTS.md preservation guard
+- Implementation: deleted `src/template_manager/purge.rs`; `remove_purge()` and `collect_purge_targets()` moved into `src/template_manager/remove.rs`; `mod purge` removed from `mod.rs`; `Purge` variant removed from `cli.rs`; `Commands::Purge` dispatch arm removed from `main.rs`
+- All purge tests ported to `remove.rs` under `test_remove_purge_*` names
+- `init-session` decision: keep as custom prompt/command (not converted to skill) — the `/init-session` slash command UX in Cursor and Claude Code is better than skill invocation for a user-triggered session-start ritual; agent-specific variations (Cursor vs Claude vs Copilot) are also natural in the command format
+- Version bump: 17.1.1 to 18.0.0 (MAJOR - breaking CLI change: subcommand removed)
+
+### 2026-05-05 (v17.1.1, fix purge silently deleting customized AGENTS.md)
+
+- Fixed `purge` deleting a customized (user-modified) AGENTS.md while simultaneously printing the "AGENTS.md has been customized and was not deleted" preservation message
+- Root cause: AGENTS.md is normally tracked in `FileTracker` (and may also appear in the BoM agent-file sweep), so it was added to `files_to_purge` *before* the AGENTS.md skip-decision block ran. The skip block only set the `agents_md_skipped` flag and never removed the file from the deletion queue, so the deletion loop happily unlinked the customized file and the user got a contradictory success message
+- Also fixed an incidental brittleness: the prior "already in list?" check used `f.ends_with("AGENTS.md")` which would match any path whose final component happens to be `AGENTS.md` (e.g. nested workspace files); replaced with canonical-path equality so symlinked workspace roots (macOS `/var` -> `/private/var`) and unrelated `AGENTS.md` files behave correctly
+- Implementation in [src/template_manager/purge.rs](src/template_manager/purge.rs):
+  - Extracted file-collection + AGENTS.md decision into a new private helper `TemplateManager::collect_purge_targets(current_dir, force) -> Result<(Vec<PathBuf>, bool, PathBuf)>` returning `(files_to_purge, agents_md_skipped, agents_md_path)`. Splitting collection from deletion makes the logic unit-testable without hitting the interactive `confirm_action` stdin prompt that `purge(false, false)` would otherwise trigger
+  - When `agents_md_customized == true && force == false`: set `agents_md_skipped = true` AND `files_to_purge.retain(|f| canonical(f) != canonical(agents_md))` so any prior tracker/BoM-sourced entry is dropped
+  - When AGENTS.md is *not* being skipped, the "already in list?" guard uses canonical-path equality instead of `ends_with`
+  - Canonicalization wrapped with `unwrap_or_else(|_| path.clone())` so a missing/inaccessible file does not panic; it simply falls through to an unequal comparison
+- Added regression test `test_purge_preserves_customized_agents_md_when_tracked`: writes a customized AGENTS.md (no `TEMPLATE_MARKER`), records it in `FileTracker`, then asserts that `collect_purge_targets(force=false)` returns `agents_md_skipped == true` AND no canonical match for AGENTS.md in the queue; also asserts `force=true` queues the file as expected. Verified to fail under the buggy code and pass under the fix
+- Test uses the helper directly to avoid the `confirm_action` stdin read that would otherwise short-circuit `purge(false, false)` to "Operation cancelled" before reaching the deletion loop, masking the bug
+- No CLI flags, options, or output formats changed; `--dry-run` output is also corrected as a side effect (previously listed AGENTS.md under "Files that would be deleted" *and* under the skip line)
+- Version bump: 17.1.0 to 17.1.1 (PATCH - bug fix)
+
+### 2026-05-05 (v17.1.0, skill-aware AGENTS.md merge)
+
+- Extended the `merge` command to make AGENTS.md skill-aware: when AGENTS.md is diverged, the LLM additionally receives every SKILL.md in the resolved template set and is instructed to drop AGENTS.md content already covered by a skill (skill becomes the canonical source)
+- Rationale: as more conventions migrate from inline AGENTS.md prose into skills (per the 2026-04-03 templates-to-skills migration), users' customised AGENTS.md files keep duplicating content the skills now own; the merge step is the natural place to deduplicate
+- Behaviour is purely additive: all existing merge functionality (classification, changelog marker handling, streaming, `--preview`/`--dry-run`/`--verbose`, partial recovery, token accounting, FileTracker updates) is unchanged; non-AGENTS.md diverged files still use the legacy prompt verbatim
+- Implementation in [src/template_manager/merge.rs](src/template_manager/merge.rs):
+  - New free fn `collect_skills(content_map)` filters entries whose target file name is `SKILL.md`, takes the parent directory name as the skill name, and returns sorted `(name, content)` pairs
+  - Added `is_main: bool` field to `FileClass::Diverged`; set inside `classify_files()` via `target.file_name() == Some("AGENTS.md")`
+  - `build_merge_messages()` signature changed to take `skills: &[(String, String)]`; an empty slice produces a byte-identical message to v17.0.4 (proven by `test_build_merge_messages_no_skills_matches_legacy`); a non-empty slice appends an `<available_skills>` block listing each `### name` plus full SKILL.md content and a closing instruction to remove duplicates
+  - Added rule 9 to `MERGE_SYSTEM_PROMPT` describing skill-priority deduplication; tweaked rule 1's parenthetical to permit removals when content is now covered by a skill while reaffirming rule 8's append-only changelog guarantee
+  - In `merge()` loop: `collect_skills()` is called once after `classify_files()`; the diverged arm passes `&skills` only when `is_main == true`, otherwise `&[]`
+- Decisions (from clarifying questions): scope = AGENTS.md only; skills considered = every SKILL.md in the resolved template set (regardless of disk state); skill payload = full SKILL.md content per skill (no referenced sub-files)
+- Added 5 new tests: `test_collect_skills_filters_skill_md_only`, `test_collect_skills_extracts_parent_dir_name`, `test_collect_skills_empty_map_returns_empty`, `test_build_merge_messages_includes_skills_block`, `test_build_merge_messages_no_skills_matches_legacy`, `test_classify_files_marks_agents_md_as_main`
+- No CLI flags, options, or output formats changed
+- Version bump: 17.0.4 to 17.1.0 (MINOR - additive merge behaviour, fully backwards compatible)
+
+### 2026-05-01 (v17.0.4, fix multi-m commit body formatting guidance)
+
+- Fixed misleading guidance in the Windows/PowerShell section that recommended `git commit -m subject -m bullet1 -m bullet2 -m bullet3`; each `-m` flag creates a separate paragraph with a blank line between it and the next, which breaks bullet lists in the body
+- Replaced with: subject in the first `-m`, **entire body** with embedded newlines in a second `-m` (PowerShell here-string `@"..."@`, or `git commit -F <file>` for cross-shell safety)
+- Mirrored the fix into [templates/v5/skills/git-workflow/SKILL.md](templates/v5/skills/git-workflow/SKILL.md) under a new "Invoking git commit safely" subsection covering zsh/bash (`$'...'`), PowerShell (here-string), and cross-shell (`-F file`) approaches
+- Triggered by an actual occurrence: commit `a159c5c` (later amended to `634a2c8`) had blank lines between every bullet because the guidance was followed literally
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.3 to 17.0.4 (PATCH - documentation fix)
+
+### 2026-05-01 (v17.0.3, prefer Option over sentinel enum variants)
+
+- Added new convention to the Enums and Pattern Matching section: prefer `Option<T>` over adding `Invalid`/`Unknown`/`None` sentinel variants to enums
+- Rationale: `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time; sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm, working against Rust's "make illegal states unrepresentable" principle
+- Documented narrow exception: when "unknown" is a meaningful domain state (e.g. forward-compatible protocol parsing where unrecognized variants must round-trip), model it explicitly with a payload-carrying variant like `HttpVersion::Unknown(String)`
+- Mirrored the rule into [templates/v5/skills/rust-coding-conventions/SKILL.md](templates/v5/skills/rust-coding-conventions/SKILL.md) so future installs receive it
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.2 to 17.0.3 (PATCH - convention addition, no behavior change)
+
+### 2026-05-01 (v17.0.2, fix TempDir dropped before GitHub-sourced files copied)
+
+- Fixed `init` (and `merge`) failing with bare `os error 2` (No such file or directory) whenever a skill or template entry was sourced from a GitHub URL
+- Root cause: `TemplateEngine::resolve_all_files()` created a `tempfile::TempDir`, downloaded GitHub sources into it, pushed the temp paths into `ResolvedFiles.files`, and then returned. The `TempDir` was dropped at function exit, deleting all downloaded files before `copy_files_with_tracking()` ran. The same flaw silently truncated `build_target_content_map()` (used by `merge`), which skipped GitHub-sourced entries via `if entry.source.exists()`
+- Reproduced with `slopctl init --lang swift`: local skills (`swift-coding-conventions`, `swift-build-commands`) succeeded because they live in `config_dir`, but the GitHub-fetched `swift-concurrency-pro` skill failed at copy time
+- Fix: added `_temp_dir: tempfile::TempDir` field to `ResolvedFiles` so the temp directory is owned by the result struct and lives until the consumer (init or merge) finishes. RAII guard with leading underscore signals "holds resource alive, never read"
+- Hardened `utils::copy_file_with_mkdir` to wrap `fs::create_dir_all` and `fs::copy` errors with `anyhow::anyhow!` context including the source and target paths, so future failures show which file failed instead of a bare ENOENT
+- Added test injection infrastructure for GitHub HTTP calls in `github.rs`:
+  - Two thread-local hooks (`LIST_CONTENTS_HOOK`, `DOWNLOAD_FILE_HOOK`) checked at the top of `list_directory_contents()` and `download_file()` before any real `reqwest` call. In production both stay `None` and the cost is one thread-local read per call
+  - `pub fn set_test_hooks(list, download) -> TestHookGuard`: tests install the hooks; the returned RAII guard clears them on drop so they cannot leak between tests
+  - Tests can drive the entire GitHub-skill code path (discover_skills, download_directory_from_entries, download_file) without network I/O
+- Added regression test `test_resolve_all_files_keeps_github_skill_temp_files_alive` that mocks the GitHub Contents API and raw download endpoint, calls `resolve_all_files()` with a `--skill foo/bar` ad-hoc skill, and asserts every GitHub-sourced `entry.source.exists()` is `true` after the function returns. Verified to fail loudly under the buggy code (panics with the temp path that no longer exists) and pass under the fix
+- Test isolation: uses `CWD_LOCK` and an inline `CwdGuard` Drop helper to restore cwd even on assertion panic
+- Pre-existing test-suite flakiness (~25% failure rate under parallel execution due to other tests mutating process-global cwd/env without consistent locking) is unchanged by this work and remains a known issue
+- Version bump: 17.0.1 to 17.0.2 (PATCH - bug fix)
 
 ### 2026-04-25 (v17.0.1, fix CI flaky test + shared ENV_LOCK)
 

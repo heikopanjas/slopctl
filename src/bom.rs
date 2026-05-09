@@ -122,6 +122,8 @@ pub struct TemplateConfig
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub integration: HashMap<String, IntegrationConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preamble:    Vec<FileMapping>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub principles:  Vec<FileMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mission:     Vec<FileMapping>,
@@ -421,6 +423,7 @@ mod tests
             languages:   HashMap::new(),
             shared:      HashMap::new(),
             integration: HashMap::new(),
+            preamble:    vec![],
             principles:  vec![],
             mission:     vec![],
             skills:      vec![]
