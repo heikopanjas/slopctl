@@ -438,8 +438,26 @@ fn main()
             };
 
             update_result
-                .and_then(|()| if verify == true { manager.verify(&source) } else { Ok(()) })
-                .and_then(|()| if list == true { manager.list_global() } else { Ok(()) })
+                .and_then(|()| {
+                    if verify == true
+                    {
+                        manager.verify(&source)
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+                .and_then(|()| {
+                    if list == true
+                    {
+                        manager.list_global()
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
         }
         | Commands::Remove { agent, lang, all, skill, purge, force, dry_run } =>
         {

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.1.0)
+**Last updated:** 2026-05-09 (v18.2.1)
 
 <!-- {mission} -->
 
@@ -824,6 +824,26 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.2.1, relax cross-language verify duplicates)
+
+- Fixed `templates --verify` incorrectly treating duplicate workspace targets across different languages as catalog errors
+- Rationale: `init` and `merge` operate on one language at a time, so `rust` and `swift` both targeting `$workspace/.editorconfig` is valid template catalog data; the conflict is only real when a single resolved language install set contains the duplicate
+- `collect_duplicate_target_issues()` now combines non-language duplicate checks with per-language checks driven by `bom::resolve_language_files(lang, config)`, which expands shared includes and preserves the real same-language duplicate validation used during install
+- `$instructions` remains exempt because it is a cumulative AGENTS.md fragment target
+- Added regression tests covering allowed cross-language duplicate targets and rejected same-language duplicate targets
+- Version bump: 18.2.0 to 18.2.1 (PATCH - verifier bug fix)
+
+### 2026-05-09 (v18.2.0, guard init against second language)
+
+- Added explicit policy for language installation conflicts: `init` remains single-language and does not silently add a second language to an already initialized workspace
+- Rationale: language templates can write exclusive workspace files such as `.editorconfig`, `.gitignore`, `.clang-format`, `.rustfmt.toml`, and `.swift-format`; these files can contain singleton or contradictory configuration and should not be merged by appending or resolved by implicit first-wins ordering
+- `TemplateManager::update()` now checks the workspace-local `FileTracker` after migration/adoption and before template resolution; if `options.lang` differs from the tracked installed language, it returns actionable guidance instead of writing files
+- Guidance points users to `slopctl merge --lang <new>` for AI-assisted conflict resolution when adding another language, or `slopctl remove --lang <old>` before replacing the language
+- Same-language re-init remains allowed; agent-only and skill-only flows are unchanged; tracker entries with `lang: none` do not block language init
+- Kept `--lang` as a single-value option on both `init` and `merge`; no repeatable multi-language CLI was introduced
+- Added tests for blocking a different installed language, allowing the same language, and ignoring `lang: none` entries
+- Version bump: 18.1.0 to 18.2.0 (MINOR - new user-facing init guard and policy)
 
 ### 2026-05-09 (v18.1.0, templates --verify)
 
