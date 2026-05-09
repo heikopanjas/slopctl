@@ -896,6 +896,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
+        // Track a codex-agent file; purge should delete it without scanning ~/.codex/skills
         let codex_file = workspace.path().join("CODEX.md");
         fs::write(&codex_file, "Read AGENTS.md")?;
 
@@ -952,7 +953,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Create CODEX.md so codex is detected as installed
+        // Track a codex agent file so remove --agent codex has something to find
         let codex_file = workspace.path().join("CODEX.md");
         fs::write(&codex_file, "Read AGENTS.md")?;
 

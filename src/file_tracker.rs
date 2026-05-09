@@ -276,17 +276,19 @@ impl FileTracker
             adopted += self.try_adopt(&agents_md, LANG_NONE, AGENT_ALL, "main")?;
         }
 
-        // Adopt agent instruction files (category "agent") for all known agents
+        // Adopt agent instruction files (category "agent") for all known agents.
+        // Only workspace-scoped FILE markers are adopted; directory markers (used by
+        // agents such as Claude and Cursor that create their own directory) are skipped.
         for agent_name in agent_defaults::known_agents()
         {
             if let Some(defaults) = agent_defaults::get_defaults(agent_name)
             {
-                for instr in defaults.instruction_files
+                for marker in defaults.workspace_markers
                 {
-                    if instr.placeholder == agent_defaults::PLACEHOLDER_WORKSPACE
+                    if marker.placeholder == agent_defaults::PLACEHOLDER_WORKSPACE
                     {
-                        let path = workspace.join(instr.path);
-                        if path.exists() == true
+                        let path = workspace.join(marker.path);
+                        if path.is_file() == true
                         {
                             adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "agent")?;
                         }
@@ -814,8 +816,11 @@ mod tests
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
 
+        // AGENTS.md → "main"
         fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-        fs::write(workspace.join("CLAUDE.md"), b"Read AGENTS.md")?;
+        // opencode.json is a file-based workspace marker (OpenCode creates it)
+        fs::write(workspace.join("opencode.json"), b"{}")?;
+        // Claude skill and command (adopted via skill/command dir scans, not marker)
         fs::create_dir_all(workspace.join(".claude/skills/git-workflow"))?;
         fs::write(workspace.join(".claude/skills/git-workflow/SKILL.md"), b"# Skill")?;
         fs::create_dir_all(workspace.join(".claude/commands"))?;

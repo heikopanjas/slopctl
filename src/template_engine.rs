@@ -388,6 +388,11 @@ impl<'a> TemplateEngine<'a>
             }
         };
 
+        for entry in &config.preamble
+        {
+            process_entry(&entry.source, &entry.target, "preamble", LANG_NONE, AGENT_ALL);
+        }
+
         for entry in &config.principles
         {
             process_entry(&entry.source, &entry.target, "principles", LANG_NONE, AGENT_ALL);
@@ -457,6 +462,19 @@ impl<'a> TemplateEngine<'a>
         let agent_skill_dir = options.agent.and_then(agent_defaults::get_skill_dir).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
         let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
 
+        // For agents that don't read .agents/skills/ (Claude, Vibe), route lang and
+        // top-level skills directly to the agent's native skill directory so they are
+        // visible to the agent. For all other agents keep the cross-client dir.
+        let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills(a) == false);
+        let lang_skill_dir = if native_only_agent == true
+        {
+            agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir)
+        }
+        else
+        {
+            &cross_client_skill_dir
+        };
+
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name) &&
             agent_config.skills.is_empty() == false &&
@@ -470,14 +488,7 @@ impl<'a> TemplateEngine<'a>
             let lang_skills = bom::resolve_language_skills(lang, &config)?;
             if lang_skills.is_empty() == false
             {
-                self.install_skills(
-                    lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())),
-                    &cross_client_skill_dir,
-                    temp_path,
-                    lang,
-                    AGENT_ALL,
-                    &mut files_to_copy
-                )?;
+                self.install_skills(lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), lang_skill_dir, temp_path, lang, AGENT_ALL, &mut files_to_copy)?;
             }
         }
 
@@ -492,6 +503,38 @@ impl<'a> TemplateEngine<'a>
             let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
             let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
             self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
+        }
+
+        // Migrate any skills already in .agents/skills/ into the agent's native skill
+        // dir when the agent doesn't read the cross-client path. This ensures Claude and
+        // Vibe users don't lose access to skills that were previously installed without
+        // an agent specified (e.g. via `slopctl init --lang rust`).
+        if native_only_agent == true &&
+            let Some(ref native_dir) = agent_skill_dir &&
+            cross_client_skill_dir.is_dir() == true &&
+            let Ok(entries) = std::fs::read_dir(&cross_client_skill_dir)
+        {
+            for entry in entries.flatten()
+            {
+                if entry.path().is_dir() == true
+                {
+                    let mut skill_files: Vec<PathBuf> = Vec::new();
+                    crate::utils::collect_files_recursive(&entry.path(), &mut skill_files)?;
+                    for src in skill_files
+                    {
+                        // Preserve the full relative path under the skill name:
+                        // .agents/skills/foo/SKILL.md → .claude/skills/foo/SKILL.md
+                        if let Ok(relative) = src.strip_prefix(&cross_client_skill_dir)
+                        {
+                            let target = native_dir.join(relative);
+                            if target.exists() == false
+                            {
+                                files_to_copy.push(ResolvedFile { source: src, target, lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() });
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         validate_no_duplicate_targets(&files_to_copy)?;
@@ -2070,6 +2113,122 @@ languages:
                 entry.source.display()
             );
         }
+
+        Ok(())
+    }
+
+    /// Build a minimal config_dir with a templates.yml and AGENTS.md for skill routing tests.
+    /// The agents list must include every agent name used in `--agent` for the test.
+    fn setup_skill_routing_config(config_dir: &std::path::Path, skill_source_name: &str, agents: &[&str]) -> anyhow::Result<()>
+    {
+        use std::fs;
+        let agents_yaml = agents.iter().map(|a| format!("  {}: {{}}", a)).collect::<Vec<_>>().join("\n");
+        let yaml = format!(
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages:\n  rust:\n    skills:\n      - name: {}\n        \
+             source: 'skills/{}'\nintegration: {{}}\n",
+            agents_yaml, skill_source_name, skill_source_name
+        );
+        fs::write(config_dir.join("templates.yml"), yaml)?;
+        fs::write(config_dir.join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+        let skill_dir = config_dir.join("skills").join(skill_source_name);
+        fs::create_dir_all(&skill_dir)?;
+        fs::write(skill_dir.join("SKILL.md"), "# Skill")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_lang_skills_route_to_native_dir_for_claude() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["claude"])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: Some("rust"), agent: Some("claude"), mission: None, skills: &[], force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        // Lang skills for claude must go to .claude/skills/, never to .agents/skills/
+        assert!(skill_targets.is_empty() == false, "expected at least one skill file");
+        for t in &skill_targets
+        {
+            assert!(t.contains(".claude/skills"), "skill target should be in .claude/skills/, got: {}", t);
+            assert!(t.contains(".agents/skills") == false, "skill must not go to .agents/skills/ for claude, got: {}", t);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lang_skills_route_to_cross_client_for_cursor() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["cursor"])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: Some("rust"), agent: Some("cursor"), mission: None, skills: &[], force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        // Cursor reads .agents/skills/ so lang skills should go there
+        assert!(skill_targets.is_empty() == false, "expected at least one skill file");
+        for t in &skill_targets
+        {
+            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for cursor, got: {}", t);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_adopt_cross_client_skills_to_claude() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        // Pre-populate .agents/skills/ as if a previous agent-less install had run
+        let cross_skill = workspace.path().join(".agents/skills/git-workflow");
+        std::fs::create_dir_all(&cross_skill)?;
+        std::fs::write(cross_skill.join("SKILL.md"), "# Git Workflow")?;
+
+        // Minimal config with no language skills so we can isolate the adoption behaviour
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  claude: {}\nlanguages: {}\nintegration: {}\n";
+        std::fs::write(config_dir.path().join("templates.yml"), yaml)?;
+        std::fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, skills: &[], force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let adopted: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains(".claude/skills/git-workflow")).collect();
+
+        assert!(adopted.is_empty() == false, "expected cross-client skill to be adopted into .claude/skills/");
+        assert!(adopted[0].target.to_string_lossy().contains(".claude/skills/git-workflow/SKILL.md") == true);
+        // The .agents/skills/ path must not appear in copy targets
+        let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains(".agents/skills")).collect();
+        assert!(cross_targets.is_empty() == true, "cross-client skills should not be copy targets when agent uses native dir");
 
         Ok(())
     }

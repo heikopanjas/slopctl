@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.2.1)
+**Last updated:** 2026-05-09 (v18.4.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,41 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.4.0, cross-client skill routing for non-compliant agents)
+
+- Added `reads_cross_client_skills: bool` field to `AgentDefaults` in `agent_defaults.rs`
+  - `true` (read `.agents/skills/`): Cursor, Codex, Copilot, OpenCode
+  - `false` (native dir only): Claude Code, Mistral Vibe
+- Added `reads_cross_client_skills(agent: &str) -> bool` public helper; unknown agents default to `true`
+- Updated `CROSS_CLIENT_SKILL_DIR` doc comment to clarify it is not universal
+- Changed language skill routing in `resolve_all_files` (`template_engine.rs`):
+  - Previously lang skills always went to `.agents/skills/` regardless of agent
+  - Now: if `--agent` is specified and the agent has `reads_cross_client_skills = false`, lang skills go to the agent's native skill dir (e.g. `.claude/skills/`, `.vibe/skills/`)
+  - Cursor, Codex, Copilot, OpenCode: unchanged — lang skills still go to `.agents/skills/`
+- Added cross-client adoption step in `resolve_all_files`: when installing an agent that doesn't read cross-client, any existing skill directories in `.agents/skills/` are copied into the agent's native skill dir (skipping files already present); source files remain in `.agents/skills/` for other agents that do read it
+- Reference: `docs/coding-agent-config-locations-v3.md` — cross-agent standards section
+- Added 4 new unit tests: `test_reads_cross_client_skills_per_agent`, `test_lang_skills_route_to_native_dir_for_claude`, `test_lang_skills_route_to_cross_client_for_cursor`, `test_adopt_cross_client_skills_to_claude`
+- Version bump: 18.3.0 → 18.4.0 (MINOR — new routing behaviour, no CLI changes)
+
+### 2026-05-09 (v18.3.0, new agents + preamble + simplified instruction model)
+
+- Added **Mistral Vibe** and **OpenCode** agents to `agent_defaults.rs` and `templates/v5/templates.yml`
+  - Vibe: detected via `.vibe/` directory; skills at `$workspace/.vibe/skills`; prompts at `$userprofile/.vibe/prompts`
+  - OpenCode: detected via `opencode.json`; skills at `$workspace/.opencode/skills`
+- Removed agent-specific instruction stubs (`CLAUDE.md`, `.cursorrules`) from the sample templates — all agents in the spec now read `AGENTS.md` natively; stubs were identical boilerplate
+- Introduced `<!-- {preamble} -->` as a new AGENTS.md insertion point processed before `<!-- {mission} -->`; backed by `preamble.md` template fragment, `preamble:` section in `templates.yml`, new `preamble` field on `TemplateConfig` in `bom.rs`, and a new loop in `resolve_all_files` in `template_engine.rs`; the `/init-session` guard moves from per-agent stubs into this shared preamble fragment
+- Kept `copilot-instructions.md` (★-stable Copilot instruction path) but replaced the init-session guard with a minimal reference to AGENTS.md; content is now a clean hook for future Copilot-specific overrides
+- Renamed `InstructionFile` → `WorkspaceMarker` and `instruction_files` → `workspace_markers` throughout `agent_defaults.rs`; detection markers are now native agent-created paths (directories or config files) rather than slopctl-installed files:
+  - Claude: `.claude/` directory (Claude Code creates this)
+  - Cursor: `.cursor/` directory (Cursor IDE creates this)
+  - Copilot: `.github/copilot-instructions.md` (slopctl-installed; Copilot has no native marker)
+  - Codex: `.codex/` directory (Codex creates this)
+  - Vibe: `.vibe/` directory (Vibe creates this)
+  - OpenCode: `opencode.json` (OpenCode creates this)
+- Updated `adopt_untracked_files` in `file_tracker.rs` to use `workspace_markers` and `is_file()` guard so directory markers are not mistakenly adopted as managed files
+- Reference: `docs/coding-agent-config-locations-v3.md`
+- Version bump: 18.2.1 → 18.3.0 (MINOR — new agents, simplified template model, no CLI changes)
 
 ### 2026-05-09 (v18.2.1, relax cross-language verify duplicates)
 

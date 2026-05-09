@@ -1,8 +1,13 @@
 //! Default filesystem paths and conventions for known AI coding agents
 //!
-//! Provides a registry of agent-specific paths for instruction files,
+//! Provides a registry of agent-specific paths for workspace detection markers,
 //! prompt/command directories, and skill directories. Used by the install
 //! flow to resolve where skills and other agent-agnostic artifacts go.
+//!
+//! Detection markers are files or directories whose presence indicates a particular
+//! agent is active in the workspace. Preferred markers are native agent-created
+//! paths (e.g. `.claude/`, `.cursor/`). Copilot has no native marker so its
+//! detection relies on the `.github/prompts/` directory that slopctl installs.
 
 use std::path::{Path, PathBuf};
 
@@ -13,14 +18,23 @@ pub const PLACEHOLDER_WORKSPACE: &str = "$workspace";
 pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 
 /// Cross-client skill directory per the agentskills.io specification.
-/// All compliant agents scan this path alongside their native skill directories.
+///
+/// Scanned by Codex, Copilot, OpenCode, Gemini CLI, and Cursor in addition to
+/// their native skill directories. Claude Code and Mistral Vibe do **not** read
+/// this path — they only scan their own native skill directories.
 pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 
-/// An agent-specific instruction file with its conventional location
+/// A file or directory whose presence indicates a particular agent is active
+/// in the workspace.
+///
+/// The path is joined to `placeholder` (workspace or userprofile root) and
+/// tested with `Path::exists()`, which returns `true` for both files and
+/// directories. Use a directory path (e.g. `.claude`) when the agent reliably
+/// creates that directory itself; use a specific file when only a file works.
 #[derive(Debug, Clone)]
-pub struct InstructionFile
+pub struct WorkspaceMarker
 {
-    /// Relative path within the placeholder root (e.g. `CLAUDE.md`, `.cursorrules`)
+    /// Relative path within the placeholder root (e.g. `.claude`, `opencode.json`)
     pub path:        &'static str,
     /// Root placeholder: `$workspace` or `$userprofile`
     pub placeholder: &'static str
@@ -31,48 +45,83 @@ pub struct InstructionFile
 pub struct AgentDefaults
 {
     /// Agent identifier (e.g. "cursor", "claude")
-    pub name:              &'static str,
-    /// Agent-specific instruction files (e.g. `.cursorrules`, `CLAUDE.md`)
-    pub instruction_files: &'static [InstructionFile],
+    pub name:                      &'static str,
+    /// Files or directories whose presence indicates this agent is active
+    pub workspace_markers:         &'static [WorkspaceMarker],
     /// Directory for agent prompts/commands, with placeholder prefix
-    pub prompt_dir:        &'static str,
+    pub prompt_dir:                &'static str,
     /// Directory for agent skills, with placeholder prefix
-    pub skill_dir:         &'static str
+    pub skill_dir:                 &'static str,
+    /// Whether this agent scans `.agents/skills/` in addition to its native skill dir.
+    ///
+    /// When `false` (Claude Code, Mistral Vibe), slopctl routes skill installation
+    /// directly to `skill_dir` and migrates any pre-existing cross-client skills
+    /// into that directory so they remain visible to the agent.
+    pub reads_cross_client_skills: bool
 }
 
-const CURSOR_INSTRUCTIONS: &[InstructionFile] = &[InstructionFile { path: ".cursorrules", placeholder: PLACEHOLDER_WORKSPACE }];
+// Claude Code creates `.claude/` when it initialises a project
+const CLAUDE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".claude", placeholder: PLACEHOLDER_WORKSPACE }];
 
-const CLAUDE_INSTRUCTIONS: &[InstructionFile] = &[InstructionFile { path: "CLAUDE.md", placeholder: PLACEHOLDER_WORKSPACE }];
+// Cursor IDE creates `.cursor/` when it opens a project
+const CURSOR_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".cursor", placeholder: PLACEHOLDER_WORKSPACE }];
 
-const CODEX_INSTRUCTIONS: &[InstructionFile] = &[InstructionFile { path: "CODEX.md", placeholder: PLACEHOLDER_WORKSPACE }];
+// Copilot has no native workspace marker; the prompt directory is used as a proxy
+// (created by slopctl when `init --agent copilot` installs the prompt files)
+const COPILOT_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".github/prompts", placeholder: PLACEHOLDER_WORKSPACE }];
 
-const COPILOT_INSTRUCTIONS: &[InstructionFile] = &[InstructionFile { path: ".github/copilot-instructions.md", placeholder: PLACEHOLDER_WORKSPACE }];
+// Codex creates `.codex/` when it initialises a project
+const CODEX_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".codex", placeholder: PLACEHOLDER_WORKSPACE }];
+
+// Mistral Vibe creates `.vibe/` when it initialises a project
+const VIBE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".vibe", placeholder: PLACEHOLDER_WORKSPACE }];
+
+// OpenCode writes `opencode.json` to the workspace root when initialised
+const OPENCODE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: "opencode.json", placeholder: PLACEHOLDER_WORKSPACE }];
 
 /// Built-in registry of known agents and their filesystem conventions
 const KNOWN_AGENTS: &[AgentDefaults] = &[
     AgentDefaults {
-        name:              "cursor",
-        instruction_files: CURSOR_INSTRUCTIONS,
-        prompt_dir:        "$workspace/.cursor/commands",
-        skill_dir:         "$workspace/.cursor/skills"
+        name:                      "cursor",
+        workspace_markers:         CURSOR_MARKERS,
+        prompt_dir:                "$workspace/.cursor/commands",
+        skill_dir:                 "$workspace/.cursor/skills",
+        reads_cross_client_skills: true
     },
     AgentDefaults {
-        name:              "claude",
-        instruction_files: CLAUDE_INSTRUCTIONS,
-        prompt_dir:        "$workspace/.claude/commands",
-        skill_dir:         "$workspace/.claude/skills"
+        name:                      "claude",
+        workspace_markers:         CLAUDE_MARKERS,
+        prompt_dir:                "$workspace/.claude/commands",
+        skill_dir:                 "$workspace/.claude/skills",
+        reads_cross_client_skills: false
     },
     AgentDefaults {
-        name:              "codex",
-        instruction_files: CODEX_INSTRUCTIONS,
-        prompt_dir:        "$userprofile/.codex/prompts",
-        skill_dir:         "$userprofile/.codex/skills"
+        name:                      "codex",
+        workspace_markers:         CODEX_MARKERS,
+        prompt_dir:                "$userprofile/.codex/prompts",
+        skill_dir:                 "$userprofile/.codex/skills",
+        reads_cross_client_skills: true
     },
     AgentDefaults {
-        name:              "copilot",
-        instruction_files: COPILOT_INSTRUCTIONS,
-        prompt_dir:        "$workspace/.github/prompts",
-        skill_dir:         "$workspace/.github/skills"
+        name:                      "copilot",
+        workspace_markers:         COPILOT_MARKERS,
+        prompt_dir:                "$workspace/.github/prompts",
+        skill_dir:                 "$workspace/.github/skills",
+        reads_cross_client_skills: true
+    },
+    AgentDefaults {
+        name:                      "vibe",
+        workspace_markers:         VIBE_MARKERS,
+        prompt_dir:                "$userprofile/.vibe/prompts",
+        skill_dir:                 "$workspace/.vibe/skills",
+        reads_cross_client_skills: false
+    },
+    AgentDefaults {
+        name:                      "opencode",
+        workspace_markers:         OPENCODE_MARKERS,
+        prompt_dir:                "$workspace/.opencode",
+        skill_dir:                 "$workspace/.opencode/skills",
+        reads_cross_client_skills: true
     }
 ];
 
@@ -89,6 +138,17 @@ pub fn get_defaults(agent: &str) -> Option<&'static AgentDefaults>
 pub fn get_skill_dir(agent: &str) -> Option<&'static str>
 {
     get_defaults(agent).map(|d| d.skill_dir)
+}
+
+/// Return whether an agent scans `.agents/skills/` for skills
+///
+/// Returns `true` for Cursor, Codex, Copilot, and OpenCode (which all follow the
+/// agentskills.io cross-client convention). Returns `false` for Claude Code and
+/// Mistral Vibe, which only scan their own native skill directories.
+/// Unknown agents default to `true` (assume cross-client compliance).
+pub fn reads_cross_client_skills(agent: &str) -> bool
+{
+    get_defaults(agent).is_none_or(|d| d.reads_cross_client_skills)
 }
 
 /// List all known agent names
@@ -125,7 +185,7 @@ pub fn resolve_placeholder_path(raw: &str, workspace: &Path, userprofile: &Path)
 /// Return all skill directories to search for a given workspace
 ///
 /// Includes the skill directory of every installed agent (detected via their
-/// instruction files) and always appends the cross-client `.agents/skills`
+/// workspace markers) and always appends the cross-client `.agents/skills`
 /// directory. Duplicates are removed before returning.
 ///
 /// # Arguments
@@ -152,9 +212,8 @@ pub fn get_all_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<Pa
 ///
 /// Like `get_all_skill_search_dirs` but excludes `$userprofile`-based skill
 /// directories (e.g. codex's `~/.codex/skills`). Those directories are
-/// user-global and may contain agent-internal files (like `.system/`) or
-/// skills installed for other workspaces. Use `FileTracker` to manage
-/// userprofile skills instead.
+/// user-global and may contain agent-internal files or skills from other
+/// workspaces. Use `FileTracker` to manage userprofile skills instead.
 ///
 /// # Arguments
 ///
@@ -186,10 +245,10 @@ pub fn get_workspace_skill_search_dirs(workspace: &Path, userprofile: &Path) -> 
     dirs
 }
 
-/// Detect which agent is installed in a workspace by checking for known files
+/// Detect which agent is installed in a workspace by checking for known markers
 ///
-/// Scans the workspace for agent-specific instruction files.
-/// Returns the first agent whose files are found.
+/// Scans the workspace for agent-specific files or directories.
+/// Returns the first agent whose marker is found.
 ///
 /// # Arguments
 ///
@@ -198,12 +257,12 @@ pub fn detect_installed_agent(workspace: &Path) -> Option<String>
 {
     for agent in KNOWN_AGENTS
     {
-        for instr in agent.instruction_files
+        for marker in agent.workspace_markers
         {
-            if instr.placeholder == PLACEHOLDER_WORKSPACE
+            if marker.placeholder == PLACEHOLDER_WORKSPACE
             {
-                let file_path = workspace.join(instr.path);
-                if file_path.exists() == true
+                let marker_path = workspace.join(marker.path);
+                if marker_path.exists() == true
                 {
                     return Some(agent.name.to_string());
                 }
@@ -213,10 +272,10 @@ pub fn detect_installed_agent(workspace: &Path) -> Option<String>
     None
 }
 
-/// Detect all agents installed in a workspace by checking for known files
+/// Detect all agents installed in a workspace by checking for known markers
 ///
-/// Scans the workspace for agent-specific instruction files.
-/// Returns every agent whose files are found (may be empty).
+/// Scans the workspace for agent-specific files or directories.
+/// Returns every agent whose marker is found (may be empty).
 ///
 /// # Arguments
 ///
@@ -226,12 +285,12 @@ pub fn detect_all_installed_agents(workspace: &Path) -> Vec<String>
     let mut found = Vec::new();
     for agent in KNOWN_AGENTS
     {
-        for instr in agent.instruction_files
+        for marker in agent.workspace_markers
         {
-            if instr.placeholder == PLACEHOLDER_WORKSPACE
+            if marker.placeholder == PLACEHOLDER_WORKSPACE
             {
-                let file_path = workspace.join(instr.path);
-                if file_path.exists() == true
+                let marker_path = workspace.join(marker.path);
+                if marker_path.exists() == true
                 {
                     found.push(agent.name.to_string());
                     break;
@@ -270,6 +329,8 @@ mod tests
     {
         assert_eq!(get_skill_dir("claude"), Some("$workspace/.claude/skills"));
         assert_eq!(get_skill_dir("codex"), Some("$userprofile/.codex/skills"));
+        assert_eq!(get_skill_dir("vibe"), Some("$workspace/.vibe/skills"));
+        assert_eq!(get_skill_dir("opencode"), Some("$workspace/.opencode/skills"));
         assert_eq!(get_skill_dir("nonexistent"), None);
     }
 
@@ -281,20 +342,37 @@ mod tests
         assert!(agents.contains(&"claude"));
         assert!(agents.contains(&"codex"));
         assert!(agents.contains(&"copilot"));
-        assert_eq!(agents.len(), 4);
+        assert!(agents.contains(&"vibe"));
+        assert!(agents.contains(&"opencode"));
+        assert_eq!(agents.len(), 6);
     }
 
     #[test]
-    fn test_detect_installed_agent() -> anyhow::Result<()>
+    fn test_reads_cross_client_skills_per_agent()
+    {
+        // Agents that DO scan .agents/skills/
+        assert!(reads_cross_client_skills("cursor") == true);
+        assert!(reads_cross_client_skills("codex") == true);
+        assert!(reads_cross_client_skills("copilot") == true);
+        assert!(reads_cross_client_skills("opencode") == true);
+        // Agents that do NOT scan .agents/skills/
+        assert!(reads_cross_client_skills("claude") == false);
+        assert!(reads_cross_client_skills("vibe") == false);
+        // Unknown agent defaults to true (assume compliant)
+        assert!(reads_cross_client_skills("unknown-agent") == true);
+    }
+
+    #[test]
+    fn test_detect_installed_agent_cursor() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        // No agent files -> None
+        // No agent markers -> None
         assert!(detect_installed_agent(workspace).is_none());
 
-        // Create .cursorrules -> detects cursor
-        std::fs::write(workspace.join(".cursorrules"), b"test")?;
+        // Create .cursor/ directory -> detects cursor
+        std::fs::create_dir(workspace.join(".cursor"))?;
         assert_eq!(detect_installed_agent(workspace), Some("cursor".to_string()));
         Ok(())
     }
@@ -305,8 +383,41 @@ mod tests
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join("CLAUDE.md"), b"test")?;
+        std::fs::create_dir(workspace.join(".claude"))?;
         assert_eq!(detect_installed_agent(workspace), Some("claude".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect_installed_agent_codex() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        std::fs::create_dir(workspace.join(".codex"))?;
+        assert_eq!(detect_installed_agent(workspace), Some("codex".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect_installed_agent_vibe() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        std::fs::create_dir(workspace.join(".vibe"))?;
+        assert_eq!(detect_installed_agent(workspace), Some("vibe".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect_installed_agent_opencode() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let workspace = temp_dir.path();
+
+        std::fs::write(workspace.join("opencode.json"), b"{}")?;
+        assert_eq!(detect_installed_agent(workspace), Some("opencode".to_string()));
         Ok(())
     }
 
@@ -368,7 +479,7 @@ mod tests
         let workspace = temp_dir.path();
         let home = std::path::PathBuf::from("/home/user");
 
-        std::fs::write(workspace.join(".cursorrules"), b"test")?;
+        std::fs::create_dir(workspace.join(".cursor"))?;
         let dirs = get_all_skill_search_dirs(workspace, &home);
         // cursor skill dir + cross-client dir
         assert_eq!(dirs.len(), 2);
@@ -384,8 +495,8 @@ mod tests
         let workspace = temp_dir.path();
         let home = std::path::PathBuf::from("/home/user");
 
-        std::fs::write(workspace.join(".cursorrules"), b"test")?;
-        std::fs::write(workspace.join("CODEX.md"), b"test")?;
+        std::fs::create_dir(workspace.join(".cursor"))?;
+        std::fs::create_dir(workspace.join(".codex"))?;
 
         let all_dirs = get_all_skill_search_dirs(workspace, &home);
         let ws_dirs = get_workspace_skill_search_dirs(workspace, &home);
@@ -416,7 +527,7 @@ mod tests
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join("CLAUDE.md"), b"test")?;
+        std::fs::create_dir(workspace.join(".claude"))?;
         let agents = detect_all_installed_agents(workspace);
         assert_eq!(agents, vec!["claude".to_string()]);
         Ok(())
@@ -428,8 +539,8 @@ mod tests
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join(".cursorrules"), b"test")?;
-        std::fs::write(workspace.join("CLAUDE.md"), b"test")?;
+        std::fs::create_dir(workspace.join(".cursor"))?;
+        std::fs::create_dir(workspace.join(".claude"))?;
 
         let agents = detect_all_installed_agents(workspace);
         assert!(agents.contains(&"cursor".to_string()) == true);
