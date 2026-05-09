@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.0.0)
+**Last updated:** 2026-05-09 (v18.1.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,20 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.1.0, templates --verify)
+
+- Added `--verify` (`-V`) flag to the `templates` subcommand
+- Performs three sequential checks printed with colored output:
+  - **C – YAML structure**: parses `templates.yml`, validates version in `2..=5`, checks `main.source` is set, checks for duplicate targets across all sections
+  - **A – Local file integrity**: every non-URL `source` file referenced in `templates.yml` (main, agent instructions/prompts, language files, shared groups, integration files, principles, mission) and every local-path skill directory must exist in the local template cache; URL-based sources are skipped (fetched at install time)
+  - **B – Source freshness**: fetches `templates.yml` from the configured source (GitHub URL or local path) and byte-compares it with the local copy; a mismatch recommends `slopctl templates --update`; network failures are reported as warnings, not hard errors
+- Returns non-zero exit code if any issue is found (useful for CI)
+- `--from` flag now applies to both `--update` and `--verify` (manual guard in `main.rs` replaces the clap `requires = "update"` attribute)
+- All three flags (`--update`, `--verify`, `--list`) can be combined freely; execution order is `--update` → `--verify` → `--list`
+- New `src/template_manager/verify.rs` with `verify()`, `verify_yaml_structure()`, `verify_local_integrity()`, `verify_source_freshness()` on `TemplateManager`, plus free functions `collect_duplicate_target_issues`, `fetch_remote_templates_yml`, `check_source_file`, `check_source_skill`
+- 9 new unit tests covering all sections
+- Version bump: 18.0.0 to 18.1.0 (MINOR - new CLI flag)
 
 ### 2026-05-09 (v18.0.0, merge purge subcommand into remove --purge)
 

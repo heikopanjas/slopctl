@@ -86,8 +86,12 @@ pub enum Commands
         #[arg(short, long, default_value = "false")]
         list: bool,
 
-        /// Path or URL to download/copy templates from
-        #[arg(short, long, requires = "update")]
+        /// Verify local templates: YAML validity, file integrity, and source freshness
+        #[arg(short = 'V', long, default_value = "false")]
+        verify: bool,
+
+        /// Path or URL to use as source (applies to --update and --verify)
+        #[arg(short, long)]
         from: Option<String>,
 
         /// Preview changes without applying them
