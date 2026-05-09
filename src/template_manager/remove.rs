@@ -139,6 +139,49 @@ impl TemplateManager
                     }
                 }
 
+                // For cross-client agents, decide what happens to .agents/skills/.
+                // If this is the last cross-client agent in the workspace, collect its
+                // contents for deletion so orphaned skills don't accumulate.
+                // If another cross-client agent is still installed, preserve the directory
+                // and print an informational note so the user knows why it was skipped.
+                if agent_defaults::reads_cross_client_skills(agent_name) == true
+                {
+                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents(&current_dir)
+                        .into_iter()
+                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills(other) == true)
+                        .collect();
+
+                    let cross_client_dir = resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, &current_dir, &userprofile);
+
+                    if other_cross_client.is_empty() == true
+                    {
+                        if cross_client_dir.exists() == true &&
+                            let Ok(entries) = fs::read_dir(&cross_client_dir)
+                        {
+                            for entry in entries.flatten()
+                            {
+                                if entry.path().is_dir() == true
+                                {
+                                    let mut skill_files = Vec::new();
+                                    let _ = collect_files_recursive(&entry.path(), &mut skill_files);
+                                    for f in skill_files
+                                    {
+                                        if files_to_remove.contains(&f) == false
+                                        {
+                                            files_to_remove.push(f);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        let agents_list = other_cross_client.join(", ");
+                        println!("{} Keeping {} (still in use by: {})", "→".blue(), agent_defaults::CROSS_CLIENT_SKILL_DIR, agents_list.yellow());
+                    }
+                }
+
                 description_parts.push(format!("agent '{}'", agent_name.yellow()));
             }
             else
@@ -973,6 +1016,63 @@ mod tests
         let result = manager.remove(Some("codex"), None, &[], false, true);
 
         assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_cross_client_agent_preserves_cross_client_skills_when_other_agent_installed() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create detection markers for two cross-client agents (cursor and codex)
+        fs::create_dir_all(workspace.path().join(".cursor"))?;
+        fs::create_dir_all(workspace.path().join(".codex"))?;
+
+        // Place a cross-client skill
+        let skill_dir = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Git Workflow")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        // Remove cursor in dry-run mode; codex is still installed so the guard fires
+        let result = manager.remove(Some("cursor"), None, &[], false, true);
+
+        assert!(result.is_ok() == true);
+        // The cross-client skill must be preserved because codex still needs it
+        assert!(skill_file.exists() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_cross_client_agent_cleans_cross_client_skills_when_last_agent() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Create a detection marker for cursor only (the last cross-client agent)
+        fs::create_dir_all(workspace.path().join(".cursor"))?;
+
+        // Place a cross-client skill
+        let skill_dir = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Git Workflow")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        // Remove cursor with force; no other cross-client agents so .agents/skills/ is cleaned
+        let result = manager.remove(Some("cursor"), None, &[], true, false);
+
+        assert!(result.is_ok() == true);
+        // The cross-client skill must be deleted because cursor was the last cross-client agent
+        assert!(skill_file.exists() == false);
         Ok(())
     }
 }
