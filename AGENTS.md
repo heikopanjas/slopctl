@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.5.0)
+**Last updated:** 2026-05-09 (v18.5.1)
 
 <!-- {mission} -->
 
@@ -824,6 +824,12 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.5.1, bug fixes)
+
+- Fixed `templates --update` not downloading `preamble` files — `preamble` loop was missing from `download_templates_from_url` in `download_manager.rs`
+- Fixed `test_adopt_cross_client_skills_to_claude` failing on Windows and macOS symlinked TempDirs — replaced `to_string_lossy().contains("forward/slash")` with `Path::ends_with` / `ancestors()` which match by path components and are separator- and symlink-agnostic
+- Version bump: 18.5.0 to 18.5.1 (PATCH - bug fixes)
 
 ### 2026-05-09 (v18.5.0, guard .agents/skills/ in remove --agent)
 
