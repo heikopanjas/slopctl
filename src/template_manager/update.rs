@@ -1,9 +1,11 @@
 //! Template update command
 
+use std::path::Path;
+
 use owo_colors::OwoColorize;
 
 use super::TemplateManager;
-use crate::{Result, template_engine};
+use crate::{Result, file_tracker::FileTracker, template_engine};
 
 impl TemplateManager
 {
@@ -23,6 +25,33 @@ impl TemplateManager
     {
         let engine = crate::template_engine::TemplateEngine::new(&self.config_dir);
         engine.install_skills_only(options)
+    }
+
+    /// Ensure `init --lang` does not silently add a second language
+    ///
+    /// Adding another language can create real workspace-file conflicts (for
+    /// example `.editorconfig` or `.gitignore`). The `merge --lang` path exists
+    /// specifically to resolve those conflicts with the LLM.
+    fn ensure_language_init_allowed(workspace: &Path, requested_lang: Option<&str>) -> Result<()>
+    {
+        if let Some(lang) = requested_lang
+        {
+            let file_tracker = FileTracker::new(workspace)?;
+            if let Some(installed_lang) = file_tracker.get_installed_language() &&
+                installed_lang != lang
+            {
+                return Err(anyhow::anyhow!(
+                    "Language '{}' is already installed. Use 'slopctl merge --lang {}' to add '{}' with AI-assisted conflict resolution, or run 'slopctl remove \
+                     --lang {}' first to replace it.",
+                    installed_lang,
+                    lang,
+                    lang,
+                    installed_lang
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Updates local templates from global storage
@@ -49,6 +78,7 @@ impl TemplateManager
 
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
+        Self::ensure_language_init_allowed(&workspace, options.lang)?;
 
         let config = template_engine::load_template_config(&self.config_dir)?;
         let version = config.version;
@@ -78,5 +108,69 @@ impl TemplateManager
             }
             | _ => Err(anyhow::anyhow!("Unsupported template version: {}. Please update slopctl to the latest version.", version))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use std::fs;
+
+    use super::TemplateManager;
+    use crate::file_tracker::{AGENT_ALL, FileTracker, LANG_NONE};
+
+    #[test]
+    fn test_ensure_language_init_allowed_blocks_different_language() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let tracked_file = workspace.path().join("AGENTS.md");
+        fs::write(&tracked_file, "# instructions")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.save()?;
+
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("swift"));
+
+        assert!(result.is_err() == true);
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("rust") == true);
+        assert!(message.contains("slopctl merge --lang swift") == true);
+        assert!(message.contains("slopctl remove --lang rust") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ensure_language_init_allowed_allows_same_language() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let tracked_file = workspace.path().join("AGENTS.md");
+        fs::write(&tracked_file, "# instructions")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.save()?;
+
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("rust"));
+
+        assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ensure_language_init_allowed_ignores_language_none() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let tracked_file = workspace.path().join("CLAUDE.md");
+        fs::write(&tracked_file, "Read AGENTS.md")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, LANG_NONE.into(), "claude".into(), "agent".into());
+        tracker.save()?;
+
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("rust"));
+
+        assert!(result.is_ok() == true);
+        Ok(())
     }
 }

@@ -51,7 +51,7 @@ pub enum Commands
     /// Initialize agent instructions and skills for a project
     Init
     {
-        /// Programming language or framework (e.g., rust, c++, swift)
+        /// Programming language or framework (single value; use merge to add another)
         #[arg(short, long)]
         lang: Option<String>,
 

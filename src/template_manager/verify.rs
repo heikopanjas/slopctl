@@ -10,7 +10,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result,
-    bom::TemplateConfig,
+    bom::{self, TemplateConfig},
     github::{download_file, is_github_url, is_url, parse_github_url},
     template_engine::load_template_config
 };
@@ -281,17 +281,35 @@ impl TemplateManager
     }
 }
 
-/// Collect duplicate-target violations across all sections of a `TemplateConfig`
+/// Collect duplicate-target violations across all single-install scenarios
 ///
 /// Returns one error string per duplicate found.
 fn collect_duplicate_target_issues(config: &TemplateConfig, config_dir: &Path) -> Vec<String>
+{
+    let mut violations = collect_global_duplicate_target_issues(config, config_dir);
+    violations.extend(collect_language_duplicate_target_issues(config));
+    violations
+}
+
+/// Collect duplicate-target violations for non-language sections
+///
+/// Language and shared files are checked separately per resolved language because
+/// only one language is installed by `init` at a time. Cross-language target
+/// overlap is valid catalog data.
+fn collect_global_duplicate_target_issues(config: &TemplateConfig, config_dir: &Path) -> Vec<String>
 {
     use std::collections::HashMap;
 
     let mut seen: HashMap<String, String> = HashMap::new();
     let mut violations: Vec<String> = Vec::new();
 
+    // $instructions is a cumulative merge target: multiple sources are
+    // expected and intentional, so it is exempt from duplicate detection.
     let mut record = |source: &str, target: &str| {
+        if target.starts_with("$instructions") == true
+        {
+            return;
+        }
         let resolved = resolve_target(target, config_dir);
         let key = resolved.to_string_lossy().to_string();
         if let Some(prev_source) = seen.insert(key.clone(), source.to_string())
@@ -313,27 +331,32 @@ fn collect_duplicate_target_issues(config: &TemplateConfig, config_dir: &Path) -
         }
     }
 
-    for lang_cfg in config.languages.values()
-    {
-        for m in &lang_cfg.files
-        {
-            record(&m.source, &m.target);
-        }
-    }
-
-    for shared_cfg in config.shared.values()
-    {
-        for m in &shared_cfg.files
-        {
-            record(&m.source, &m.target);
-        }
-    }
-
     for int_cfg in config.integration.values()
     {
         for m in &int_cfg.files
         {
             record(&m.source, &m.target);
+        }
+    }
+
+    violations
+}
+
+/// Collect duplicate-target violations within each resolved language
+///
+/// `bom::resolve_language_files` expands shared includes and already contains
+/// the single-language duplicate-target validation used during install.
+fn collect_language_duplicate_target_issues(config: &TemplateConfig) -> Vec<String>
+{
+    let mut violations: Vec<String> = Vec::new();
+    let mut lang_names: Vec<&str> = config.languages.keys().map(String::as_str).collect();
+    lang_names.sort();
+
+    for lang in lang_names
+    {
+        if let Err(e) = bom::resolve_language_files(lang, config)
+        {
+            violations.push(format!("language {}: {}", lang, e));
         }
     }
 
@@ -585,6 +608,63 @@ mod tests
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
         assert!(issues.is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_collect_duplicate_target_issues_allows_cross_language_targets() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+
+        let yaml = concat!(
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
+            "      - source: rust-editor-config.ini\n        target: '$workspace/.editorconfig'\n", "  swift:\n", "    files:\n",
+            "      - source: swift-editor-config.ini\n        target: '$workspace/.editorconfig'\n"
+        );
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+
+        let issues = collect_duplicate_target_issues(&config, data_dir.path());
+
+        assert!(issues.is_empty() == true, "cross-language duplicate targets must be allowed: {:?}", issues);
+        Ok(())
+    }
+
+    #[test]
+    fn test_collect_duplicate_target_issues_rejects_same_language_duplicate() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+
+        let yaml = concat!(
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
+            "      - source: rust-editor-config.ini\n        target: '$workspace/.editorconfig'\n",
+            "      - source: rust-editor-config-alt.ini\n        target: '$workspace/.editorconfig'\n"
+        );
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+
+        let issues = collect_duplicate_target_issues(&config, data_dir.path());
+
+        assert!(issues.iter().any(|i| i.contains("language rust") && i.contains("Duplicate target")) == true, "expected same-language duplicate issue: {:?}", issues);
+        Ok(())
+    }
+
+    #[test]
+    fn test_collect_duplicate_target_issues_instructions_exempt() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+
+        // Multiple entries targeting $instructions are intentional and must NOT
+        // be flagged as duplicates.
+        let yaml = concat!(
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
+            "      - source: rust.md\n        target: '$instructions'\n", "      - source: rust-style.md\n        target: '$instructions'\n"
+        );
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+
+        let issues = collect_duplicate_target_issues(&config, data_dir.path());
+        assert!(issues.is_empty() == true, "instructions targets must not be flagged: {:?}", issues);
         Ok(())
     }
 }
