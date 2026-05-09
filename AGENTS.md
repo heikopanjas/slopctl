@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.4.0)
+**Last updated:** 2026-05-09 (v18.5.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,17 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.5.0, guard .agents/skills/ in remove --agent)
+
+- Extended `remove --agent <name>` to manage `.agents/skills/` correctly when removing a cross-client agent (`reads_cross_client_skills == true`)
+- New behavior: after collecting the agent's native skill files, detect which other installed agents also support `.agents/skills/`
+  - If **none remain**: also collect `.agents/skills/` contents for deletion — prevents orphaned cross-client skills accumulating when the last cross-client agent is removed
+  - If **others remain**: skip `.agents/skills/` deletion and print `→ Keeping .agents/skills/ (still in use by: <agents>)` — explicit guard so other agents' shared skills are not destroyed
+- Non-cross-client agents (Claude, Vibe) are unaffected; their skills live only in their native directory
+- `remove --all` and `remove --purge` already delete `.agents/skills/` via `get_workspace_skill_search_dirs` and are unchanged
+- Added 2 regression tests: `test_remove_cross_client_agent_preserves_cross_client_skills_when_other_agent_installed` and `test_remove_cross_client_agent_cleans_cross_client_skills_when_last_agent`
+- Version bump: 18.4.0 to 18.5.0 (MINOR — new cleanup + guard behaviour in `remove --agent`)
 
 ### 2026-05-09 (v18.4.0, cross-client skill routing for non-compliant agents)
 
