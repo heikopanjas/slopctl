@@ -2222,12 +2222,17 @@ languages:
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
 
-        let adopted: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains(".claude/skills/git-workflow")).collect();
+        // Use Path::ends_with with relative components to avoid symlink / path-separator
+        // mismatches between workspace.path() (raw TempDir) and the canonicalized cwd
+        // that resolve_all_files uses internally (macOS /var vs /private/var, Windows \).
+        let native_rel = std::path::Path::new(".claude/skills/git-workflow");
+        let adopted: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.parent().is_some_and(|p| p.ends_with(native_rel))).collect();
 
         assert!(adopted.is_empty() == false, "expected cross-client skill to be adopted into .claude/skills/");
-        assert!(adopted[0].target.to_string_lossy().contains(".claude/skills/git-workflow/SKILL.md") == true);
+        assert!(adopted[0].target.ends_with(std::path::Path::new(".claude/skills/git-workflow/SKILL.md")) == true);
         // The .agents/skills/ path must not appear in copy targets
-        let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains(".agents/skills")).collect();
+        let cross_rel = std::path::Path::new(".agents/skills");
+        let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.ancestors().any(|a| a.ends_with(cross_rel))).collect();
         assert!(cross_targets.is_empty() == true, "cross-client skills should not be copy targets when agent uses native dir");
 
         Ok(())
