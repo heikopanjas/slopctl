@@ -90,6 +90,11 @@ impl DownloadManager
             download_entry(&main.source)?;
         }
 
+        for entry in &config.preamble
+        {
+            download_entry(&entry.source)?;
+        }
+
         for entry in &config.principles
         {
             download_entry(&entry.source)?;
