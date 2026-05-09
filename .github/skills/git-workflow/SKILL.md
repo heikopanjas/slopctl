@@ -97,21 +97,3 @@ Bad (special characters):
 ```text
 fix: update `KString` with "nested 'quotes'" & $special chars!
 ```
-
-**Invoking git commit safely:**
-
-Each `-m` flag creates a **separate paragraph** with a blank line between it and the next. Never use one `-m` per bullet line, or every bullet ends up separated by a blank line.
-
-Wrong (blank line between every bullet):
-
-```text
-git commit -m subject -m bullet-one -m bullet-two -m bullet-three
-```
-
-Right - put the entire body in a single `-m` with embedded newlines:
-
-- zsh / bash: use ANSI-C quoting `$'...\n...'` so `\n` becomes a real newline
-- PowerShell: use a here-string `@"...newlines..."@` passed as one argument
-- Cross-shell: write the message to a temp file and use `git commit -F <file>`
-
-The rule: subject in the first `-m`, the **whole** body in the second `-m`. Bullet lists must live inside one body paragraph.

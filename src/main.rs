@@ -385,21 +385,28 @@ fn main()
                 manager.update(&options)
             }
         }
-        | Commands::Templates { update, list, from, dry_run } =>
+        | Commands::Templates { update, list, verify, from, dry_run } =>
         {
-            if update == false && list == false
+            if update == false && list == false && verify == false
             {
-                eprintln!("{} Must specify --update or --list", "✗".red());
+                eprintln!("{} Must specify --update, --list, or --verify", "✗".red());
                 eprintln!("{} Examples: slopctl templates --update", "→".blue());
                 eprintln!("{}          slopctl templates --list", "→".blue());
+                eprintln!("{}          slopctl templates --verify", "→".blue());
                 eprintln!("{}          slopctl templates --update --list", "→".blue());
                 std::process::exit(1);
             }
 
+            if from.is_some() == true && update == false && verify == false
+            {
+                eprintln!("{} --from requires --update or --verify", "✗".red());
+                std::process::exit(1);
+            }
+
+            let (source, is_configured, fallback) = resolve_source(from);
+
             let update_result = if update == true
             {
-                let (source, is_configured, fallback) = resolve_source(from);
-
                 if dry_run == true
                 {
                     if is_configured == true
@@ -422,7 +429,6 @@ fn main()
                         println!("{} Using configured source", "→".blue());
                     }
                     println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-
                     download_with_fallback(&manager, &source, fallback)
                 }
             }
@@ -431,29 +437,41 @@ fn main()
                 Ok(())
             };
 
-            if let Err(e) = update_result
-            {
-                Err(e)
-            }
-            else if list == true
-            {
-                manager.list_global()
-            }
-            else
-            {
-                Ok(())
-            }
+            update_result
+                .and_then(|()| {
+                    if verify == true
+                    {
+                        manager.verify(&source)
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+                .and_then(|()| {
+                    if list == true
+                    {
+                        manager.list_global()
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
         }
-        | Commands::Purge { force, dry_run } => manager.purge(force, dry_run),
-        | Commands::Remove { agent, lang, all, skill, force, dry_run } =>
+        | Commands::Remove { agent, lang, all, skill, purge, force, dry_run } =>
         {
-            if all == true && (agent.is_some() == true || lang.is_some() == true)
+            if purge == true
+            {
+                manager.remove_purge(force, dry_run)
+            }
+            else if all == true && (agent.is_some() == true || lang.is_some() == true)
             {
                 Err(anyhow::anyhow!("Cannot specify --agent or --lang together with --all"))
             }
             else if all == false && agent.is_none() == true && lang.is_none() == true && skill.is_empty() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --skill"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, --skill, or --purge"))
             }
             else
             {

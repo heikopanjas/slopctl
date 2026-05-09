@@ -146,6 +146,11 @@ It covers error handling, naming, module organization, formatting, testing, and 
   };
   ```
 
+- Prefer `Option<T>` over sentinel enum variants. Do not add `Invalid`, `Unknown`, or `None` variants to an enum solely to avoid wrapping it in `Option`. `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time, whereas sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm.
+  - ❌ Incorrect: `enum Color { Invalid, Red, Green, Blue }` returned from a parser
+  - ✅ Correct: `enum Color { Red, Green, Blue }` with `Option<Color>` at the boundary
+  - Exception: when "unknown" is a meaningful domain state — e.g. forward-compatible protocol parsing where unrecognized variants must round-trip — model it explicitly (`HttpVersion::Unknown(String)`). This is "modeling the domain accurately," not "avoiding `Option`."
+
 **CLI Design with clap:**
 
 - Use clap's derive API for argument parsing
