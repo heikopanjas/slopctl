@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-05 (v17.1.1)
+**Last updated:** 2026-05-09 (v18.0.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,17 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-09 (v18.0.0, merge purge subcommand into remove --purge)
+
+- **BREAKING**: removed the `purge` subcommand; its functionality is now `slopctl remove --purge`
+- Design rationale: `remove --all` and `purge` were nearly identical; the only difference is that `purge` also removes AGENTS.md. Adding `--purge` to `remove` makes the relationship explicit in a single command with layered semantics: `--all` removes agent files and skills (keeps AGENTS.md); `--purge` removes everything including AGENTS.md (customized AGENTS.md is preserved unless `--force` is also given)
+- `--purge` is mutually exclusive with `--agent`, `--lang`, `--skill`, and `--all` (enforced by clap `conflicts_with`)
+- `--force` semantics are now layered: alone it skips the confirmation prompt; combined with `--purge` it additionally overrides the customized-AGENTS.md preservation guard
+- Implementation: deleted `src/template_manager/purge.rs`; `remove_purge()` and `collect_purge_targets()` moved into `src/template_manager/remove.rs`; `mod purge` removed from `mod.rs`; `Purge` variant removed from `cli.rs`; `Commands::Purge` dispatch arm removed from `main.rs`
+- All purge tests ported to `remove.rs` under `test_remove_purge_*` names
+- `init-session` decision: keep as custom prompt/command (not converted to skill) — the `/init-session` slash command UX in Cursor and Claude Code is better than skill invocation for a user-triggered session-start ritual; agent-specific variations (Cursor vs Claude vs Copilot) are also natural in the command format
+- Version bump: 17.1.1 to 18.0.0 (MAJOR - breaking CLI change: subcommand removed)
 
 ### 2026-05-05 (v17.1.1, fix purge silently deleting customized AGENTS.md)
 
