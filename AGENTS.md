@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.5.1)
+**Last updated:** 2026-05-14 (v18.5.2)
 
 <!-- {mission} -->
 
@@ -824,6 +824,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v18.5.2, agentskills.io spec compliance for bundled skills)
+
+- Added YAML frontmatter (`name`, `description`, `license`, `metadata`) to all 10 bundled skill files in `templates/v5/skills/` to conform to the [agentskills.io specification](https://agentskills.io/specification)
+- Renamed directory `templates/v5/skills/c++-coding-conventions` to `cpp-coding-conventions` — the `+` character is not allowed in the `name` field (only lowercase letters, numbers, and hyphens); `name` must also match the parent directory name
+- Updated `templates/v5/templates.yml` to reference the renamed skill (`cpp-coding-conventions`) under the `c++` language section
+- All skill names are lowercase, hyphen-separated, and match their parent directory names as required by the spec
+- No Rust source changes; no CLI behavior changes
+- Version bump: 18.5.1 to 18.5.2 (PATCH — template file conformance fix)
 
 ### 2026-05-09 (v18.5.1, bug fixes)
 

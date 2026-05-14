@@ -1,3 +1,12 @@
+---
+name: swift-coding-conventions
+description: Swift coding conventions covering naming, access control, concurrency, error handling, and protocol-oriented design. Load before writing, reviewing, or refactoring Swift code.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # Swift Coding Conventions
 
 Read this skill before writing, reviewing, or refactoring Swift code in this project.

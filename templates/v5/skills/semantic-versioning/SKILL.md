@@ -1,3 +1,12 @@
+---
+name: semantic-versioning
+description: Rules for when to increment PATCH, MINOR, or MAJOR version numbers using semantic versioning. Load when deciding how to version a code change or preparing a release.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # Semantic Versioning Protocol
 
 Read this skill when you need to bump the project version. It explains when to
