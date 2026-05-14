@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v19.0.0)
+**Last updated:** 2026-05-14 (v20.0.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,32 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.0.0, remove workspace_skill_dir override)
+
+- Removed the `workspace_skill_dir` field from `AgentDefaults`
+- Removed the now-redundant `get_effective_workspace_skill_dir()` helper
+- Rationale: slopctl installs agent-scoped files into the workspace by default whenever the agent supports workspace-local artifacts; userprofile installs are the explicit exception for global or corporate policy use cases
+- `skill_dir` is now the native workspace skill directory for all known agents, while `userprofile_skill_dir` remains available only for explicit `target: '$userprofile'` skill definitions
+- Updated README skill-routing documentation to distinguish agent-specific native workspace skills from cross-client language and top-level skills
+- Version bump: 19.1.1 → 20.0.0 (MAJOR — public `AgentDefaults` field and helper removal)
+
+### 2026-05-14 (v19.1.1, workspace-local Codex defaults)
+
+- Fixed Codex defaults in `agent_defaults.rs` to use workspace-local prompt and skill directories: `$workspace/.codex/prompts` and `$workspace/.codex/skills`
+- Kept Codex's userprofile skill directory available via explicit `target: '$userprofile'` as `$userprofile/.codex/skills`
+- Rationale: Codex supports project-local prompts and native project-local skills, so agent-specific Codex artifacts should install into the workspace by default
+- Updated regression coverage for Codex default directories and workspace skill search directories
+- Version bump: 19.1.0 → 19.1.1 (PATCH — corrected Codex path defaults)
+
+### 2026-05-14 (v19.1.0, init-session parity for Codex, Vibe, and OpenCode)
+
+- Added an `init-session` Agent Skill in `templates/v5/skills/init-session/` and attached it as an agent-specific skill for Codex and Mistral Vibe
+- Rationale: Codex discourages predefined prompts in favor of skills, and Vibe's prompt support is system-prompt oriented rather than a direct user-invoked command flow
+- Added an OpenCode custom command template at `templates/v5/opencode/commands/init-session.md`
+- Updated OpenCode's `prompt_dir` in `agent_defaults.rs` from `$workspace/.opencode` to `$workspace/.opencode/commands` so workspace adoption targets the documented command directory
+- Updated `docs/coding-agent-config-locations-v3.md` to include OpenCode command locations
+- Version bump: 19.0.0 → 19.1.0 (MINOR — new agent-visible init-session support)
 
 ### 2026-05-14 (v19.0.0, remove ad-hoc skill CLI flags)
 
