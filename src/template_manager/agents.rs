@@ -144,7 +144,6 @@ impl TemplateManager
         }
         else
         {
-            eprintln!("{} Verification found {} issue(s)", "✗".red(), issues.len());
             Err(anyhow::anyhow!("Verification found {} issue(s)", issues.len()))
         }
     }
