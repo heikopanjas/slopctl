@@ -50,8 +50,15 @@ pub struct AgentDefaults
     pub workspace_markers:         &'static [WorkspaceMarker],
     /// Directory for agent prompts/commands, with placeholder prefix
     pub prompt_dir:                &'static str,
-    /// Directory for agent skills, with placeholder prefix
+    /// Primary skill installation directory, with placeholder prefix.
+    /// May be workspace-scoped (`$workspace/...`) or userprofile-scoped (`$userprofile/...`).
     pub skill_dir:                 &'static str,
+    /// Explicit workspace-scoped skill dir when `skill_dir` is userprofile-based.
+    /// `None` means `skill_dir` itself is workspace-scoped and doubles as this value.
+    pub workspace_skill_dir:       Option<&'static str>,
+    /// Explicit userprofile-scoped skill dir when `skill_dir` is workspace-based.
+    /// `None` means `skill_dir` itself is userprofile-scoped and doubles as this value.
+    pub userprofile_skill_dir:     Option<&'static str>,
     /// Whether this agent scans `.agents/skills/` in addition to its native skill dir.
     ///
     /// When `false` (Claude Code, Mistral Vibe), slopctl routes skill installation
@@ -86,6 +93,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         CURSOR_MARKERS,
         prompt_dir:                "$workspace/.cursor/commands",
         skill_dir:                 "$workspace/.cursor/skills",
+        workspace_skill_dir:       None,
+        userprofile_skill_dir:     None,
         reads_cross_client_skills: true
     },
     AgentDefaults {
@@ -93,6 +102,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         CLAUDE_MARKERS,
         prompt_dir:                "$workspace/.claude/commands",
         skill_dir:                 "$workspace/.claude/skills",
+        workspace_skill_dir:       None,
+        userprofile_skill_dir:     Some("$userprofile/.claude/skills"),
         reads_cross_client_skills: false
     },
     AgentDefaults {
@@ -100,6 +111,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         CODEX_MARKERS,
         prompt_dir:                "$userprofile/.codex/prompts",
         skill_dir:                 "$userprofile/.codex/skills",
+        workspace_skill_dir:       Some(CROSS_CLIENT_SKILL_DIR),
+        userprofile_skill_dir:     None,
         reads_cross_client_skills: true
     },
     AgentDefaults {
@@ -107,6 +120,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         COPILOT_MARKERS,
         prompt_dir:                "$workspace/.github/prompts",
         skill_dir:                 "$workspace/.github/skills",
+        workspace_skill_dir:       None,
+        userprofile_skill_dir:     Some("$userprofile/.copilot/skills"),
         reads_cross_client_skills: true
     },
     AgentDefaults {
@@ -114,6 +129,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         VIBE_MARKERS,
         prompt_dir:                "$userprofile/.vibe/prompts",
         skill_dir:                 "$workspace/.vibe/skills",
+        workspace_skill_dir:       None,
+        userprofile_skill_dir:     Some("$userprofile/.vibe/skills"),
         reads_cross_client_skills: false
     },
     AgentDefaults {
@@ -121,6 +138,8 @@ const KNOWN_AGENTS: &[AgentDefaults] = &[
         workspace_markers:         OPENCODE_MARKERS,
         prompt_dir:                "$workspace/.opencode",
         skill_dir:                 "$workspace/.opencode/skills",
+        workspace_skill_dir:       None,
+        userprofile_skill_dir:     Some("$userprofile/.config/opencode/skills"),
         reads_cross_client_skills: true
     }
 ];
@@ -149,6 +168,58 @@ pub fn get_skill_dir(agent: &str) -> Option<&'static str>
 pub fn reads_cross_client_skills(agent: &str) -> bool
 {
     get_defaults(agent).is_none_or(|d| d.reads_cross_client_skills)
+}
+
+/// Return the workspace-scoped skill directory for an agent
+///
+/// Returns the raw placeholder path (e.g. `$workspace/.cursor/skills`).
+/// When the agent's primary `skill_dir` is userprofile-based (e.g. Codex),
+/// falls back to `CROSS_CLIENT_SKILL_DIR`. Unknown agents also fall back to
+/// `CROSS_CLIENT_SKILL_DIR`. Caller must resolve the placeholder to an actual path.
+pub fn get_effective_workspace_skill_dir(agent: &str) -> &'static str
+{
+    get_defaults(agent)
+        .map(|d| {
+            d.workspace_skill_dir
+                .or_else(|| {
+                    if d.skill_dir.starts_with(PLACEHOLDER_WORKSPACE) == true
+                    {
+                        Some(d.skill_dir)
+                    }
+                    else
+                    {
+                        None
+                    }
+                })
+                .unwrap_or(CROSS_CLIENT_SKILL_DIR)
+        })
+        .unwrap_or(CROSS_CLIENT_SKILL_DIR)
+}
+
+/// Return the userprofile-scoped skill directory for an agent
+///
+/// Returns the raw placeholder path (e.g. `$userprofile/.codex/skills`).
+/// When the agent's primary `skill_dir` is workspace-based, falls back to the
+/// agent's declared `userprofile_skill_dir`. Unknown agents fall back to
+/// `$userprofile/.agents/skills`. Caller must resolve the placeholder to an actual path.
+pub fn get_effective_userprofile_skill_dir(agent: &str) -> &'static str
+{
+    get_defaults(agent)
+        .map(|d| {
+            d.userprofile_skill_dir
+                .or_else(|| {
+                    if d.skill_dir.starts_with(PLACEHOLDER_USERPROFILE) == true
+                    {
+                        Some(d.skill_dir)
+                    }
+                    else
+                    {
+                        None
+                    }
+                })
+                .unwrap_or("$userprofile/.agents/skills")
+        })
+        .unwrap_or("$userprofile/.agents/skills")
 }
 
 /// List all known agent names

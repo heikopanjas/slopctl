@@ -297,9 +297,9 @@ mod tests
     use super::*;
     use crate::bom::SkillDefinition;
 
-    fn make_skill(name: &str, source: &str) -> SkillDefinition
+    fn make_skill(_name: &str, source: &str) -> SkillDefinition
     {
-        SkillDefinition { name: name.to_string(), source: source.to_string() }
+        SkillDefinition { source: source.to_string(), target: None }
     }
 
     fn empty_config() -> TemplateConfig

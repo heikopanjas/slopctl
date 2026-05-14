@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v18.5.2)
+**Last updated:** 2026-05-14 (v18.7.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,40 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v18.7.0, unified skill routing for cross-client agents)
+
+- Fixed top-level skills (`config.skills`) and ad-hoc skills (`--skill`) being incorrectly routed to an agent's native skill directory instead of `.agents/skills/` for cross-client agents (Cursor, Codex, Copilot, OpenCode)
+- Root cause: only language skills used the `lang_skill_dir` (cross-client-aware) logic; the top-level and ad-hoc call sites still used `agent_skill_dir` as the default, which for Cursor resolved to `.cursor/skills` and for Codex resolved to `~/.codex/skills`
+- Fix: renamed `lang_skill_dir` → `non_agent_skill_dir` and applied it uniformly to all three non-agent-specific skill call sites (language, top-level, ad-hoc) in `resolve_all_files()`
+- Fixed `install_skills_only()` (standalone `slopctl init --skill foo/bar`) with the same error: it used `get_skill_dir()` for each installed agent (wrong native dirs for cross-client agents); replaced with `reads_cross_client_skills()`-aware lookup that routes cross-client agents to `.agents/skills/` and deduplicates the target dirs so skills are not installed multiple times when e.g. Cursor + Codex are both installed
+- Routing rules are now consistent across all install paths:
+- **Cross-client agents** (Cursor, Codex, Copilot, OpenCode): all non-agent-specific skills → `.agents/skills/` (the agentskills.io standard; avoids duplicates since these agents scan that dir)
+- **Native-only agents** (Claude, Vibe): all non-agent-specific skills → agent's native skill dir (they don't read `.agents/skills/`)
+- **Agent-specific skills** (`agents.<name>.skills:` in templates.yml): always go to the agent's native skill dir regardless of cross-client support
+- Fixed `resolve_skill_target()` in `template_engine.rs`: bare `'$workspace'` previously called `get_effective_workspace_skill_dir(agent)` which returned the native workspace dir (e.g. `.cursor/skills` for Cursor), inconsistent with the `None` default; now returns `default` directly so `target: '$workspace'` is semantically equivalent to omitting `target`
+- `target` field semantics in `templates.yml` skill definitions:
+- `target: '$workspace'` — workspace-scoped install using the smart default (cross-client dir for cross-client agents, native dir for native-only agents); explicit but identical to no `target`
+- `target: '$userprofile'` — userprofile-scoped install (e.g. `~/.codex/skills` for Codex); use when you explicitly want a user-global skill rather than a per-workspace one
+- full path (e.g. `'$workspace/.agents/skills'`) — resolved literally, bypasses smart routing
+- omitted — same as `target: '$workspace'`
+- Fixed latent bug in `agent_defaults.rs`: Cursor's `userprofile_skill_dir` was incorrectly set to `$userprofile/.claude/skills` (copy-paste from the Claude entry); corrected to `None` (Cursor has no userprofile-scoped skill directory)
+- Added 2 new regression tests: `test_toplevel_skills_route_to_cross_client_for_codex` and `test_toplevel_skills_route_to_native_dir_for_claude`; added a second test helper `setup_toplevel_skill_routing_config` for top-level skill routing tests
+- Cleaned up `setup_skill_routing_config` test helper: removed the stale `name:` field from its YAML (field was removed from `SkillDefinition` in v18.6.0; serde ignored it silently but it was confusing)
+- Version bump: 18.6.0 → 18.7.0 (MINOR — corrected skill routing across all install paths)
+
+### 2026-05-14 (v18.6.0, skill target field + name derivation)
+
+- Added `target: Option<String>` field to `SkillDefinition` in `src/bom.rs`; skill install directory can now be declared explicitly in `templates.yml`
+- `"$workspace"` and `"$userprofile"` act as smart shorthands in `target` (semantics corrected in v18.7.0; see that entry for final behaviour)
+- Removed `name: String` from `SkillDefinition`; the skill name is now derived from the last path component of `source` via the new `derive_name()` method (matches the SKILL.md `name` frontmatter per agentskills.io spec)
+- Extended `AgentDefaults` in `src/agent_defaults.rs` with two new fields: `workspace_skill_dir: Option<&'static str>` and `userprofile_skill_dir: Option<&'static str>`; populated for all six known agents
+- Added `get_effective_workspace_skill_dir(agent)` and `get_effective_userprofile_skill_dir(agent)` public helpers
+- Added `resolve_skill_target()` and `group_skills_by_target()` private helpers on `TemplateEngine`
+- Updated the three `install_skills()` call sites in `resolve_all_files()` to use the new grouping and `derive_name()`
+- Removed all `name:` fields from `templates/v5/templates.yml`; added `target: '$workspace'` to the two top-level skills (`git-workflow`, `semantic-versioning`)
+- All 304 tests pass; no breaking CLI changes
+- Version bump: 18.5.2 → 18.6.0 (MINOR — new `target` field and `derive_name()` API)
 
 ### 2026-05-14 (v18.5.2, agentskills.io spec compliance for bundled skills)
 
