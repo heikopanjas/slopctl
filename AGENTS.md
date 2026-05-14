@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.2.0)
+**Last updated:** 2026-05-14 (v20.2.1)
 
 <!-- {mission} -->
 
@@ -824,6 +824,13 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.2.1, single verify failure summary)
+
+- Fixed `slopctl templates --verify` and `slopctl agents --verify` printing duplicate `Verification found N issue(s)` summaries on failure
+- Verification routines now print section details and return the summary error, leaving the top-level CLI error handler as the single place that prints the final failure line
+- Rationale: failed verification output should be clear and non-redundant while preserving the existing non-zero exit behavior
+- Version bump: 20.2.0 → 20.2.1 (PATCH — user-facing output fix)
 
 ### 2026-05-14 (v20.2.0, agent marker directory creation)
 
