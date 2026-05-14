@@ -151,6 +151,7 @@ Home: `~/.config/opencode/`
 |---|---|---|
 | **Instructions** ★ | `~/.config/opencode/AGENTS.md` — personal rules, all sessions. Compat fallback: `~/.claude/CLAUDE.md` ³ | `<repo>/AGENTS.md` — first match wins (AGENTS.md > CLAUDE.md). Extra via `opencode.json` `instructions: […]`; supports remote URLs + globs |
 | **Config** ★ | `~/.config/opencode/opencode.json` | `<repo>/opencode.json` |
+| **Commands** ★ | `~/.config/opencode/commands/*.md` — invoke via `/` in the TUI | `.opencode/commands/*.md` — filename becomes command name |
 | **Skills** ★ | `~/.config/opencode/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`, `~/.agents/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md`, `.claude/skills/*/SKILL.md`, **`.agents/skills/*/SKILL.md`** — walks cwd→git root |
 | **Agents** ★ | `~/.config/opencode/agents/*.md` — YAML: description, model, temperature, tools, mode | `.opencode/agents/*.md` — primary (Tab) or subagent (@ invoke) |
 

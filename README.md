@@ -856,7 +856,7 @@ All templates in this repository enforce these critical rules:
 - Mistral Vibe
 - OpenCode
 
-One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AGENTS.md when needed. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent.
+One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) reference AGENTS.md when needed. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent. The default catalog includes `init-session` support for every built-in agent: Claude, Cursor, Copilot, and OpenCode use their native command/prompt directories; Codex and Vibe use an `init-session` skill because those agents do not provide the same recommended predefined prompt workflow.
 
 ## Supported Languages
 
@@ -911,7 +911,7 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 **How skills work:**
 
 - All skill definitions use a single `source` field (GitHub URL or local path); the skill name is derived from the source directory name
-- **Agent skills** (`agents.<name>.skills`): always installed to the agent-specific directory (e.g. `.claude/skills/`, `.cursor/skills/`), regardless of cross-client support
+- **Agent skills** (`agents.<name>.skills`): installed to the agent's native workspace skill directory (e.g. `.claude/skills/`, `.codex/skills/`, `.cursor/skills/`), regardless of cross-client support
 - **Language skills** (`languages.<name>.skills`): use the smart default — cross-client `.agents/skills/` for agents that support it (Cursor, Codex, Copilot, OpenCode), native skill dir for native-only agents (Claude, Vibe)
 - **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`; same routing rules as language skills
 - **Language include skills**: skills from an included *language* are also propagated depth-first (e.g. `swiftui` including `swift` inherits `swift`'s skills); cycle detection prevents infinite recursion. See the [`includes` section](#includes-composable-languages-and-shared-groups) for full details.
@@ -932,16 +932,16 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 | Mistral Vibe | `.vibe/skills/` | `~/.vibe/skills/` | ✗ |
 | OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | ✓ |
 
-¹ Codex scans both `.codex/skills/` and `.agents/skills/`. slopctl routes Codex's workspace skills to `.agents/skills/` to avoid duplication.
+¹ Codex scans both `.codex/skills/` and `.agents/skills/`. slopctl installs Codex agent-specific skills to `.codex/skills/`; language and top-level skills use `.agents/skills/` to avoid duplication with other cross-client agents.
 
 **slopctl skill routing decisions:**
 
 | How the skill is defined / invoked | Agent context | Installed to |
 | --- | --- | --- |
-| `agents.<name>.skills` in templates.yml | named agent | agent's native workspace dir (always) |
+| `agents.<name>.skills` in templates.yml | named agent | agent's native workspace skill dir |
 | `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | cross-client agent | `.agents/skills/` |
 | `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | native-only agent | agent's native workspace dir |
-| Any skill definition — `target: '$userprofile'` | any agent | agent's userprofile skill dir (see table above) |
+| Any skill definition — `target: '$userprofile'` | any agent | agent's userprofile skill dir (global exception; see table above) |
 
 **Example per-agent skills in templates.yml:**
 
@@ -993,7 +993,7 @@ skills:
   - source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
     # skill name derived from source: "create-rule"
   - source: 'skills/my-local-skill'
-    target: '$userprofile'   # optional: install globally (e.g. ~/.codex/skills)
+    target: '$userprofile'   # optional: global policy install (e.g. ~/.codex/skills)
     # skill name derived from source: "my-local-skill"
 ```
 
@@ -1095,6 +1095,16 @@ agents:
             - source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
         directories:
             - target: '$workspace/.cursor/plans'
+    codex:
+        skills:
+            - source: 'skills/init-session'
+    vibe:
+        skills:
+            - source: 'skills/init-session'
+    opencode:
+        prompts:
+            - source: opencode/commands/init-session.md
+              target: '$workspace/.opencode/commands/init-session.md'
 
 shared:
     cmake:
@@ -1287,20 +1297,20 @@ When you run `slopctl init --lang rust`:
 6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore)
 7. Installs language skills (e.g. rust-coding-conventions, rust-build-commands) to `.agents/skills/`
 8. Single AGENTS.md works with all agents
-9. Optional `--agent` adds agent-specific files (e.g. CLAUDE.md, .cursor/commands/init-session.md), agent skills, and creates agent directories (e.g. `.cursor/plans`)
+9. Optional `--agent` adds agent-specific files (e.g. `.cursor/commands/init-session.md`, `.opencode/commands/init-session.md`), agent skills, and creates agent directories (e.g. `.cursor/plans`)
 10. You're ready to start coding with any agent
 
 **Without `--lang`** (language-independent setup):
 
 1. Same as above but skips language skill hints, config files, and language skills
 2. AGENTS.md contains mission, principles, integration (e.g. git, versioning) only
-3. Requires `--agent` to specify which agent prompts to set up
+3. Requires `--agent` to specify which agent prompts or agent-specific skills to set up
 
 **With `--agent` only** (switch agent, preserve language):
 
 1. Detects existing installation language from file tracker
 2. Uses that language; if none, uses first available from templates
-3. Adds/updates agent prompts only
+3. Adds/updates agent prompts and agent-specific skills only
 
 The resulting AGENTS.md contains the complete merged content with all relevant sections for your project.
 
@@ -1430,7 +1440,7 @@ It depends on how the skill is defined or invoked. See the [slopctl skill routin
 - **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`): language and top-level skills go to `.agents/skills/` — these agents scan it natively, so no duplication occurs.
 - **Native-only agents** (`claude`, `vibe`): language and top-level skills go to the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`.
 - **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir.
-- **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir (e.g. `~/.codex/skills/`).
+- **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir for explicit global policy installs (e.g. `~/.codex/skills/`).
 
 ## License
 
@@ -1466,4 +1476,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: May 14, 2026 (v19.0.0)
+Last updated: May 14, 2026 (v20.0.0)
