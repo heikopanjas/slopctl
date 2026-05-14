@@ -493,6 +493,17 @@ impl<'a> TemplateEngine<'a>
 
         let mut directories_to_create: Vec<PathBuf> = Vec::new();
 
+        if let Some(agent_name) = options.agent
+        {
+            for marker_dir in agent_defaults::get_workspace_marker_dirs(agent_name, &workspace)
+            {
+                if directories_to_create.contains(&marker_dir) == false
+                {
+                    directories_to_create.push(marker_dir);
+                }
+            }
+        }
+
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name)
         {
@@ -518,7 +529,10 @@ impl<'a> TemplateEngine<'a>
             for dir_entry in &agent_config.directories
             {
                 let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
-                directories_to_create.push(dir_path);
+                if directories_to_create.contains(&dir_path) == false
+                {
+                    directories_to_create.push(dir_path);
+                }
             }
         }
 
@@ -1668,6 +1682,30 @@ languages:
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_all_files_includes_agent_marker_directory() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  opencode: {}\nlanguages: {}\nintegration: {}\n";
+        fs::write(config_dir.path().join("templates.yml"), yaml)?;
+        fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("opencode"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new(".opencode"))) == true);
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new("opencode.json"))) == false);
         Ok(())
     }
 
