@@ -1,6 +1,6 @@
 [package]
 name = "slopctl"
-version = "18.5.2"
+version = "18.7.0"
 edition = "2024"
 
 [dependencies]

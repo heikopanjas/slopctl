@@ -348,7 +348,7 @@ impl TemplateManager
                 {
                     "(local)"
                 };
-                println!("    {} {} {}", "•".blue(), skill.name, source_info.dimmed());
+                println!("    {} {} {}", "•".blue(), skill.derive_name(), source_info.dimmed());
             }
         }
 
@@ -361,7 +361,7 @@ impl TemplateManager
             println!("{}", "Available Skills:".bold());
             for skill in &config.skills
             {
-                template_skill_names.insert(skill.name.clone());
+                template_skill_names.insert(skill.derive_name().to_string());
                 let source_info = if crate::github::is_url(&skill.source) == true
                 {
                     "(GitHub)"
@@ -370,7 +370,7 @@ impl TemplateManager
                 {
                     "(local)"
                 };
-                println!("  • {} {}", skill.name, source_info.dimmed());
+                println!("  • {} {}", skill.derive_name(), source_info.dimmed());
             }
         }
 
