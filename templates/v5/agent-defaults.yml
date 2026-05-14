@@ -1,0 +1,55 @@
+version: 1
+
+agents:
+  - name: cursor
+    workspace_markers:
+      - path: .cursor
+        placeholder: '$workspace'
+    prompt_dir: '$workspace/.cursor/commands'
+    skill_dir: '$workspace/.cursor/skills'
+    reads_cross_client_skills: true
+
+  - name: claude
+    workspace_markers:
+      - path: .claude
+        placeholder: '$workspace'
+    prompt_dir: '$workspace/.claude/commands'
+    skill_dir: '$workspace/.claude/skills'
+    userprofile_skill_dir: '$userprofile/.claude/skills'
+    reads_cross_client_skills: false
+
+  - name: codex
+    workspace_markers:
+      - path: .codex
+        placeholder: '$workspace'
+    prompt_dir: '$workspace/.codex/prompts'
+    skill_dir: '$workspace/.codex/skills'
+    userprofile_skill_dir: '$userprofile/.codex/skills'
+    reads_cross_client_skills: true
+
+  - name: copilot
+    workspace_markers:
+      - path: .github/prompts
+        placeholder: '$workspace'
+    prompt_dir: '$workspace/.github/prompts'
+    skill_dir: '$workspace/.github/skills'
+    userprofile_skill_dir: '$userprofile/.copilot/skills'
+    reads_cross_client_skills: true
+
+  - name: vibe
+    workspace_markers:
+      - path: .vibe
+        placeholder: '$workspace'
+    prompt_dir: '$userprofile/.vibe/prompts'
+    skill_dir: '$workspace/.vibe/skills'
+    userprofile_skill_dir: '$userprofile/.vibe/skills'
+    reads_cross_client_skills: false
+
+  - name: opencode
+    workspace_markers:
+      - path: opencode.json
+        placeholder: '$workspace'
+    prompt_dir: '$workspace/.opencode/commands'
+    skill_dir: '$workspace/.opencode/skills'
+    userprofile_skill_dir: '$userprofile/.config/opencode/skills'
+    reads_cross_client_skills: true
