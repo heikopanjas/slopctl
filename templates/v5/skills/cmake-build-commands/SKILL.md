@@ -1,3 +1,12 @@
+---
+name: cmake-build-commands
+description: CMake commands for configuring, building, testing, and packaging a CMake-based project. Load when working with CMake build files or running a CMake build.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # CMake Build Commands
 
 Read this skill when you need to configure, build, test, or deploy a CMake-based project.

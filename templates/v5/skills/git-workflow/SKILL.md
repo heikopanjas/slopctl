@@ -1,3 +1,12 @@
+---
+name: git-workflow
+description: Git commit message format using conventional commits, with character limits, commit types, branch workflow, and examples. Load before making a commit or reviewing git history.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # Git Workflow Conventions
 
 Read this skill before making a commit. It contains the full commit message format,

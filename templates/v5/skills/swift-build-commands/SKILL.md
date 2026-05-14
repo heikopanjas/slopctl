@@ -1,3 +1,12 @@
+---
+name: swift-build-commands
+description: Swift Package Manager and Xcode commands for building, testing, documenting, and managing dependencies in a Swift project. Load when building or running a Swift project.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # Swift Build Commands
 
 Read this skill when you need to build, test, document, or manage dependencies for a Swift project.

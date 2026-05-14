@@ -108,8 +108,8 @@ languages:
       - source: c++-editor-config.ini
         target: '$workspace/.editorconfig'
     skills:
-      - name: c++-coding-conventions
-        source: 'skills/c++-coding-conventions'
+      - name: cpp-coding-conventions
+        source: 'skills/cpp-coding-conventions'
   rust:
     files:
       - source: rust-skills-hint.md
