@@ -224,9 +224,9 @@ fn validate_marker_path(marker: &str, agent_name: &str) -> Result<()>
 {
     require!(marker.trim().is_empty() == false, Err(anyhow::anyhow!("agent '{}' has an empty marker path", agent_name)));
     require!(marker.contains('$') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must not contain placeholders", agent_name, marker)));
-    require!(marker.contains(':') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a relative directory path", agent_name, marker)));
     let path = Path::new(marker);
     require!(path.is_absolute() == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be relative", agent_name, marker)));
+    require!(marker.contains(':') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a relative directory path", agent_name, marker)));
 
     for component in path.components()
     {
@@ -614,18 +614,24 @@ agents:
     #[test]
     fn test_parse_agent_catalog_rejects_absolute_marker()
     {
-        let err = parse_agent_catalog(
+        #[cfg(windows)]
+        let marker_path =
+            std::env::var_os("TEMP").or_else(|| std::env::var_os("TMP")).map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("slopctl-invalid-marker");
+        #[cfg(not(windows))]
+        let marker_path = PathBuf::from("/tmp/invalid");
+        let marker = marker_path.to_string_lossy().replace('\'', "''");
+        let err = parse_agent_catalog(&format!(
             r#"
 version: 1
 agents:
   - name: invalid
     markers:
-      - /tmp/invalid
+      - '{marker}'
     prompt_dir: '$workspace/.invalid/prompts'
     skill_dir: '$workspace/.invalid/skills'
     reads_cross_client_skills: true
 "#
-        )
+        ))
         .unwrap_err();
         assert!(err.to_string().contains("must be relative") == true);
     }

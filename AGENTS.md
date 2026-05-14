@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.2.1)
+**Last updated:** 2026-05-14 (v20.2.2)
 
 <!-- {mission} -->
 
@@ -734,7 +734,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 - Add blank line after subject before body
 - Wrap each line at 72 characters maximum
 - Explain what and why, not how
-- Use bullet points (`-`) for multiple items with lowercase text after bullet
+- Use bullet points (`-`) for all body items with lowercase text after bullet
 - Keep it concise
 
 **Special Character Safety:**
@@ -824,6 +824,19 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.2.2, commit body bullet guidance)
+
+- Clarified commit message guidance so every commit body item uses a bullet, even when the body contains only one item
+- Mirrored the convention into the git workflow skill sources so future agents do not interpret prose bodies as acceptable
+- Rationale: commit formatting should be deterministic and match the project skill guidance exactly
+
+### 2026-05-14 (v20.2.2, Windows absolute marker test)
+
+- Fixed `test_parse_agent_catalog_rejects_absolute_marker` failing on Windows because the test fixture used Unix-only `/tmp/invalid` as its absolute marker path
+- The test now uses a marker under the Windows `TEMP` or `TMP` directory on Windows and a Unix absolute marker elsewhere
+- Marker validation now checks `Path::is_absolute()` before the colon rule, so Windows drive-qualified absolute markers report the intended "must be relative" error
+- Version bump: 20.2.1 → 20.2.2 (PATCH — cross-platform test fix)
 
 ### 2026-05-14 (v20.2.1, single verify failure summary)
 
