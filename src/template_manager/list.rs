@@ -352,7 +352,8 @@ impl TemplateManager
             }
         }
 
-        // Collect template-defined skill names for deduplication against ad-hoc
+        // Collect template-defined skill names for deduplication against installed
+        // skills that came from older templates or previous slopctl versions.
         let mut template_skill_names: BTreeSet<String> = BTreeSet::new();
 
         if config.skills.is_empty() == false
@@ -374,33 +375,33 @@ impl TemplateManager
             }
         }
 
-        // Show ad-hoc installed skills not in template config
+        // Show installed skills not in the current template config.
         let current_dir = std::env::current_dir().ok();
         if let Some(ref cwd) = current_dir
         {
             let file_tracker = FileTracker::new(cwd)?;
             let skill_entries = file_tracker.get_entries_by_category("skill");
 
-            let mut adhoc_names: BTreeSet<String> = BTreeSet::new();
+            let mut external_names: BTreeSet<String> = BTreeSet::new();
             for (path, _) in &skill_entries
             {
                 if let Some(name) = Self::extract_skill_name_from_path(path) &&
                     template_skill_names.contains(&name) == false
                 {
-                    adhoc_names.insert(name);
+                    external_names.insert(name);
                 }
             }
 
-            if adhoc_names.is_empty() == false
+            if external_names.is_empty() == false
             {
                 if template_skill_names.is_empty() == true
                 {
                     println!();
                     println!("{}", "Installed Skills:".bold());
                 }
-                for name in &adhoc_names
+                for name in &external_names
                 {
-                    println!("  • {} {}", name, "(ad-hoc)".dimmed());
+                    println!("  • {} {}", name, "(installed)".dimmed());
                 }
             }
         }

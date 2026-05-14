@@ -20,36 +20,33 @@ use crate::{
 
 impl TemplateManager
 {
-    /// Remove agent-specific, language-specific, and/or skill files from the current directory
+    /// Remove agent-specific and/or language-specific files from the current directory
     ///
-    /// Deletes files associated with the specified agent, language, and/or skills.
+    /// Deletes files associated with the specified agent and/or language.
     /// Agent files come from the Bill of Materials; language files are resolved via
-    /// `resolve_language_files`; skill files come from the FileTracker (covering
-    /// template, top-level, and ad-hoc sources). AGENTS.md is never touched.
+    /// `resolve_language_files`; language-associated skills are removed with the
+    /// language. AGENTS.md is never touched.
     ///
     /// # Arguments
     ///
     /// * `agent` - Optional agent name. If Some, removes files for that agent only.
     /// * `lang` - Optional language name. If Some, removes disk files for that language.
-    /// * `skills` - Skill names to remove. Empty slice means no skill-specific removal.
     /// * `force` - If true, skip confirmation prompt
     /// * `dry_run` - If true, only show what would be removed without actually removing
     ///
     /// # Errors
     ///
     /// Returns an error if file deletion fails or the current directory cannot be determined
-    pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, skills: &[String], force: bool, dry_run: bool) -> Result<()>
+    pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&current_dir);
         let config_file = self.config_dir.join("templates.yml");
         let has_agent_target = agent.is_some();
         let has_lang_target = lang.is_some();
-        let has_skill_target = skills.is_empty() == false;
-        let remove_all = agent.is_none() && lang.is_none() && has_skill_target == false;
+        let remove_all = agent.is_none() && lang.is_none();
 
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
-        let mut stale_tracker_paths: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
 
         // Collect agent files when agent or --all is requested.
@@ -279,6 +276,31 @@ impl TemplateManager
                         }
                     }
                 }
+                if let Ok(lang_skills) = bom::resolve_language_skills(lang_name, &config)
+                {
+                    let userprofile = dirs::home_dir().unwrap_or_default();
+                    let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
+                    for skill in lang_skills
+                    {
+                        let skill_name = skill.derive_name();
+                        for search_dir in &skill_search_dirs
+                        {
+                            let candidate = search_dir.join(skill_name);
+                            if candidate.is_dir() == true
+                            {
+                                let mut skill_files = Vec::new();
+                                collect_files_recursive(&candidate, &mut skill_files)?;
+                                for f in skill_files
+                                {
+                                    if files_to_remove.contains(&f) == false
+                                    {
+                                        files_to_remove.push(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 true
             }
             else
@@ -305,91 +327,27 @@ impl TemplateManager
                 }
             }
 
-            description_parts.push(format!("language '{}'", lang_name.yellow()));
-        }
-
-        // Collect skill files by name from all agent skill dirs and cross-client dir
-        if has_skill_target == true
-        {
-            let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
-            let skill_search_dirs = agent_defaults::get_all_skill_search_dirs(&current_dir, &userprofile);
-
             let file_tracker = FileTracker::new(&current_dir)?;
-            let skill_entries = file_tracker.get_entries_by_category("skill");
-
-            for skill_name in skills
+            let all_entries = file_tracker.get_entries();
+            for (rel_path, meta) in all_entries
             {
-                let mut found = false;
-
-                // Scan filesystem under every agent skill dir + cross-client dir
-                for search_dir in &skill_search_dirs
+                let abs_path = current_dir.join(&rel_path);
+                if meta.lang == lang_name && meta.category == "skill" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                 {
-                    let candidate = search_dir.join(skill_name);
-                    if candidate.is_dir() == true
-                    {
-                        let mut dir_files = Vec::new();
-                        collect_files_recursive(&candidate, &mut dir_files)?;
-                        for f in dir_files
-                        {
-                            if files_to_remove.contains(&f) == false
-                            {
-                                files_to_remove.push(f);
-                                found = true;
-                            }
-                        }
-                    }
+                    files_to_remove.push(abs_path);
                 }
-
-                // Also sweep FileTracker for any tracked paths outside the standard dirs.
-                // Collect stale entries (tracked but missing on disk) for silent tracker cleanup.
-                for (rel_path, _) in &skill_entries
-                {
-                    if Self::extract_skill_name_from_path(rel_path).as_deref() == Some(skill_name.as_str())
-                    {
-                        let abs_path = current_dir.join(rel_path);
-                        if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
-                        {
-                            files_to_remove.push(abs_path);
-                            found = true;
-                        }
-                        else if abs_path.exists() == false && stale_tracker_paths.contains(&abs_path) == false
-                        {
-                            stale_tracker_paths.push(abs_path);
-                            found = true;
-                        }
-                    }
-                }
-
-                if found == false
-                {
-                    println!("{} Skill '{}' not found in current workspace", "!".yellow(), skill_name.yellow());
-                }
-
-                description_parts.push(format!("skill '{}'", skill_name.yellow()));
             }
+
+            description_parts.push(format!("language '{}'", lang_name.yellow()));
         }
 
         files_to_remove.sort();
         files_to_remove.dedup();
-        stale_tracker_paths.sort();
-        stale_tracker_paths.dedup();
 
         let description = description_parts.join(", ");
 
-        // Silently purge stale tracker entries (tracked but no longer on disk) even when
-        // there are no real files to remove; this prevents phantom skills in status output.
         if files_to_remove.is_empty() == true
         {
-            if stale_tracker_paths.is_empty() == false && dry_run == false
-            {
-                let mut file_tracker = FileTracker::new(&current_dir)?;
-                for path in &stale_tracker_paths
-                {
-                    file_tracker.remove_entry(path);
-                }
-                file_tracker.save()?;
-            }
-
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
         }
@@ -438,12 +396,6 @@ impl TemplateManager
                     eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
                 }
             }
-        }
-
-        // Also prune any stale tracker entries collected alongside real files
-        for path in &stale_tracker_paths
-        {
-            file_tracker.remove_entry(path);
         }
 
         file_tracker.save()?;
@@ -580,7 +532,8 @@ impl TemplateManager
             }
         }
 
-        // Merge all FileTracker entries for the workspace (catches ad-hoc and top-level skills)
+        // Merge all FileTracker entries for the workspace (catches top-level skills
+        // and files from older slopctl versions).
         let file_tracker = FileTracker::new(current_dir)?;
         for (rel_path, _) in file_tracker.get_entries()
         {
@@ -728,7 +681,7 @@ mod tests
         fs::write(&config_path, yaml)?;
 
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("nonexistent"), &[], false, true);
+        let result = manager.remove(None, Some("nonexistent"), false, true);
         assert!(result.is_ok() == true);
         Ok(())
     }
@@ -753,7 +706,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("cursor"), None, &[], false, true);
+        let result = manager.remove(Some("cursor"), None, false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -779,14 +732,14 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("rust"), &[], false, true);
+        let result = manager.remove(None, Some("rust"), false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
     }
 
     #[test]
-    fn test_remove_lang_fallback_excludes_main_and_skill() -> anyhow::Result<()>
+    fn test_remove_lang_fallback_removes_language_skills_but_keeps_main() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -810,9 +763,37 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("rust"), &[], false, true);
+        let result = manager.remove(None, Some("rust"), true, false);
 
         assert!(result.is_ok() == true);
+        assert!(lang_file.exists() == false);
+        assert!(skill_file.exists() == false);
+        assert!(main_file.exists() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_discovers_template_skill_files() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  rust:\n    skills:\n      - source: skills/rust-coding-conventions\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let skill_dir = workspace.path().join(".agents/skills/rust-coding-conventions");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Rust Coding Conventions")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("rust"), true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(skill_file.exists() == false);
         Ok(())
     }
 
@@ -838,7 +819,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("cursor"), None, &[], true, false);
+        let result = manager.remove(Some("cursor"), None, true, false);
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -861,7 +842,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, None, &[], true, false);
+        let result = manager.remove(None, None, true, false);
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -1013,7 +994,7 @@ mod tests
         // the userprofile-based ~/.codex/skills directory (which would pick up
         // .system and other workspaces' skills).
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("codex"), None, &[], false, true);
+        let result = manager.remove(Some("codex"), None, false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -1040,7 +1021,7 @@ mod tests
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         // Remove cursor in dry-run mode; codex is still installed so the guard fires
-        let result = manager.remove(Some("cursor"), None, &[], false, true);
+        let result = manager.remove(Some("cursor"), None, false, true);
 
         assert!(result.is_ok() == true);
         // The cross-client skill must be preserved because codex still needs it
@@ -1068,7 +1049,7 @@ mod tests
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         // Remove cursor with force; no other cross-client agents so .agents/skills/ is cleaned
-        let result = manager.remove(Some("cursor"), None, &[], true, false);
+        let result = manager.remove(Some("cursor"), None, true, false);
 
         assert!(result.is_ok() == true);
         // The cross-client skill must be deleted because cursor was the last cross-client agent

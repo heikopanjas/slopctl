@@ -25,9 +25,7 @@ pub struct MergeOptions<'a>
     /// Agent override (falls back to installed agents detected in workspace)
     pub agent:   Option<&'a str>,
     /// Mission statement to use when generating the fresh template for comparison
-    pub mission: Option<&'a str>,
-    /// Additional skill sources from CLI `--skill` flags (local paths; URLs skipped)
-    pub skills:  &'a [String]
+    pub mission: Option<&'a str>
 }
 
 /// Marker that separates template-managed content from user-owned changelog
@@ -149,7 +147,7 @@ impl TemplateManager
     ///
     /// # Arguments
     ///
-    /// * `options` - User-supplied overrides (lang, agent, mission, skills)
+    /// * `options` - User-supplied overrides (lang, agent, mission)
     /// * `dry_run` - If true, shows what would happen without making changes
     /// * `preview` - If true, writes `.merged` sidecar files instead of replacing originals
     /// * `verbose` - If true, prints token usage, reports unchanged files, and dumps the outgoing chat messages plus streams the incoming agent response to stdout
@@ -161,8 +159,7 @@ impl TemplateManager
     {
         let engine = TemplateEngine::new(&self.config_dir);
 
-        let update_options =
-            UpdateOptions { lang: options.lang, agent: options.agent, mission: options.mission, skills: options.skills, force: false, dry_run: false };
+        let update_options = UpdateOptions { lang: options.lang, agent: options.agent, mission: options.mission, force: false, dry_run: false };
 
         let content_map = engine.build_target_content_map(&update_options)?;
 
@@ -1065,35 +1062,35 @@ mod tests
     #[test]
     fn test_categorize_path_main()
     {
-        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        let options = MergeOptions { lang: None, agent: None, mission: None };
         assert_eq!(categorize_path(Path::new("/project/AGENTS.md"), &options), "main");
     }
 
     #[test]
     fn test_categorize_path_skill()
     {
-        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        let options = MergeOptions { lang: None, agent: None, mission: None };
         assert_eq!(categorize_path(Path::new("/project/.cursor/skills/my-skill/SKILL.md"), &options), "skill");
     }
 
     #[test]
     fn test_categorize_path_integration()
     {
-        let options = MergeOptions { lang: None, agent: None, mission: None, skills: &[] };
+        let options = MergeOptions { lang: None, agent: None, mission: None };
         assert_eq!(categorize_path(Path::new("/project/.gitignore"), &options), "integration");
     }
 
     #[test]
     fn test_categorize_path_agent()
     {
-        let options = MergeOptions { lang: None, agent: Some("cursor"), mission: None, skills: &[] };
+        let options = MergeOptions { lang: None, agent: Some("cursor"), mission: None };
         assert_eq!(categorize_path(Path::new("/project/.cursorrules"), &options), "agent");
     }
 
     #[test]
     fn test_categorize_path_language()
     {
-        let options = MergeOptions { lang: Some("rust"), agent: None, mission: None, skills: &[] };
+        let options = MergeOptions { lang: Some("rust"), agent: None, mission: None };
         assert_eq!(categorize_path(Path::new("/project/.rustfmt.toml"), &options), "language");
     }
 

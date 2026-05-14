@@ -1,12 +1,12 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v18.7.0)
+**Last updated:** 2026-05-14 (v19.0.0)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
+slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, OpenCode) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
@@ -824,6 +824,22 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v19.0.0, remove ad-hoc skill CLI flags)
+
+- **BREAKING**: removed the `--skill` option from `init`, `merge`, and `remove`
+- Rationale: ad-hoc skill CLI support was introduced before skills were first-class entries in `templates.yml`; now that templates support agent, language, shared, and top-level skills with explicit `target` routing, the parallel CLI path duplicated behavior and complicated install/remove semantics
+- `init` now requires `--lang` and/or `--agent`; skills are installed only from `templates.yml` as part of the selected language, agent, shared includes, or top-level template set
+- Removed standalone skill install plumbing: `UpdateOptions.skills`, `TemplateEngine::resolve_adhoc_skills()`, `TemplateEngine::install_skills_only()`, the `TemplateManager::install_skills()` wrapper, and the unused GitHub shorthand expansion helper
+- Removed `MergeOptions.skills`; `merge` now compares only the resolved template set selected by `--lang`, `--agent`, and `--mission`
+- Removed named skill deletion from `remove`; skill lifecycle is now tied to the owning template scope:
+- `remove --agent <name>` removes agent files and that agent's skill files
+- `remove --lang <name>` removes language disk files and language-associated skill directories (including skills inherited via `includes`)
+- `remove --all` and `remove --purge` continue to remove all workspace-scoped skills
+- Documented the security rationale for requiring full GitHub URLs in `templates.yml` skill sources: slopctl must not silently reinterpret a missing local path as a remote repository because that creates supply-chain attack risk
+- Added regression coverage for `remove --lang` discovering and deleting template-defined language skill directories
+- Updated README.md to remove all `--skill` usage examples and replace them with templates.yml-based skill guidance
+- Version bump: 18.7.0 → 19.0.0 (MAJOR — incompatible CLI flag removal)
 
 ### 2026-05-14 (v18.7.0, unified skill routing for cross-client agents)
 

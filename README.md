@@ -19,8 +19,7 @@ slopctl is a command-line tool that helps you:
 - **Configure via YAML** – Define template structure and file mappings in `templates.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – Follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
-- **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates or GitHub repos
-- **Independent skill loading** – Install skills standalone with `--skill user/repo` (no templates or agent required); uses cross-client `.agents/skills/` directory per agentskills.io spec
+- **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates; local directories and full GitHub URLs are supported in `templates.yml`
 - **Keep templates synchronized** – Update global templates from remote sources
 - **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
 - **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`; run `doctor --smart` for AI-assisted linting of `AGENTS.md`
@@ -52,8 +51,8 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 - Simpler initialization: `slopctl init --lang rust` or omit `--lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
-- Independent skill loading: `--skill` works standalone (no templates, no agent required) or combined with `--lang`/`--agent`
-- Cross-client skill directory: standalone `--skill` installs to `.agents/skills/` per agentskills.io spec
+- Skills are declared in `templates.yml` and installed automatically with the selected language, agent, or top-level template set
+- Cross-client skill directory: template-defined non-agent skills install to `.agents/skills/` for agents that support the agentskills.io convention
 - URL: `https://github.com/heikopanjas/slopctl/tree/develop/templates/v5`
 
 **Usage:**
@@ -62,7 +61,6 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 slopctl templates --update            # Downloads V5 templates
 slopctl init --lang rust           # With language conventions
 slopctl init --agent cursor        # Agent only (AGENTS.md + agent prompts, no language files)
-slopctl init --skill user/repo     # Install a skill (standalone, to .agents/skills/)
 ```
 
 ## Installation
@@ -92,7 +90,6 @@ slopctl templates --update
 cd your-project
 slopctl init --lang rust         # With Rust conventions and config files
 slopctl init --agent cursor     # Agent prompts + skills (AGENTS.md without language files)
-slopctl init --skill user/repo  # Install a skill only (no templates needed)
 ```
 
 With `--lang rust` this will:
@@ -101,7 +98,7 @@ With `--lang rust` this will:
 2. Merge skill hint fragments into AGENTS.md (tells agents about available coding skills)
 3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore)
 4. Install language skills (rust-coding-conventions, rust-build-commands) to `.agents/skills/`
-5. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, and Codex)
+5. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode)
 
 Without `--lang`, you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
@@ -427,16 +424,13 @@ Initialize instruction files and skills for AI coding agents in your project.
 **Usage:**
 
 ```bash
-# Specify at least one of --lang, --agent, or --skill
+# Specify at least one of --lang or --agent
 
 # With language conventions
-slopctl init --lang <language> [--agent <agent>] [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
+slopctl init --lang <language> [--agent <agent>] [--mission <text|@file>] [--force] [--dry-run]
 
 # Agent only (preserves existing language, or language-independent if fresh)
-slopctl init --agent <agent> [--skill <url>]... [--mission <text|@file>] [--force] [--dry-run]
-
-# Install skills only (standalone, no templates or agent required)
-slopctl init --skill <url> [--skill <url>]... [--force] [--dry-run]
+slopctl init --agent <agent> [--mission <text|@file>] [--force] [--dry-run]
 ```
 
 **Options:**
@@ -444,7 +438,6 @@ slopctl init --skill <url> [--skill <url>]... [--force] [--dry-run]
 - `--lang <string>` - Programming language or framework (e.g., c++, rust, swift, c). Optional; omit for language-independent setup.
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor). Optional; when specified alone, preserves existing language when switching agents.
 - `--mission <string>` - Custom mission statement to override the template default. Use `@filename` to read from a file (e.g., `--mission @mission.md`)
-- `--skill <string>` - Install skill(s) from GitHub or local paths (repeatable). Supports `user/repo` shorthand, full GitHub URLs, and local paths (`./skill`, `~/skills/my-skill`, `/absolute/path`). Works standalone (no `--lang` or `--agent` required).
 - `--force` - Force overwrite of local files without confirmation
 - `--dry-run` - Preview changes without applying them
 
@@ -472,24 +465,6 @@ slopctl init --lang rust --mission @mission.md
 # Force overwrite existing local files
 slopctl init --lang swift --force
 
-# Install a skill standalone (to .agents/skills/ cross-client directory)
-slopctl init --skill user/my-skill
-
-# Install multiple skills standalone
-slopctl init --skill user/skill-a --skill user/skill-b
-
-# Install a skill with a specific agent
-# Cross-client agents (Cursor, Codex, Copilot, OpenCode) use .agents/skills/
-# Native-only agents (Claude, Vibe) use their native skill dir (e.g. .claude/skills/)
-slopctl init --agent cursor --skill user/my-skill
-
-# Install a skill from a full GitHub URL
-slopctl init --skill https://github.com/user/skills/tree/main/create-rule
-
-# Install a skill from a local path
-slopctl init --skill ./path/to/skill
-slopctl init --skill ~/skills/my-skill
-
 # Preview what would be created/modified
 slopctl init --lang rust --dry-run
 ```
@@ -499,11 +474,8 @@ slopctl init --lang rust --dry-run
 - Uses global templates to set up agent instructions in the current project
 - If global templates do not exist, automatically downloads them from the default repository
 - Detects template version from templates.yml
-- **Must specify at least one** of `--lang`, `--agent`, or `--skill`
+- **Must specify at least one** of `--lang` or `--agent`
 - **GitHub URL sources**: Any `source` field in templates.yml can be a full GitHub URL (downloaded on-the-fly)
-- **`--skill` standalone**: When used without `--lang` or `--agent`, installs skills directly to the cross-client `$workspace/.agents/skills/` directory without downloading global templates or creating AGENTS.md
-- **`--skill` with `--agent`**: Installs skills using the agent's effective workspace skill dir — cross-client `.agents/skills/` for agents that support it (Cursor, Codex, Copilot, OpenCode), native dir (e.g. `.claude/skills/`) for native-only agents (Claude, Vibe)
-- **`--skill` with `--lang`** (no agent): Installs skills to the cross-client `.agents/skills/` directory alongside language templates
 - **With `--agent` only** (no `--lang`): Creates AGENTS.md with mission, principles, integration (no language files); preserves existing language if previously installed; installs agent-associated skills from templates.yml; creates agent-declared directories (e.g. `.cursor/plans`)
 - **With `--lang`**: Creates single AGENTS.md plus language config files; installs language-associated skills (own + inherited from shared groups) from templates.yml to cross-client directory; optional `--agent` adds agent prompts and agent skills
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
@@ -515,9 +487,9 @@ slopctl init --lang rust --dry-run
   - `$userprofile` resolves to user's home directory
 - Merges language-specific and integration fragments into AGENTS.md
 
-### `remove` - Remove Agent, Language, Skill, or All Files
+### `remove` - Remove Agent, Language, or All Files
 
-Remove agent-specific, language-specific, or named skill files from the current directory. Use `--purge` to also remove AGENTS.md (full cleanup).
+Remove agent-specific or language-specific files from the current directory. Use `--purge` to also remove AGENTS.md (full cleanup).
 
 **Usage:**
 
@@ -527,9 +499,6 @@ slopctl remove --agent <agent> [--force] [--dry-run]
 
 # Remove language disk files (e.g. .rustfmt.toml, .editorconfig)
 slopctl remove --lang <lang> [--force] [--dry-run]
-
-# Remove a named skill
-slopctl remove --skill <name> [--force] [--dry-run]
 
 # Remove all agent-specific files and skills (keeps AGENTS.md)
 slopctl remove --all [--force] [--dry-run]
@@ -541,10 +510,9 @@ slopctl remove --purge [--force] [--dry-run]
 **Options:**
 
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
-- `--lang <string>` - Language to remove disk files for (e.g., rust, c++, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths.
-- `--skill <string>` - Skill name to remove (repeatable). Scans all agent skill dirs and the cross-client `.agents/skills/` directory.
+- `--lang <string>` - Language to remove disk files and language-associated skills for (e.g., rust, c++, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths unless tracked in the workspace.
 - `--all` - Remove all agent-specific files and skills (keeps AGENTS.md). Mutually exclusive with `--agent`, `--lang`, and `--purge`.
-- `--purge` - Remove all slopctl files including AGENTS.md (full cleanup). Mutually exclusive with `--agent`, `--lang`, `--skill`, and `--all`.
+- `--purge` - Remove all slopctl files including AGENTS.md (full cleanup). Mutually exclusive with `--agent`, `--lang`, and `--all`.
 - `--force` - Force removal without confirmation; combined with `--purge`, also overrides the customized-AGENTS.md preservation guard.
 - `--dry-run` - Preview what would be deleted without making changes
 
@@ -556,9 +524,6 @@ slopctl remove --agent claude
 
 # Remove Rust language files (.rustfmt.toml, .editorconfig, etc.)
 slopctl remove --lang rust
-
-# Remove a named skill
-slopctl remove --skill create-rule
 
 # Remove language files and agent files together
 slopctl remove --lang rust --agent cursor
@@ -584,8 +549,7 @@ slopctl remove --purge --dry-run
 
 - Loads templates.yml from global storage to build Bill of Materials (BoM)
 - `--agent`: removes agent instruction, prompt, and skill files; BoM is the source of truth
-- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); skips `$instructions` fragments and `$userprofile` paths; validates the language name against templates.yml
-- `--skill`: scans all agent skill directories and the cross-client `.agents/skills/` directory for that skill name; also sweeps FileTracker for any tracked paths outside standard directories; stale tracker entries are silently pruned
+- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories; skips `$instructions` fragments; validates the language name against templates.yml
 - `--all`: removes all agent files and skills from all agents; **NEVER touches AGENTS.md**
 - `--purge`: removes everything `--all` removes **plus** AGENTS.md; customized AGENTS.md is preserved unless `--force` is also given
 - Only removes files that exist in the current directory
@@ -595,7 +559,7 @@ slopctl remove --purge --dry-run
 - Automatically cleans up empty parent directories
 - Does NOT affect global templates in local data directory
 - If agent/language not found in BoM/templates, shows a list of available options
-- Must specify at least one of `--agent`, `--lang`, `--skill`, `--all`, or `--purge`
+- Must specify at least one of `--agent`, `--lang`, `--all`, or `--purge`
 
 ### `doctor` - Check Workspace Health
 
@@ -617,7 +581,7 @@ slopctl doctor [--fix] [--dry-run] [--verbose] [--smart]
 **Issue categories detected:**
 
 | Kind | Condition | Symbol |
-|------|-----------|--------|
+| --- | --- | --- |
 | **Missing** | File is tracked but no longer exists on disk (stale tracker entry) | `✗` |
 | **Unmerged** | AGENTS.md (main file) exists but still contains the template marker | `✗` |
 | **Modified** | File exists but SHA changed since installation (informational; main files like AGENTS.md are excluded since customization is expected) | `!` |
@@ -649,7 +613,7 @@ slopctl doctor --smart
 
 **Example output (with --verbose and issues present):**
 
-```
+```text
 Checking workspace files:
 
   ✓ OK:       .cursor/commands/init-session.md
@@ -699,7 +663,7 @@ To browse the available template catalog, use `slopctl templates --list`.
 
 **Example output:**
 
-```
+```text
 slopctl status
 
 Global Templates:
@@ -760,7 +724,6 @@ slopctl merge                                    # Merge using config/env provid
 slopctl merge --lang rust                        # Override detected language
 slopctl merge --agent cursor                     # Override detected agent
 slopctl merge --mission "My new mission"         # Use a custom mission for the fresh template
-slopctl merge --skill user/my-skill              # Include an extra skill in the comparison
 slopctl merge --preview                          # Write .merged sidecars instead of replacing
 slopctl merge --dry-run                          # Show candidates without calling the LLM
 slopctl merge --verbose                          # Show token usage summary after merging
@@ -772,7 +735,6 @@ slopctl merge --list-models                      # List available models from th
 - `--lang` / `-l` - Programming language override. Falls back to installed language detected by the FileTracker.
 - `--agent` / `-a` - AI coding agent override. Falls back to agents detected in the workspace.
 - `--mission` / `-m` - Custom mission statement for the fresh template (use `@filename` to read from a file).
-- `--skill` / `-s` - Include extra skill source(s) in the fresh template for comparison (repeatable). URL-based sources are skipped.
 - `--preview` - Write `.merged` sidecar files instead of replacing originals
 - `--dry-run` / `-n` - Show merge candidates without calling the LLM
 - `--list-models` / `-L` - List available models from the resolved provider
@@ -935,13 +897,12 @@ slopctl supports [Agent Skills](https://agentskills.io) – an open format for e
 
 A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name, description) and Markdown instructions. Skills can optionally include `scripts/`, `references/`, and `assets/` subdirectories.
 
-**Skills can be defined in five ways:**
+**Skills can be defined in four ways:**
 
 1. **Per-agent in templates.yml** – Using `source` under `agents.<name>.skills` (installed to agent-specific skill directory)
 2. **Per-language in templates.yml** – Using `source` under `languages.<name>.skills` (installed to cross-client `.agents/skills/` for cross-client agents)
 3. **Per-shared group in templates.yml** – Using `source` under `shared.<name>.skills` (propagated to including languages via `includes`)
 4. **Top-level in templates.yml** – Agent-agnostic skills under the `skills` section (routing follows the smart default)
-5. **Ad-hoc via CLI** – Using `--skill user/repo`, `--skill https://github.com/...`, or `--skill ./local/path` on the `init` command
 
 **How skills work:**
 
@@ -951,12 +912,32 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 - **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`; same routing rules as language skills
 - **Language include skills**: skills from an included *language* are also propagated depth-first (e.g. `swiftui` including `swift` inherits `swift`'s skills); cycle detection prevents infinite recursion. See the [`includes` section](#includes-composable-languages-and-shared-groups) for full details.
 - **Top-level skills** (`skills`): use the smart default — cross-client `.agents/skills/` for cross-client agents, native dir for native-only agents; optional `target: '$userprofile'` installs globally (e.g. `~/.codex/skills`)
-- **CLI `--skill`**: supports `user/repo` shorthand (expanded to full GitHub URL), full `https://github.com/...` URLs, and local filesystem paths (`./path`, `~/path`, `/absolute/path`)
-- **Standalone mode**: `--skill` can be used without `--lang` or `--agent` — skills are installed to the cross-client `$workspace/.agents/skills/` directory without requiring global templates, AGENTS.md, or an agent. This follows the [agentskills.io](https://agentskills.io) cross-client interoperability spec.
 - GitHub skills are downloaded on-the-fly via the GitHub Contents API (no local cache)
 - Skills are tracked with the `"skill"` category in the file tracker for modification detection
 - The `templates --list` command shows available skills (including agent and language skill counts); `status` shows installed skills
 - Removing an agent (`slopctl remove --agent <name>`) also removes its skills
+
+**Agent skill directory reference:**
+
+| Agent | Workspace skill dir | Userprofile skill dir | Reads `.agents/skills/` |
+| --- | --- | --- | --- |
+| Cursor | `.cursor/skills/` | — | ✓ |
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` | ✗ |
+| Codex | `.codex/skills/` ¹ | `~/.codex/skills/` | ✓ |
+| Copilot | `.github/skills/` | `~/.copilot/skills/` | ✓ |
+| Mistral Vibe | `.vibe/skills/` | `~/.vibe/skills/` | ✗ |
+| OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | ✓ |
+
+¹ Codex scans both `.codex/skills/` and `.agents/skills/`. slopctl routes Codex's workspace skills to `.agents/skills/` to avoid duplication.
+
+**slopctl skill routing decisions:**
+
+| How the skill is defined / invoked | Agent context | Installed to |
+| --- | --- | --- |
+| `agents.<name>.skills` in templates.yml | named agent | agent's native workspace dir (always) |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | cross-client agent | `.agents/skills/` |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | native-only agent | agent's native workspace dir |
+| Any skill definition — `target: '$userprofile'` | any agent | agent's userprofile skill dir (see table above) |
 
 **Example per-agent skills in templates.yml:**
 
@@ -1012,25 +993,6 @@ skills:
     # skill name derived from source: "my-local-skill"
 ```
 
-**Example ad-hoc skill installation:**
-
-```bash
-# Standalone (cross-client .agents/skills/ directory)
-slopctl init --skill user/my-skill
-
-# With a cross-client agent (Cursor, Codex, Copilot, OpenCode) → .agents/skills/
-slopctl init --agent cursor --skill user/my-skill
-
-# With a native-only agent (Claude, Vibe) → agent's native dir (e.g. .claude/skills/)
-slopctl init --agent claude --skill user/my-skill
-
-# From full GitHub URL
-slopctl init --skill https://github.com/user/skills/tree/main/create-rule
-
-# From local path
-slopctl init --skill ./my-local-skill
-```
-
 ### Agent Directories
 
 Agents can declare workspace directories that should be created during `init`. This is useful for directories that the agent expects to exist but that are not tracked by version control — for example, Cursor's `.cursor/plans` directory for storing agent-generated plans.
@@ -1080,7 +1042,9 @@ Each file entry specifies:
 - `source`: Path in the template repository, or a full GitHub URL (e.g., `https://github.com/user/repo/tree/main/file.md`)
 - `target`: Destination path using placeholders
 
-**Note:** Only full GitHub URLs are supported in `source` fields. The `user/repo` shorthand is CLI-only (`--skill` flag).
+**Note:** Only full GitHub URLs are supported in `source` fields; `user/repo` shorthand is not supported in `templates.yml`.
+
+This is deliberate. Template sources are declarative supply-chain inputs, so slopctl does not silently reinterpret a missing local path as a GitHub repository. For example, a typo in `source: 'skills/company-internal-review'` should fail loudly instead of reaching out to a remote repository with a similar-looking shorthand. If a skill should come from GitHub, use the full URL so the remote dependency is explicit and reviewable.
 
 **Placeholders:**
 
@@ -1228,7 +1192,7 @@ languages:
 When a user runs `slopctl init --lang swiftui`, they get everything from `swift` first, then `swiftui`'s own additions on top:
 
 | What gets installed | Source |
-|---|---|
+| --- | --- |
 | `swift-coding-conventions.md` → AGENTS.md | inherited from `swift` |
 | `.swiftformat` | inherited from `swift` |
 | `swiftui-coding-conventions.md` → AGENTS.md | own |
@@ -1267,7 +1231,7 @@ languages:
 #### Key rules
 
 | Rule | Detail |
-|---|---|
+| --- | --- |
 | **Shared groups propagate skills** | `includes: [my-shared]` → inherits both files and skills from the shared group |
 | **Languages propagate skills** | `includes: [swift]` → inherits both files and skills from `swift` |
 | **No duplicate disk targets** | Two entries targeting the same `$workspace/` path cause an error at init time; `$instructions` fragments are exempt |
@@ -1426,17 +1390,18 @@ Omitting `--lang` gives you AGENTS.md with mission, principles, and integration 
 Run `slopctl init --agent <new-agent>`. slopctl detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
 
 **What are Agent Skills?**
-[Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills can be defined in `templates.yml` (per-agent, per-language, or top-level) or installed ad-hoc using `--skill user/repo`. Skills are downloaded on-the-fly and tracked like other template files.
+[Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills are defined in `templates.yml` (per-agent, per-language, shared group, or top-level). They can point to local template directories or full GitHub URLs, are downloaded on-the-fly when needed, and are tracked like other template files.
 
 **How do I install a skill?**
-Use the `--skill` flag: `slopctl init --skill user/my-skill`. This installs to the cross-client `.agents/skills/` directory without needing templates or an agent. To install to an agent-specific directory, add `--agent`: `slopctl init --agent cursor --skill user/my-skill`. You can also use full GitHub URLs (`--skill https://github.com/user/repo/tree/main/path`) or local paths (`--skill ./my-skill`, `--skill ~/skills/my-skill`).
+Add it to the relevant `skills:` section in `templates.yml`, then run `slopctl templates --update` and `slopctl init --lang <lang>` or `slopctl init --agent <agent>`. Language skills install with their language, agent skills install with their agent, and top-level skills install with any init run.
 
 **Where are skills installed?**
-It depends on how you invoke `--skill`:
+It depends on how the skill is defined or invoked. See the [slopctl skill routing decisions](#agent-skills) table for the full matrix. In short:
 
-- **Standalone** (`--skill` alone or with `--lang`): Cross-client directory `$workspace/.agents/skills/` per the [agentskills.io](https://agentskills.io) spec. All compliant agents scan this path.
-- **With a cross-client agent** (e.g. `--agent cursor`, `--agent codex`, `--agent copilot`, `--agent opencode`): Cross-client directory `.agents/skills/` — these agents scan it natively, so skills placed there are available without duplication.
-- **With a native-only agent** (e.g. `--agent claude`, `--agent vibe`): Agent's native skill directory (e.g. `.claude/skills/`, `.vibe/skills/`) — these agents do not scan `.agents/skills/`.
+- **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`): language and top-level skills go to `.agents/skills/` — these agents scan it natively, so no duplication occurs.
+- **Native-only agents** (`claude`, `vibe`): language and top-level skills go to the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`.
+- **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir.
+- **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir (e.g. `~/.codex/skills/`).
 
 ## License
 
@@ -1472,4 +1437,4 @@ cargo clippy
 
 <img src="docs/images/made-in-berlin-badge.jpg" alt="Made in Berlin" width="220" style="border: 5px solid white;">
 
-Last updated: May 14, 2026 (v18.7.0)
+Last updated: May 14, 2026 (v19.0.0)
