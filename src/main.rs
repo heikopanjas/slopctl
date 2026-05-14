@@ -295,19 +295,16 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, force, dry_run } =>
         {
-            if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
+            if lang.is_none() == true && agent.is_none() == true
             {
-                eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
+                eprintln!("{} Must specify at least one of --lang or --agent", "✗".red());
                 eprintln!("{} Examples: slopctl init --lang rust", "→".blue());
                 eprintln!("{}          slopctl init --agent cursor", "→".blue());
                 eprintln!("{}          slopctl init --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          slopctl init --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
-
-            let skill_only = lang.is_none() == true && agent.is_none() == true;
 
             let resolved_mission = if let Some(ref mission_value) = mission
             {
@@ -326,22 +323,8 @@ fn main()
                 None
             };
 
-            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
+            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), force, dry_run };
 
-            if skill_only == true
-            {
-                let prefix = if dry_run == true
-                {
-                    "Dry run: previewing"
-                }
-                else
-                {
-                    "Installing"
-                };
-                println!("{} {} skills", "→".blue(), prefix);
-                manager.install_skills(&options)
-            }
-            else
             {
                 if manager.has_global_templates() == false
                 {
@@ -379,7 +362,7 @@ fn main()
                     | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
                     | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
                     | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
-                    | (None, None) => println!("{} {} skills", "→".blue(), prefix)
+                    | (None, None) => unreachable!("validated at least one init target")
                 }
 
                 manager.update(&options)
@@ -459,7 +442,7 @@ fn main()
                     }
                 })
         }
-        | Commands::Remove { agent, lang, all, skill, purge, force, dry_run } =>
+        | Commands::Remove { agent, lang, all, purge, force, dry_run } =>
         {
             if purge == true
             {
@@ -469,16 +452,16 @@ fn main()
             {
                 Err(anyhow::anyhow!("Cannot specify --agent or --lang together with --all"))
             }
-            else if all == false && agent.is_none() == true && lang.is_none() == true && skill.is_empty() == true
+            else if all == false && agent.is_none() == true && lang.is_none() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, --skill, or --purge"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --purge"))
             }
             else
             {
-                manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
+                manager.remove(agent.as_deref(), lang.as_deref(), force, dry_run)
             }
         }
-        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, verbose } =>
+        | Commands::Merge { lang, agent, mission, preview, dry_run, verbose } =>
         {
             let resolved_mission = if let Some(ref mission_value) = mission
             {
@@ -497,7 +480,7 @@ fn main()
                 None
             };
 
-            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
+            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref() };
 
             if dry_run == true
             {
