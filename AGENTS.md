@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.1.0)
+**Last updated:** 2026-05-14 (v20.2.0)
 
 <!-- {mission} -->
 
@@ -824,6 +824,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.2.0, agent marker directory creation)
+
+- Simplified `templates/v5/agent-defaults.yml` marker declarations from `workspace_markers` objects to workspace-relative `markers` directory paths
+- `slopctl init --agent <name>` now creates the selected agent's marker directory, so later detection-based commands can identify the installed agent even when the agent template has no prompts or skills
+- Changed OpenCode's slopctl detection marker from `opencode.json` to `.opencode` to avoid fabricating agent config files
+- Added strict marker validation: markers must be relative directory paths and must not contain placeholders, absolute paths, parent-directory escapes, or file extensions
+- Updated docs to clarify that agent markers are safe slopctl-created directories, not agent config files
+- Version bump: 20.1.0 → 20.2.0 (MINOR — agent init gains a visible marker-directory side effect)
 
 ### 2026-05-14 (v20.1.0, YAML-backed agent defaults)
 

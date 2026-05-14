@@ -185,8 +185,8 @@ All paths use Unix notation; `~` = `%USERPROFILE%` on Windows. `$CODEX_HOME`, `$
 
 ### slopctl agent defaults
 
-slopctl keeps the agent filesystem conventions from this document in `agent-defaults.yml`, stored next to `templates.yml` in the global template cache. Use `slopctl agents --update` to refresh agent prompt, skill, marker, and cross-client-skill defaults independently from templates. `slopctl templates --update` bootstraps this file only when it is missing.
+slopctl keeps the agent filesystem conventions from this document in `agent-defaults.yml`, stored next to `templates.yml` in the global template cache. Use `slopctl agents --update` to refresh agent prompt, skill, marker, and cross-client-skill defaults independently from templates. `slopctl templates --update` bootstraps this file only when it is missing. Agent markers are workspace-relative directories that `slopctl init --agent` can safely create for detection; slopctl does not create agent config files such as `opencode.json`.
 
 ---
 
-*Last verified: 2026-05-09*
+*Last verified: 2026-05-14*

@@ -50,6 +50,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 - Skills associated with agents, languages, or shared groups — skills propagate via `includes` (from shared groups and from included languages)
 - Simpler initialization: `slopctl init --lang rust` or omit `--lang` for language-independent setup
 - Optional `--lang` and `--agent` (specify at least one; `--agent` alone preserves existing language when switching)
+- Agent initialization creates the agent's workspace marker directory (for example `.cursor`, `.claude`, or `.opencode`) so later commands can detect the installed agent
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Skills are declared in `templates.yml` and installed automatically with the selected language, agent, or top-level template set
 - Cross-client skill directory: template-defined non-agent skills install to `.agents/skills/` for agents that support the agentskills.io convention

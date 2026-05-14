@@ -8,7 +8,7 @@
 use std::{
     collections::HashSet,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::OnceLock
 };
 
@@ -34,19 +34,17 @@ pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 /// this path — they only scan their own native skill directories.
 pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 
-/// A file or directory whose presence indicates a particular agent is active
-/// in the workspace.
+/// A directory whose presence indicates a particular agent is active in the workspace.
 ///
-/// The path is joined to `placeholder` (workspace or userprofile root) and
-/// tested with `Path::exists()`, which returns `true` for both files and
-/// directories. Use a directory path (e.g. `.claude`) when the agent reliably
-/// creates that directory itself; use a specific file when only a file works.
+/// Catalog markers are workspace-relative directory paths. The `placeholder`
+/// field is synthesized as `$workspace` for source compatibility with existing
+/// call sites that still iterate over `workspace_markers`.
 #[derive(Debug, Clone)]
 pub struct WorkspaceMarker
 {
-    /// Relative path within the placeholder root (e.g. `.claude`, `opencode.json`)
+    /// Relative directory path within the workspace root (e.g. `.claude`)
     pub path:        &'static str,
-    /// Root placeholder: `$workspace` or `$userprofile`
+    /// Root placeholder, always `$workspace` for catalog markers
     pub placeholder: &'static str
 }
 
@@ -87,25 +85,15 @@ pub struct AgentCatalog
     pub agents:  Vec<AgentDefaultsEntry>
 }
 
-/// YAML representation of an agent marker
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceMarkerEntry
-{
-    /// Relative path within the placeholder root
-    pub path:        String,
-    /// Root placeholder: `$workspace` or `$userprofile`
-    pub placeholder: String
-}
-
 /// YAML representation of an agent default entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDefaultsEntry
 {
     /// Agent identifier
     pub name:                      String,
-    /// Files or directories whose presence indicates this agent is active
+    /// Workspace-relative marker directories whose presence indicates this agent is active
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_markers:         Vec<WorkspaceMarkerEntry>,
+    pub markers:                   Vec<String>,
     /// Directory for agent prompts/commands, with placeholder prefix
     pub prompt_dir:                String,
     /// Primary skill installation directory, with placeholder prefix
@@ -205,7 +193,7 @@ pub fn validate_agent_catalog(catalog: &AgentCatalog) -> Result<()>
     {
         require!(agent.name.trim().is_empty() == false, Err(anyhow::anyhow!("agent name cannot be empty")));
         require!(names.insert(agent.name.as_str()) == true, Err(anyhow::anyhow!("duplicate agent defaults entry: {}", agent.name)));
-        require!(agent.workspace_markers.is_empty() == false, Err(anyhow::anyhow!("agent '{}' must declare at least one workspace marker", agent.name)));
+        require!(agent.markers.is_empty() == false, Err(anyhow::anyhow!("agent '{}' must declare at least one marker", agent.name)));
         validate_placeholder_path(&agent.prompt_dir, &format!("agent '{}'.prompt_dir", agent.name))?;
         validate_placeholder_path(&agent.skill_dir, &format!("agent '{}'.skill_dir", agent.name))?;
         if let Some(userprofile_skill_dir) = &agent.userprofile_skill_dir
@@ -213,13 +201,9 @@ pub fn validate_agent_catalog(catalog: &AgentCatalog) -> Result<()>
             validate_placeholder_path(userprofile_skill_dir, &format!("agent '{}'.userprofile_skill_dir", agent.name))?;
         }
 
-        for marker in &agent.workspace_markers
+        for marker in &agent.markers
         {
-            require!(marker.path.trim().is_empty() == false, Err(anyhow::anyhow!("agent '{}' has an empty workspace marker path", agent.name)));
-            require!(
-                is_supported_placeholder(&marker.placeholder) == true,
-                Err(anyhow::anyhow!("agent '{}' marker '{}' uses unsupported placeholder '{}'", agent.name, marker.path, marker.placeholder))
-            );
+            validate_marker_path(marker, &agent.name)?;
         }
     }
 
@@ -236,9 +220,32 @@ fn validate_placeholder_path(path: &str, field: &str) -> Result<()>
     Ok(())
 }
 
-fn is_supported_placeholder(placeholder: &str) -> bool
+fn validate_marker_path(marker: &str, agent_name: &str) -> Result<()>
 {
-    placeholder == PLACEHOLDER_WORKSPACE || placeholder == PLACEHOLDER_USERPROFILE
+    require!(marker.trim().is_empty() == false, Err(anyhow::anyhow!("agent '{}' has an empty marker path", agent_name)));
+    require!(marker.contains('$') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must not contain placeholders", agent_name, marker)));
+    require!(marker.contains(':') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a relative directory path", agent_name, marker)));
+    let path = Path::new(marker);
+    require!(path.is_absolute() == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be relative", agent_name, marker)));
+
+    for component in path.components()
+    {
+        match component
+        {
+            | Component::Normal(_) =>
+            {}
+            | _ => return Err(anyhow::anyhow!("agent '{}' marker '{}' must not escape the workspace", agent_name, marker))
+        }
+    }
+
+    let Some(_file_name) = path.file_name().and_then(|name| name.to_str())
+    else
+    {
+        return Err(anyhow::anyhow!("agent '{}' marker '{}' must be a directory path", agent_name, marker));
+    };
+    require!(path.extension().is_none() == true, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a directory path, not a file", agent_name, marker)));
+
+    Ok(())
 }
 
 fn default_agent_defaults() -> &'static [AgentDefaults]
@@ -262,7 +269,7 @@ fn leak_agent_defaults(catalog: AgentCatalog) -> &'static [AgentDefaults]
         .into_iter()
         .map(|agent| {
             let markers: Vec<WorkspaceMarker> =
-                agent.workspace_markers.into_iter().map(|marker| WorkspaceMarker { path: leak_str(marker.path), placeholder: leak_str(marker.placeholder) }).collect();
+                agent.markers.into_iter().map(|marker| WorkspaceMarker { path: leak_str(marker), placeholder: PLACEHOLDER_WORKSPACE }).collect();
             AgentDefaults {
                 name:                      leak_str(agent.name),
                 workspace_markers:         Box::leak(markers.into_boxed_slice()),
@@ -321,6 +328,24 @@ pub fn get_effective_userprofile_skill_dir(agent: &str) -> &'static str
 pub fn known_agents() -> Vec<&'static str>
 {
     default_agent_defaults().iter().map(|a| a.name).collect()
+}
+
+/// Return workspace marker directories for an agent resolved under `workspace`
+///
+/// Markers in `agent-defaults.yml` are validated as relative directory paths, so
+/// these paths are safe for `slopctl init --agent` to create.
+///
+/// # Arguments
+///
+/// * `agent` - Agent identifier
+/// * `workspace` - Workspace root directory
+pub fn get_workspace_marker_dirs(agent: &str, workspace: &Path) -> Vec<PathBuf>
+{
+    get_defaults(agent)
+        .map(|defaults| {
+            defaults.workspace_markers.iter().filter(|marker| marker.placeholder == PLACEHOLDER_WORKSPACE).map(|marker| workspace.join(marker.path)).collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Resolve a placeholder path to an absolute filesystem path
@@ -499,9 +524,8 @@ mod tests
 version: 1
 agents:
   - name: test-agent
-    workspace_markers:
-      - path: .test-agent
-        placeholder: '$workspace'
+    markers:
+      - .test-agent
     prompt_dir: '$workspace/.test-agent/prompts'
     skill_dir: '$workspace/.test-agent/skills'
     reads_cross_client_skills: true
@@ -532,16 +556,14 @@ agents:
 version: 1
 agents:
   - name: duplicate
-    workspace_markers:
-      - path: .one
-        placeholder: '$workspace'
+    markers:
+      - .one
     prompt_dir: '$workspace/.one/prompts'
     skill_dir: '$workspace/.one/skills'
     reads_cross_client_skills: true
   - name: duplicate
-    workspace_markers:
-      - path: .two
-        placeholder: '$workspace'
+    markers:
+      - .two
     prompt_dir: '$workspace/.two/prompts'
     skill_dir: '$workspace/.two/skills'
     reads_cross_client_skills: true
@@ -559,9 +581,8 @@ agents:
 version: 1
 agents:
   - name: invalid
-    workspace_markers:
-      - path: .invalid
-        placeholder: '$workspace'
+    markers:
+      - .invalid
     prompt_dir: '$project/.invalid/prompts'
     skill_dir: '$workspace/.invalid/skills'
     reads_cross_client_skills: true
@@ -569,6 +590,63 @@ agents:
         )
         .unwrap_err();
         assert!(err.to_string().contains("prompt_dir must start") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_marker_placeholder()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - '$workspace/.invalid'
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must not contain placeholders") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_absolute_marker()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - /tmp/invalid
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must be relative") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_file_marker()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - opencode.json
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a file") == true);
     }
 
     #[test]
@@ -679,8 +757,17 @@ agents:
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join("opencode.json"), b"{}")?;
+        std::fs::create_dir(workspace.join(".opencode"))?;
         assert_eq!(detect_installed_agent(workspace), Some("opencode".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_marker_dirs_resolves_marker_directories() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let dirs = get_workspace_marker_dirs("opencode", temp_dir.path());
+        assert_eq!(dirs, vec![temp_dir.path().join(".opencode")]);
         Ok(())
     }
 

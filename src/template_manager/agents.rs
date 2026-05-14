@@ -93,8 +93,7 @@ impl TemplateManager
                 println!("  {} userprofile skills: {}", "→".blue(), userprofile_skill_dir.yellow());
             }
             println!("  {} cross-client skills: {}", "→".blue(), agent.reads_cross_client_skills.to_string().green());
-            let markers =
-                agent.workspace_markers.iter().map(|marker| format!("{}/{}", marker.placeholder, marker.path.trim_start_matches('/'))).collect::<Vec<_>>().join(", ");
+            let markers = agent.markers.join(", ");
             println!("  {} markers: {}", "→".blue(), markers.yellow());
         }
 
