@@ -151,6 +151,7 @@ Home: `~/.config/opencode/`
 |---|---|---|
 | **Instructions** ★ | `~/.config/opencode/AGENTS.md` — personal rules, all sessions. Compat fallback: `~/.claude/CLAUDE.md` ³ | `<repo>/AGENTS.md` — first match wins (AGENTS.md > CLAUDE.md). Extra via `opencode.json` `instructions: […]`; supports remote URLs + globs |
 | **Config** ★ | `~/.config/opencode/opencode.json` | `<repo>/opencode.json` |
+| **Commands** ★ | `~/.config/opencode/commands/*.md` — invoke via `/` in the TUI | `.opencode/commands/*.md` — filename becomes command name |
 | **Skills** ★ | `~/.config/opencode/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`, `~/.agents/skills/*/SKILL.md` | `.opencode/skills/*/SKILL.md`, `.claude/skills/*/SKILL.md`, **`.agents/skills/*/SKILL.md`** — walks cwd→git root |
 | **Agents** ★ | `~/.config/opencode/agents/*.md` — YAML: description, model, temperature, tools, mode | `.opencode/agents/*.md` — primary (Tab) or subagent (@ invoke) |
 
@@ -182,6 +183,10 @@ Home: `~/.config/opencode/`
 
 All paths use Unix notation; `~` = `%USERPROFILE%` on Windows. `$CODEX_HOME`, `$VIBE_HOME` override their respective defaults.
 
+### slopctl agent defaults
+
+slopctl keeps the agent filesystem conventions from this document in `agent-defaults.yml`, stored next to `templates.yml` in the global template cache. Use `slopctl agents --update` to refresh agent prompt, skill, marker, and cross-client-skill defaults independently from templates. `slopctl templates --update` bootstraps this file only when it is missing. Agent markers are workspace-relative directories that `slopctl init --agent` can safely create for detection; slopctl does not create agent config files such as `opencode.json`.
+
 ---
 
-*Last verified: 2026-05-09*
+*Last verified: 2026-05-14*

@@ -36,8 +36,6 @@ pub struct UpdateOptions<'a>
     pub agent:   Option<&'a str>,
     /// Custom mission statement to override template default
     pub mission: Option<&'a str>,
-    /// Ad-hoc skill sources from CLI `--skill` flags (GitHub URLs, shorthand, or local paths)
-    pub skills:  &'a [String],
     /// Force overwrite of local modifications without warning
     pub force:   bool,
     /// Preview changes without applying them
@@ -248,6 +246,76 @@ impl<'a> TemplateEngine<'a>
         PathBuf::from(path)
     }
 
+    /// Resolves a skill `target` field to an absolute base directory
+    ///
+    /// Bare `"$workspace"` returns `default` — the contextually correct skill dir for
+    /// this skill type and agent (cross-client dir for cross-client agents on non-agent
+    /// skills; native dir for agent-specific skills). This keeps `target: "$workspace"`
+    /// semantically consistent with the `None` case and avoids routing skills to a
+    /// native agent dir when the agent also scans the cross-client dir.
+    ///
+    /// Bare `"$userprofile"` resolves to the agent's userprofile skill dir (e.g.
+    /// `~/.codex/skills` for Codex, or `~/.agents/skills` as fallback). Use this when
+    /// you explicitly want a user-global (not workspace-local) installation.
+    ///
+    /// Any full path (e.g. `"$workspace/.agents/skills"`) is resolved via
+    /// `resolve_placeholder` as-is. `None` also falls back to `default`.
+    fn resolve_skill_target(&self, target: Option<&str>, default: &Path, agent: Option<&str>, workspace: &Path, userprofile: &Path) -> PathBuf
+    {
+        let Some(t) = target
+        else
+        {
+            return default.to_path_buf();
+        };
+
+        if t == agent_defaults::PLACEHOLDER_WORKSPACE
+        {
+            // Treat bare "$workspace" as "use the smart contextual default" so that
+            // explicit `target: '$workspace'` in templates.yml has the same routing as
+            // no target at all.  This avoids native-dir routing for cross-client agents.
+            return default.to_path_buf();
+        }
+
+        if t == agent_defaults::PLACEHOLDER_USERPROFILE
+        {
+            let raw = agent.map(agent_defaults::get_effective_userprofile_skill_dir).unwrap_or("$userprofile/.agents/skills");
+            return self.resolve_placeholder(raw, workspace, userprofile);
+        }
+
+        self.resolve_placeholder(t, workspace, userprofile)
+    }
+
+    /// Groups a skill list by their resolved install base directory
+    ///
+    /// Skills with an explicit `target` are routed to their resolved dir;
+    /// skills without `target` use `default`. Returns a `Vec` of `(dir, skills)`
+    /// pairs in insertion order, preserving the original skill ordering within each group.
+    fn group_skills_by_target<'s>(
+        &self, skills: &'s [bom::SkillDefinition], default: &Path, agent: Option<&str>, workspace: &Path, userprofile: &Path
+    ) -> Vec<(PathBuf, Vec<&'s bom::SkillDefinition>)>
+    {
+        let mut order: Vec<PathBuf> = Vec::new();
+        let mut map: HashMap<PathBuf, Vec<&bom::SkillDefinition>> = HashMap::new();
+
+        for skill in skills
+        {
+            let dir = self.resolve_skill_target(skill.target.as_deref(), default, agent, workspace, userprofile);
+            if map.contains_key(&dir) == false
+            {
+                order.push(dir.clone());
+            }
+            map.entry(dir).or_default().push(skill);
+        }
+
+        order
+            .into_iter()
+            .map(|dir| {
+                let skills = map.remove(&dir).unwrap_or_default();
+                (dir, skills)
+            })
+            .collect()
+    }
+
     /// Resolves a source string to a local file path
     ///
     /// If the source is a URL, downloads it to the temp directory and returns
@@ -425,6 +493,17 @@ impl<'a> TemplateEngine<'a>
 
         let mut directories_to_create: Vec<PathBuf> = Vec::new();
 
+        if let Some(agent_name) = options.agent
+        {
+            for marker_dir in agent_defaults::get_workspace_marker_dirs(agent_name, &workspace)
+            {
+                if directories_to_create.contains(&marker_dir) == false
+                {
+                    directories_to_create.push(marker_dir);
+                }
+            }
+        }
+
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name)
         {
@@ -450,7 +529,10 @@ impl<'a> TemplateEngine<'a>
             for dir_entry in &agent_config.directories
             {
                 let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
-                directories_to_create.push(dir_path);
+                if directories_to_create.contains(&dir_path) == false
+                {
+                    directories_to_create.push(dir_path);
+                }
             }
         }
 
@@ -462,11 +544,12 @@ impl<'a> TemplateEngine<'a>
         let agent_skill_dir = options.agent.and_then(agent_defaults::get_skill_dir).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
         let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
 
-        // For agents that don't read .agents/skills/ (Claude, Vibe), route lang and
-        // top-level skills directly to the agent's native skill directory so they are
-        // visible to the agent. For all other agents keep the cross-client dir.
+        // For agents that don't read .agents/skills/ (Claude, Vibe), all non-agent-specific
+        // skills go directly to the agent's native skill directory. For every other agent
+        // (Cursor, Codex, Copilot, OpenCode) they go to the cross-client dir — that is
+        // where those agents scan, and it avoids duplicating skills in two locations.
         let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills(a) == false);
-        let lang_skill_dir = if native_only_agent == true
+        let non_agent_skill_dir = if native_only_agent == true
         {
             agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir)
         }
@@ -478,9 +561,12 @@ impl<'a> TemplateEngine<'a>
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name) &&
             agent_config.skills.is_empty() == false &&
-            let Some(ref dir) = agent_skill_dir
+            let Some(ref default_dir) = agent_skill_dir
         {
-            self.install_skills(agent_config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), dir, temp_path, LANG_NONE, agent_name, &mut files_to_copy)?;
+            for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &workspace, &userprofile)
+            {
+                self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, agent_name, &mut files_to_copy)?;
+            }
         }
 
         if let Some(lang) = options.lang
@@ -488,21 +574,19 @@ impl<'a> TemplateEngine<'a>
             let lang_skills = bom::resolve_language_skills(lang, &config)?;
             if lang_skills.is_empty() == false
             {
-                self.install_skills(lang_skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), lang_skill_dir, temp_path, lang, AGENT_ALL, &mut files_to_copy)?;
+                for (dir, group) in self.group_skills_by_target(&lang_skills, non_agent_skill_dir, options.agent, &workspace, &userprofile)
+                {
+                    self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, lang, AGENT_ALL, &mut files_to_copy)?;
+                }
             }
         }
 
         if config.skills.is_empty() == false
         {
-            let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
-            self.install_skills(config.skills.iter().map(|s| (s.name.as_str(), s.source.as_str())), skill_dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
-        }
-
-        if options.skills.is_empty() == false
-        {
-            let skill_dir = agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir);
-            let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
-            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
+            for (dir, group) in self.group_skills_by_target(&config.skills, non_agent_skill_dir, options.agent, &workspace, &userprofile)
+            {
+                self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
+            }
         }
 
         // Migrate any skills already in .agents/skills/ into the agent's native skill
@@ -996,189 +1080,13 @@ impl<'a> TemplateEngine<'a>
         }
     }
 
-    /// Check whether a `--skill` value looks like a local filesystem path
-    ///
-    /// Returns true for absolute paths (Unix `/` or Windows drive letter `C:\`),
-    /// explicit relative paths (`./`, `../`), and home-relative paths (`~/`).
-    /// Recognizes both `/` and `\` separators for cross-platform support.
-    /// Everything else is treated as GitHub shorthand.
-    fn is_local_path(input: &str) -> bool
-    {
-        input.starts_with('/') ||
-            input.starts_with("./") ||
-            input.starts_with(".\\") ||
-            input.starts_with("../") ||
-            input.starts_with("..\\") ||
-            input.starts_with("~/") ||
-            input.starts_with("~\\") ||
-            Self::starts_with_drive_letter(input)
-    }
-
-    /// Check for a Windows drive letter prefix (e.g. `C:\`, `D:\`)
-    fn starts_with_drive_letter(input: &str) -> bool
-    {
-        let bytes = input.as_bytes();
-        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
-    }
-
-    /// Resolve a local skill path to an absolute `PathBuf`
-    ///
-    /// Expands `~` to the user's home directory via the `dirs` crate.
-    /// Relative paths (`./`, `../`) are resolved against `std::env::current_dir()`.
-    /// Handles both `/` and `\` separators for cross-platform support.
-    fn resolve_local_skill_path(input: &str) -> PathBuf
-    {
-        let home_suffix = input.strip_prefix("~/").or_else(|| input.strip_prefix("~\\"));
-        if let Some(suffix) = home_suffix &&
-            let Some(home) = dirs::home_dir()
-        {
-            return home.join(suffix);
-        }
-
-        let path = PathBuf::from(input);
-        if path.is_absolute() == true
-        {
-            path
-        }
-        else
-        {
-            std::env::current_dir().unwrap_or_default().join(path)
-        }
-    }
-
-    /// Resolve ad-hoc skill sources from CLI `--skill` values into (name, source) pairs
-    ///
-    /// Local paths are resolved to absolute paths. GitHub shorthand is expanded to full URLs.
-    fn resolve_adhoc_skills(skills: &[String]) -> Vec<(String, String)>
-    {
-        skills
-            .iter()
-            .map(|s| {
-                if Self::is_local_path(s) == true
-                {
-                    let resolved = Self::resolve_local_skill_path(s);
-                    let name = resolved.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| s.clone());
-                    (name, resolved.to_string_lossy().to_string())
-                }
-                else
-                {
-                    let url = github::expand_shorthand(s);
-                    let name = Self::skill_name_from_url(&url).unwrap_or_else(|| s.clone());
-                    (name, url)
-                }
-            })
-            .collect()
-    }
-
-    /// Install ad-hoc skills without requiring global templates
-    ///
-    /// Standalone skill installation that bypasses all template processing (AGENTS.md,
-    /// language files, agent files). Skills are installed to the cross-client
-    /// `.agents/skills/` directory per the agentskills.io specification.
-    ///
-    /// # Arguments
-    ///
-    /// * `options` - Update options (only `skills`, `force`, and `dry_run` are used)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if skill resolution, download, or copy operations fail
-    pub fn install_skills_only(&self, options: &UpdateOptions) -> Result<()>
-    {
-        require!(options.skills.is_empty() == false, Ok(()));
-
-        let workspace = std::env::current_dir()?;
-        let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
-
-        // Detect all installed agents; install into each agent's skill dir.
-        // Fall back to the cross-client dir when no agent is present.
-        let installed_agents = agent_defaults::detect_all_installed_agents(&workspace);
-
-        let skill_dirs: Vec<(String, PathBuf)> = if installed_agents.is_empty() == false
-        {
-            installed_agents
-                .iter()
-                .filter_map(|agent| agent_defaults::get_skill_dir(agent).map(|dir| (agent.clone(), self.resolve_placeholder(dir, &workspace, &userprofile))))
-                .collect()
-        }
-        else
-        {
-            let cross_client = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
-            vec![("cross-client".to_string(), cross_client)]
-        };
-
-        let mut file_tracker = FileTracker::new(&workspace)?;
-        let temp_dir = tempfile::TempDir::new()?;
-
-        let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
-
-        let adhoc_skills = Self::resolve_adhoc_skills(options.skills);
-        for (_, skill_dir) in &skill_dirs
-        {
-            self.install_skills(adhoc_skills.iter().map(|(n, s)| (n.as_str(), s.as_str())), skill_dir, temp_dir.path(), LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
-        }
-
-        validate_no_duplicate_targets(&files_to_copy)?;
-
-        if options.dry_run == true
-        {
-            println!("\n{} Files that would be created/modified:", "→".blue());
-            for entry in &files_to_copy
-            {
-                if entry.target.exists() == true
-                {
-                    println!("  {} {} (would be overwritten)", "●".yellow(), entry.target.display());
-                }
-                else
-                {
-                    println!("  {} {} (would be created)", "●".green(), entry.target.display());
-                }
-            }
-            println!("\n{} Dry run complete. No files were modified.", "✓".green());
-            return Ok(());
-        }
-
-        println!("{} Copying skill files", "→".blue());
-
-        let copy_result = self.copy_files_with_tracking(&files_to_copy, &mut file_tracker, 0, options)?;
-
-        match copy_result
-        {
-            | CopyFilesResult::Done { skipped } =>
-            {
-                self.show_skipped_files_summary(&skipped);
-            }
-            | CopyFilesResult::Cancelled =>
-            {
-                return Ok(());
-            }
-        }
-
-        file_tracker.save()?;
-
-        println!("{} Skills installed successfully", "✓".green());
-        if installed_agents.is_empty() == true
-        {
-            println!("{} Installed to cross-client directory: {}", "→".blue(), skill_dirs[0].1.display().to_string().yellow());
-        }
-        else
-        {
-            for (agent, skill_dir) in &skill_dirs
-            {
-                println!("{} Installed to {} ({})", "→".blue(), skill_dir.display().to_string().yellow(), agent.green());
-            }
-        }
-
-        Ok(())
-    }
-
     /// Install skills into the given skill directory
     ///
     /// For each skill, resolves the source (local or GitHub) and adds file entries
     /// to the files_to_copy list. GitHub skills are discovered via SKILL.md scanning
     /// and downloaded recursively (including subdirectories). Local skills are copied
-    /// recursively; absolute paths are used directly (ad-hoc local installs) while
-    /// relative paths are resolved against the global template cache.
+    /// recursively; absolute paths are used directly while relative paths are resolved
+    /// against the global template cache.
     ///
     /// # Arguments
     ///
@@ -1309,26 +1217,6 @@ impl<'a> TemplateEngine<'a>
 
         Ok(())
     }
-
-    /// Extract a skill name from a GitHub URL or expanded shorthand
-    ///
-    /// Parses as a GitHubUrl to derive the name from the path (last segment)
-    /// or repo name when the path is empty (bare `user/repo` shorthand).
-    /// Falls back to the last URL segment for non-GitHub URLs.
-    fn skill_name_from_url(url: &str) -> Option<String>
-    {
-        if let Some(parsed) = github::parse_github_url(url)
-        {
-            let name = parsed.skill_name();
-            if name.is_empty() == false
-            {
-                return Some(name);
-            }
-        }
-
-        let trimmed = url.trim_end_matches('/');
-        trimmed.rsplit('/').next().map(|s| s.to_string()).filter(|s| s.is_empty() == false)
-    }
 }
 
 /// Normalizes a path to its canonical form for map lookups
@@ -1440,188 +1328,6 @@ mod tests
         assert_eq!(result, PathBuf::from("relative/path.md"));
     }
 
-    // -- skill_name_from_url --
-
-    #[test]
-    fn test_skill_name_from_url_simple() -> anyhow::Result<()>
-    {
-        assert_eq!(
-            TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/my-skill").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
-            "my-skill"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_skill_name_from_url_trailing_slash() -> anyhow::Result<()>
-    {
-        assert_eq!(
-            TemplateEngine::skill_name_from_url("https://github.com/user/repo/tree/main/skill/").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
-            "skill"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_skill_name_from_url_empty()
-    {
-        assert!(TemplateEngine::skill_name_from_url("").is_none() == true);
-    }
-
-    #[test]
-    fn test_skill_name_from_url_bare_repo() -> anyhow::Result<()>
-    {
-        assert_eq!(
-            TemplateEngine::skill_name_from_url("https://github.com/twostraws/swiftui-agent-skill/tree/main").ok_or_else(|| anyhow::anyhow!("expected skill name"))?,
-            "swiftui-agent-skill"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_skill_name_from_url_bare_repo_no_tree() -> anyhow::Result<()>
-    {
-        assert_eq!(TemplateEngine::skill_name_from_url("https://github.com/user/my-skill").ok_or_else(|| anyhow::anyhow!("expected skill name"))?, "my-skill");
-        Ok(())
-    }
-
-    // -- is_local_path --
-
-    #[test]
-    fn test_is_local_path_absolute()
-    {
-        assert!(TemplateEngine::is_local_path("/Users/heiko/skills/my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_relative_dot()
-    {
-        assert!(TemplateEngine::is_local_path("./my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_relative_dotdot()
-    {
-        assert!(TemplateEngine::is_local_path("../shared/my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_home()
-    {
-        assert!(TemplateEngine::is_local_path("~/skills/my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_github_shorthand()
-    {
-        assert!(TemplateEngine::is_local_path("user/repo") == false);
-    }
-
-    #[test]
-    fn test_is_local_path_url()
-    {
-        assert!(TemplateEngine::is_local_path("https://github.com/user/repo") == false);
-    }
-
-    #[test]
-    fn test_is_local_path_bare_name()
-    {
-        assert!(TemplateEngine::is_local_path("my-skill") == false);
-    }
-
-    #[test]
-    fn test_is_local_path_windows_drive_letter()
-    {
-        assert!(TemplateEngine::is_local_path("C:\\Users\\heiko\\skills") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_windows_drive_letter_forward_slash()
-    {
-        assert!(TemplateEngine::is_local_path("D:/skills/my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_windows_relative_dot()
-    {
-        assert!(TemplateEngine::is_local_path(".\\my-skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_windows_relative_dotdot()
-    {
-        assert!(TemplateEngine::is_local_path("..\\shared\\skill") == true);
-    }
-
-    #[test]
-    fn test_is_local_path_windows_home()
-    {
-        assert!(TemplateEngine::is_local_path("~\\skills\\my-skill") == true);
-    }
-
-    #[test]
-    fn test_starts_with_drive_letter_lowercase()
-    {
-        assert!(TemplateEngine::starts_with_drive_letter("c:\\projects") == true);
-    }
-
-    #[test]
-    fn test_starts_with_drive_letter_too_short()
-    {
-        assert!(TemplateEngine::starts_with_drive_letter("C:") == false);
-    }
-
-    #[test]
-    fn test_starts_with_drive_letter_no_separator()
-    {
-        assert!(TemplateEngine::starts_with_drive_letter("C:foo") == false);
-    }
-
-    // -- resolve_local_skill_path --
-
-    #[test]
-    fn test_resolve_local_skill_path_absolute()
-    {
-        #[cfg(windows)]
-        {
-            let result = TemplateEngine::resolve_local_skill_path("C:\\opt\\skills\\my-skill");
-            assert_eq!(result, PathBuf::from("C:\\opt\\skills\\my-skill"));
-        }
-        #[cfg(not(windows))]
-        {
-            let result = TemplateEngine::resolve_local_skill_path("/opt/skills/my-skill");
-            assert_eq!(result, PathBuf::from("/opt/skills/my-skill"));
-        }
-    }
-
-    #[test]
-    fn test_resolve_local_skill_path_home()
-    {
-        let result = TemplateEngine::resolve_local_skill_path("~/skills/my-skill");
-        if let Some(home) = dirs::home_dir()
-        {
-            assert_eq!(result, home.join("skills/my-skill"));
-        }
-    }
-
-    #[test]
-    fn test_resolve_local_skill_path_relative()
-    {
-        let result = TemplateEngine::resolve_local_skill_path("./my-skill");
-        let expected = std::env::current_dir().unwrap().join("./my-skill");
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_resolve_local_skill_path_home_backslash()
-    {
-        let result = TemplateEngine::resolve_local_skill_path("~\\skills\\my-skill");
-        if let Some(home) = dirs::home_dir()
-        {
-            assert_eq!(result, home.join("skills\\my-skill"));
-        }
-    }
-
     // -- merge_fragments --
 
     fn write_template(dir: &Path, content: &str) -> anyhow::Result<PathBuf>
@@ -1660,7 +1366,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 5 };
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1688,7 +1394,7 @@ mod tests
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
             template_version: 5
         };
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1708,7 +1414,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1728,7 +1434,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1748,7 +1454,7 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1788,38 +1494,6 @@ mod tests
     {
         let files = vec![rf("template.ini", "/workspace/.editorconfig"), rf("template.ini", "/workspace/.other-config")];
         assert!(validate_no_duplicate_targets(&files).is_ok() == true);
-    }
-
-    // -- resolve_adhoc_skills --
-
-    #[test]
-    fn test_resolve_adhoc_skills_github_shorthand()
-    {
-        let skills = vec!["user/my-skill".to_string()];
-        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].0, "my-skill");
-        assert!(resolved[0].1.contains("github.com") == true);
-    }
-
-    #[test]
-    fn test_resolve_adhoc_skills_local_path()
-    {
-        let skills = vec!["./my-local-skill".to_string()];
-        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
-        assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].0, "my-local-skill");
-        assert!(Path::new(&resolved[0].1).is_absolute() == true);
-    }
-
-    #[test]
-    fn test_resolve_adhoc_skills_mixed()
-    {
-        let skills = vec!["user/remote-skill".to_string(), "./local-skill".to_string()];
-        let resolved = TemplateEngine::resolve_adhoc_skills(&skills);
-        assert_eq!(resolved.len(), 2);
-        assert_eq!(resolved[0].0, "remote-skill");
-        assert_eq!(resolved[1].0, "local-skill");
     }
 
     // -- cross-client skill directory --
@@ -1925,18 +1599,6 @@ mod tests
         Ok(())
     }
 
-    #[test]
-    fn test_install_skills_only_empty_skills_is_noop() -> anyhow::Result<()>
-    {
-        let config_dir = tempfile::TempDir::new()?;
-        let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec![];
-        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
-
-        engine.install_skills_only(&options)?;
-        Ok(())
-    }
-
     /// Write a minimal templates.yml with known agents and languages
     fn write_minimal_templates_yml(dir: &std::path::Path) -> anyhow::Result<()>
     {
@@ -1975,8 +1637,7 @@ languages:
         write_minimal_templates_yml(config_dir.path())?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec![];
-        let options = UpdateOptions { lang: None, agent: Some("nonexistent"), mission: None, skills: &skills, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("nonexistent"), mission: None, force: false, dry_run: false };
 
         let result = engine.update(&options);
         assert!(result.is_err() == true);
@@ -1995,8 +1656,7 @@ languages:
         write_minimal_templates_yml(config_dir.path())?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec![];
-        let options = UpdateOptions { lang: Some("nonexistent"), agent: None, mission: None, skills: &skills, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("nonexistent"), agent: None, mission: None, force: false, dry_run: false };
 
         let result = engine.update(&options);
         assert!(result.is_err() == true);
@@ -2018,11 +1678,34 @@ languages:
         fs::write(config_dir.path().join("cursor/cursorrules"), "test")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec![];
-        let options = UpdateOptions { lang: None, agent: Some("cursor"), mission: None, skills: &skills, force: false, dry_run: true };
+        let options = UpdateOptions { lang: None, agent: Some("cursor"), mission: None, force: false, dry_run: true };
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_all_files_includes_agent_marker_directory() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  opencode: {}\nlanguages: {}\nintegration: {}\n";
+        fs::write(config_dir.path().join("templates.yml"), yaml)?;
+        fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("opencode"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new(".opencode"))) == true);
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new("opencode.json"))) == false);
         Ok(())
     }
 
@@ -2035,85 +1718,10 @@ languages:
         fs::write(config_dir.path().join("rust-format.toml"), "max_width = 100")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec![];
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, skills: &skills, force: false, dry_run: true };
+        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: true };
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
-        Ok(())
-    }
-
-    /// Regression test for v17.0.2: GitHub-downloaded source files must remain on disk
-    /// after `resolve_all_files()` returns
-    ///
-    /// Before the fix, the `tempfile::TempDir` created inside `resolve_all_files()` was
-    /// dropped at function exit, deleting every GitHub-downloaded file referenced by
-    /// `ResolvedFiles.files`. The subsequent `copy_files_with_tracking()` then failed
-    /// with a bare `os error 2` (No such file or directory).
-    ///
-    /// The fix moves ownership of the `TempDir` into `ResolvedFiles._temp_dir` so it
-    /// lives until the consumer (init or merge) finishes. This test installs HTTP
-    /// hooks via `github::set_test_hooks`, drives the GitHub-skill code path through
-    /// `resolve_all_files()`, and asserts the source files still exist on the
-    /// returned `ResolvedFiles`.
-    #[test]
-    fn test_resolve_all_files_keeps_github_skill_temp_files_alive() -> anyhow::Result<()>
-    {
-        struct CwdGuard
-        {
-            original: PathBuf
-        }
-        impl Drop for CwdGuard
-        {
-            fn drop(&mut self)
-            {
-                let _ = std::env::set_current_dir(&self.original);
-            }
-        }
-
-        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-        let workspace = tempfile::TempDir::new()?;
-        let config_dir = tempfile::TempDir::new()?;
-
-        let _restore = CwdGuard { original: std::env::current_dir()? };
-        std::env::set_current_dir(workspace.path())?;
-
-        fs::write(config_dir.path().join("AGENTS.md"), format!("{}\n# Test\n", TEMPLATE_MARKER))?;
-        let yml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nlanguages: {}\n";
-        fs::write(config_dir.path().join("templates.yml"), yml)?;
-
-        let _hooks = github::set_test_hooks(
-            Box::new(|_url| {
-                Ok(vec![github::GitHubContentEntry {
-                    name:         "SKILL.md".into(),
-                    entry_type:   "file".into(),
-                    download_url: Some("https://raw.githubusercontent.com/foo/bar/main/SKILL.md".into()),
-                    path:         "SKILL.md".into()
-                }])
-            }),
-            Box::new(|_url| Ok(b"# Mock Skill\n".to_vec()))
-        );
-
-        let engine = TemplateEngine::new(config_dir.path());
-        let skills: Vec<String> = vec!["foo/bar".to_string()];
-        let options = UpdateOptions { lang: None, agent: None, mission: None, skills: &skills, force: false, dry_run: false };
-
-        let resolved = engine.resolve_all_files(&options)?;
-
-        let github_files: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).collect();
-
-        assert!(github_files.is_empty() == false, "expected GitHub-sourced skill file in ResolvedFiles");
-
-        for entry in &github_files
-        {
-            assert!(
-                entry.source.exists() == true,
-                "GitHub-sourced temp file missing after resolve_all_files() returned: {} (this is the v17.0.2 TempDir-lifetime bug)",
-                entry.source.display()
-            );
-        }
-
         Ok(())
     }
 
@@ -2124,9 +1732,9 @@ languages:
         use std::fs;
         let agents_yaml = agents.iter().map(|a| format!("  {}: {{}}", a)).collect::<Vec<_>>().join("\n");
         let yaml = format!(
-            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages:\n  rust:\n    skills:\n      - name: {}\n        \
-             source: 'skills/{}'\nintegration: {{}}\n",
-            agents_yaml, skill_source_name, skill_source_name
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages:\n  rust:\n    skills:\n      - source: \
+             'skills/{}'\nintegration: {{}}\n",
+            agents_yaml, skill_source_name
         );
         fs::write(config_dir.join("templates.yml"), yaml)?;
         fs::write(config_dir.join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
@@ -2148,7 +1756,7 @@ languages:
         setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["claude"])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("rust"), agent: Some("claude"), mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("rust"), agent: Some("claude"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -2179,7 +1787,7 @@ languages:
         setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["cursor"])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("rust"), agent: Some("cursor"), mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("rust"), agent: Some("cursor"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -2192,6 +1800,87 @@ languages:
         for t in &skill_targets
         {
             assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for cursor, got: {}", t);
+        }
+
+        Ok(())
+    }
+
+    /// Build a minimal config_dir whose top-level `skills:` section contains one skill.
+    /// The agents list must include every agent name used in `--agent` for the test.
+    fn setup_toplevel_skill_routing_config(config_dir: &std::path::Path, skill_source_name: &str, agents: &[&str]) -> anyhow::Result<()>
+    {
+        use std::fs;
+        let agents_yaml = agents.iter().map(|a| format!("  {}: {{}}", a)).collect::<Vec<_>>().join("\n");
+        let yaml = format!(
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages: {{}}\nskills:\n  - source: 'skills/{}'\nintegration: \
+             {{}}\n",
+            agents_yaml, skill_source_name
+        );
+        fs::write(config_dir.join("templates.yml"), yaml)?;
+        fs::write(config_dir.join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+        let skill_dir = config_dir.join("skills").join(skill_source_name);
+        fs::create_dir_all(&skill_dir)?;
+        fs::write(skill_dir.join("SKILL.md"), "# Skill")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_toplevel_skills_route_to_cross_client_for_codex() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["codex"])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("codex"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        // Top-level skills for codex must go to .agents/skills/, never to ~/.codex/skills/
+        assert!(skill_targets.is_empty() == false, "expected at least one skill file");
+        for t in &skill_targets
+        {
+            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for codex, got: {}", t);
+            assert!(t.contains(".codex") == false, "skill must not go to .codex/ for codex, got: {}", t);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_toplevel_skills_route_to_native_dir_for_claude() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["claude"])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        // Top-level skills for claude must go to .claude/skills/, never to .agents/skills/
+        assert!(skill_targets.is_empty() == false, "expected at least one skill file");
+        for t in &skill_targets
+        {
+            assert!(t.contains(".claude/skills"), "skill target should be in .claude/skills/ for claude, got: {}", t);
+            assert!(t.contains(".agents/skills") == false, "skill must not go to .agents/skills/ for claude, got: {}", t);
         }
 
         Ok(())
@@ -2217,7 +1906,7 @@ languages:
         std::fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, skills: &[], force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;

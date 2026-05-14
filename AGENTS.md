@@ -1,19 +1,19 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-09 (v18.5.1)
+**Last updated:** 2026-05-14 (v20.2.2)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex) following the agents.md and agentskills.io community standards.
+slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, OpenCode) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
-- **Serialization:** serde + serde_yaml for templates.yml and file tracker, serde_json for legacy migration
+- **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
@@ -734,7 +734,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 - Add blank line after subject before body
 - Wrap each line at 72 characters maximum
 - Explain what and why, not how
-- Use bullet points (`-`) for multiple items with lowercase text after bullet
+- Use bullet points (`-`) for all body items with lowercase text after bullet
 - Keep it concise
 
 **Special Character Safety:**
@@ -824,6 +824,130 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.2.2, commit body bullet guidance)
+
+- Clarified commit message guidance so every commit body item uses a bullet, even when the body contains only one item
+- Mirrored the convention into the git workflow skill sources so future agents do not interpret prose bodies as acceptable
+- Rationale: commit formatting should be deterministic and match the project skill guidance exactly
+
+### 2026-05-14 (v20.2.2, Windows absolute marker test)
+
+- Fixed `test_parse_agent_catalog_rejects_absolute_marker` failing on Windows because the test fixture used Unix-only `/tmp/invalid` as its absolute marker path
+- The test now uses a marker under the Windows `TEMP` or `TMP` directory on Windows and a Unix absolute marker elsewhere
+- Marker validation now checks `Path::is_absolute()` before the colon rule, so Windows drive-qualified absolute markers report the intended "must be relative" error
+- Version bump: 20.2.1 → 20.2.2 (PATCH — cross-platform test fix)
+
+### 2026-05-14 (v20.2.1, single verify failure summary)
+
+- Fixed `slopctl templates --verify` and `slopctl agents --verify` printing duplicate `Verification found N issue(s)` summaries on failure
+- Verification routines now print section details and return the summary error, leaving the top-level CLI error handler as the single place that prints the final failure line
+- Rationale: failed verification output should be clear and non-redundant while preserving the existing non-zero exit behavior
+- Version bump: 20.2.0 → 20.2.1 (PATCH — user-facing output fix)
+
+### 2026-05-14 (v20.2.0, agent marker directory creation)
+
+- Simplified `templates/v5/agent-defaults.yml` marker declarations from `workspace_markers` objects to workspace-relative `markers` directory paths
+- `slopctl init --agent <name>` now creates the selected agent's marker directory, so later detection-based commands can identify the installed agent even when the agent template has no prompts or skills
+- Changed OpenCode's slopctl detection marker from `opencode.json` to `.opencode` to avoid fabricating agent config files
+- Added strict marker validation: markers must be relative directory paths and must not contain placeholders, absolute paths, parent-directory escapes, or file extensions
+- Updated docs to clarify that agent markers are safe slopctl-created directories, not agent config files
+- Version bump: 20.1.0 → 20.2.0 (MINOR — agent init gains a visible marker-directory side effect)
+
+### 2026-05-14 (v20.1.0, YAML-backed agent defaults)
+
+- Added `templates/v5/agent-defaults.yml` as the data source for agent filesystem conventions: workspace markers, prompt directories, skill directories, userprofile skill directories, and cross-client skill support
+- Refactored `src/agent_defaults.rs` to load the cached `agent-defaults.yml` catalog with an embedded fallback, while preserving the existing borrowed lookup helper API for current call sites
+- Added `slopctl agents` as a catalog-management subcommand mirroring `slopctl templates`: `--update`, `--verify`, `--list`, `--from`, and `--dry-run`
+- Added `agents.uri` and `agents.fallbackUri` config keys so agent defaults can be updated independently from templates
+- `slopctl templates --update` now bootstraps `agent-defaults.yml` only when the cached file is missing; existing agent defaults are left untouched so `slopctl agents --update` remains the normal update path
+- Rationale: coding-agent filesystem conventions change independently from slopctl releases, so they should be data-driven and updateable without recompiling the CLI
+- Version bump: 20.0.0 → 20.1.0 (MINOR — new `agents` subcommand and runtime-updateable agent defaults)
+
+### 2026-05-14 (v20.0.0, remove workspace_skill_dir override)
+
+- Removed the `workspace_skill_dir` field from `AgentDefaults`
+- Removed the now-redundant `get_effective_workspace_skill_dir()` helper
+- Rationale: slopctl installs agent-scoped files into the workspace by default whenever the agent supports workspace-local artifacts; userprofile installs are the explicit exception for global or corporate policy use cases
+- `skill_dir` is now the native workspace skill directory for all known agents, while `userprofile_skill_dir` remains available only for explicit `target: '$userprofile'` skill definitions
+- Updated README skill-routing documentation to distinguish agent-specific native workspace skills from cross-client language and top-level skills
+- Version bump: 19.1.1 → 20.0.0 (MAJOR — public `AgentDefaults` field and helper removal)
+
+### 2026-05-14 (v19.1.1, workspace-local Codex defaults)
+
+- Fixed Codex defaults in `agent_defaults.rs` to use workspace-local prompt and skill directories: `$workspace/.codex/prompts` and `$workspace/.codex/skills`
+- Kept Codex's userprofile skill directory available via explicit `target: '$userprofile'` as `$userprofile/.codex/skills`
+- Rationale: Codex supports project-local prompts and native project-local skills, so agent-specific Codex artifacts should install into the workspace by default
+- Updated regression coverage for Codex default directories and workspace skill search directories
+- Version bump: 19.1.0 → 19.1.1 (PATCH — corrected Codex path defaults)
+
+### 2026-05-14 (v19.1.0, init-session parity for Codex, Vibe, and OpenCode)
+
+- Added an `init-session` Agent Skill in `templates/v5/skills/init-session/` and attached it as an agent-specific skill for Codex and Mistral Vibe
+- Rationale: Codex discourages predefined prompts in favor of skills, and Vibe's prompt support is system-prompt oriented rather than a direct user-invoked command flow
+- Added an OpenCode custom command template at `templates/v5/opencode/commands/init-session.md`
+- Updated OpenCode's `prompt_dir` in `agent_defaults.rs` from `$workspace/.opencode` to `$workspace/.opencode/commands` so workspace adoption targets the documented command directory
+- Updated `docs/coding-agent-config-locations-v3.md` to include OpenCode command locations
+- Version bump: 19.0.0 → 19.1.0 (MINOR — new agent-visible init-session support)
+
+### 2026-05-14 (v19.0.0, remove ad-hoc skill CLI flags)
+
+- **BREAKING**: removed the `--skill` option from `init`, `merge`, and `remove`
+- Rationale: ad-hoc skill CLI support was introduced before skills were first-class entries in `templates.yml`; now that templates support agent, language, shared, and top-level skills with explicit `target` routing, the parallel CLI path duplicated behavior and complicated install/remove semantics
+- `init` now requires `--lang` and/or `--agent`; skills are installed only from `templates.yml` as part of the selected language, agent, shared includes, or top-level template set
+- Removed standalone skill install plumbing: `UpdateOptions.skills`, `TemplateEngine::resolve_adhoc_skills()`, `TemplateEngine::install_skills_only()`, the `TemplateManager::install_skills()` wrapper, and the unused GitHub shorthand expansion helper
+- Removed `MergeOptions.skills`; `merge` now compares only the resolved template set selected by `--lang`, `--agent`, and `--mission`
+- Removed named skill deletion from `remove`; skill lifecycle is now tied to the owning template scope:
+- `remove --agent <name>` removes agent files and that agent's skill files
+- `remove --lang <name>` removes language disk files and language-associated skill directories (including skills inherited via `includes`)
+- `remove --all` and `remove --purge` continue to remove all workspace-scoped skills
+- Documented the security rationale for requiring full GitHub URLs in `templates.yml` skill sources: slopctl must not silently reinterpret a missing local path as a remote repository because that creates supply-chain attack risk
+- Added regression coverage for `remove --lang` discovering and deleting template-defined language skill directories
+- Updated README.md to remove all `--skill` usage examples and replace them with templates.yml-based skill guidance
+- Version bump: 18.7.0 → 19.0.0 (MAJOR — incompatible CLI flag removal)
+
+### 2026-05-14 (v18.7.0, unified skill routing for cross-client agents)
+
+- Fixed top-level skills (`config.skills`) and ad-hoc skills (`--skill`) being incorrectly routed to an agent's native skill directory instead of `.agents/skills/` for cross-client agents (Cursor, Codex, Copilot, OpenCode)
+- Root cause: only language skills used the `lang_skill_dir` (cross-client-aware) logic; the top-level and ad-hoc call sites still used `agent_skill_dir` as the default, which for Cursor resolved to `.cursor/skills` and for Codex resolved to `~/.codex/skills`
+- Fix: renamed `lang_skill_dir` → `non_agent_skill_dir` and applied it uniformly to all three non-agent-specific skill call sites (language, top-level, ad-hoc) in `resolve_all_files()`
+- Fixed `install_skills_only()` (standalone `slopctl init --skill foo/bar`) with the same error: it used `get_skill_dir()` for each installed agent (wrong native dirs for cross-client agents); replaced with `reads_cross_client_skills()`-aware lookup that routes cross-client agents to `.agents/skills/` and deduplicates the target dirs so skills are not installed multiple times when e.g. Cursor + Codex are both installed
+- Routing rules are now consistent across all install paths:
+- **Cross-client agents** (Cursor, Codex, Copilot, OpenCode): all non-agent-specific skills → `.agents/skills/` (the agentskills.io standard; avoids duplicates since these agents scan that dir)
+- **Native-only agents** (Claude, Vibe): all non-agent-specific skills → agent's native skill dir (they don't read `.agents/skills/`)
+- **Agent-specific skills** (`agents.<name>.skills:` in templates.yml): always go to the agent's native skill dir regardless of cross-client support
+- Fixed `resolve_skill_target()` in `template_engine.rs`: bare `'$workspace'` previously called `get_effective_workspace_skill_dir(agent)` which returned the native workspace dir (e.g. `.cursor/skills` for Cursor), inconsistent with the `None` default; now returns `default` directly so `target: '$workspace'` is semantically equivalent to omitting `target`
+- `target` field semantics in `templates.yml` skill definitions:
+- `target: '$workspace'` — workspace-scoped install using the smart default (cross-client dir for cross-client agents, native dir for native-only agents); explicit but identical to no `target`
+- `target: '$userprofile'` — userprofile-scoped install (e.g. `~/.codex/skills` for Codex); use when you explicitly want a user-global skill rather than a per-workspace one
+- full path (e.g. `'$workspace/.agents/skills'`) — resolved literally, bypasses smart routing
+- omitted — same as `target: '$workspace'`
+- Fixed latent bug in `agent_defaults.rs`: Cursor's `userprofile_skill_dir` was incorrectly set to `$userprofile/.claude/skills` (copy-paste from the Claude entry); corrected to `None` (Cursor has no userprofile-scoped skill directory)
+- Added 2 new regression tests: `test_toplevel_skills_route_to_cross_client_for_codex` and `test_toplevel_skills_route_to_native_dir_for_claude`; added a second test helper `setup_toplevel_skill_routing_config` for top-level skill routing tests
+- Cleaned up `setup_skill_routing_config` test helper: removed the stale `name:` field from its YAML (field was removed from `SkillDefinition` in v18.6.0; serde ignored it silently but it was confusing)
+- Version bump: 18.6.0 → 18.7.0 (MINOR — corrected skill routing across all install paths)
+
+### 2026-05-14 (v18.6.0, skill target field + name derivation)
+
+- Added `target: Option<String>` field to `SkillDefinition` in `src/bom.rs`; skill install directory can now be declared explicitly in `templates.yml`
+- `"$workspace"` and `"$userprofile"` act as smart shorthands in `target` (semantics corrected in v18.7.0; see that entry for final behaviour)
+- Removed `name: String` from `SkillDefinition`; the skill name is now derived from the last path component of `source` via the new `derive_name()` method (matches the SKILL.md `name` frontmatter per agentskills.io spec)
+- Extended `AgentDefaults` in `src/agent_defaults.rs` with two new fields: `workspace_skill_dir: Option<&'static str>` and `userprofile_skill_dir: Option<&'static str>`; populated for all six known agents
+- Added `get_effective_workspace_skill_dir(agent)` and `get_effective_userprofile_skill_dir(agent)` public helpers
+- Added `resolve_skill_target()` and `group_skills_by_target()` private helpers on `TemplateEngine`
+- Updated the three `install_skills()` call sites in `resolve_all_files()` to use the new grouping and `derive_name()`
+- Removed all `name:` fields from `templates/v5/templates.yml`; added `target: '$workspace'` to the two top-level skills (`git-workflow`, `semantic-versioning`)
+- All 304 tests pass; no breaking CLI changes
+- Version bump: 18.5.2 → 18.6.0 (MINOR — new `target` field and `derive_name()` API)
+
+### 2026-05-14 (v18.5.2, agentskills.io spec compliance for bundled skills)
+
+- Added YAML frontmatter (`name`, `description`, `license`, `metadata`) to all 10 bundled skill files in `templates/v5/skills/` to conform to the [agentskills.io specification](https://agentskills.io/specification)
+- Renamed directory `templates/v5/skills/c++-coding-conventions` to `cpp-coding-conventions` — the `+` character is not allowed in the `name` field (only lowercase letters, numbers, and hyphens); `name` must also match the parent directory name
+- Updated `templates/v5/templates.yml` to reference the renamed skill (`cpp-coding-conventions`) under the `c++` language section
+- All skill names are lowercase, hyphen-separated, and match their parent directory names as required by the spec
+- No Rust source changes; no CLI behavior changes
+- Version bump: 18.5.1 to 18.5.2 (PATCH — template file conformance fix)
 
 ### 2026-05-09 (v18.5.1, bug fixes)
 

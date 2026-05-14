@@ -63,10 +63,6 @@ pub enum Commands
         #[arg(short, long)]
         mission: Option<String>,
 
-        /// Install skill(s) from GitHub or local path (repeatable)
-        #[arg(short, long)]
-        skill: Vec<String>,
-
         /// Force overwrite of local files without confirmation
         #[arg(short, long, default_value = "false")]
         force: bool,
@@ -98,6 +94,29 @@ pub enum Commands
         #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
+    /// Manage global agent defaults catalog
+    Agents
+    {
+        /// Download or update global agent defaults from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show known agents and their default locations
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
+        /// Verify local agent defaults: YAML validity and source freshness
+        #[arg(short = 'V', long, default_value = "false")]
+        verify: bool,
+
+        /// Path or URL to use as source (applies to --update and --verify)
+        #[arg(short, long)]
+        from: Option<String>,
+
+        /// Preview changes without applying them
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
+        dry_run: bool
+    },
     /// Remove installed files from the current workspace
     Remove
     {
@@ -112,10 +131,6 @@ pub enum Commands
         /// Remove all agent files and skills; AGENTS.md is kept
         #[arg(long, default_value = "false", conflicts_with = "purge")]
         all: bool,
-
-        /// Remove skill(s) by name (repeatable)
-        #[arg(short, long, conflicts_with = "purge")]
-        skill: Vec<String>,
 
         /// Remove everything slopctl installed, including AGENTS.md.
         /// A customized AGENTS.md is preserved unless --force is also given.
@@ -178,10 +193,6 @@ pub enum Commands
         /// Custom mission statement (use @filename to read from file)
         #[arg(short, long)]
         mission: Option<String>,
-
-        /// Include skill(s) from GitHub or local path (repeatable)
-        #[arg(short, long)]
-        skill: Vec<String>,
 
         /// Write merged output to .merged sidecar files instead of replacing originals
         #[arg(long, default_value = "false")]

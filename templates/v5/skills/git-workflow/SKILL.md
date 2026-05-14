@@ -1,3 +1,12 @@
+---
+name: git-workflow
+description: Git commit message format using conventional commits, with character limits, commit types, branch workflow, and examples. Load before making a commit or reviewing git history.
+license: MIT
+metadata:
+  author: slopctl
+  version: "1.0"
+---
+
 # Git Workflow Conventions
 
 Read this skill before making a commit. It contains the full commit message format,
@@ -51,7 +60,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 - Add blank line after subject before body
 - Wrap each line at 72 characters maximum
 - Explain what and why, not how
-- Use bullet points (`-`) for multiple items with lowercase text after bullet
+- Use bullet points (`-`) for all body items with lowercase text after bullet
 - Keep it concise
 
 **Special Character Safety:**
