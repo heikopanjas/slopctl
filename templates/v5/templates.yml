@@ -57,7 +57,10 @@ agents:
       - source: copilot/prompts/init-session.prompt.md
         target: '$workspace/.github/prompts/init-session.prompt.md'
 
-  codex: {}
+  codex:
+    skills:
+      - source: 'skills/init-session'
+        target: '$workspace'
 
   cursor:
     prompts:
@@ -66,9 +69,15 @@ agents:
     directories:
       - target: '$workspace/.cursor/plans'
 
-  vibe: {}
+  vibe:
+    skills:
+      - source: 'skills/init-session'
+        target: '$workspace'
 
-  opencode: {}
+  opencode:
+    prompts:
+      - source: opencode/commands/init-session.md
+        target: '$workspace/.opencode/commands/init-session.md'
 
 # Reusable file groups shared across multiple languages
 # Each group has `files` (FileMapping list) and optional `skills` (SkillDefinition list).
@@ -81,8 +90,8 @@ shared:
       - source: cmake-git-ignore.txt
         target: '$workspace/.gitignore'
     skills:
-      - name: cmake-build-commands
-        source: 'skills/cmake-build-commands'
+      - source: 'skills/cmake-build-commands'
+        target: '$workspace'
 
 # Language-specific coding standards templates
 languages:
@@ -96,8 +105,8 @@ languages:
       - source: c-editor-config.ini
         target: '$workspace/.editorconfig'
     skills:
-      - name: c-coding-conventions
-        source: 'skills/c-coding-conventions'
+      - source: 'skills/c-coding-conventions'
+        target: '$workspace'
   c++:
     includes: [cmake]
     files:
@@ -108,8 +117,8 @@ languages:
       - source: c++-editor-config.ini
         target: '$workspace/.editorconfig'
     skills:
-      - name: c++-coding-conventions
-        source: 'skills/c++-coding-conventions'
+      - source: 'skills/cpp-coding-conventions'
+        target: '$workspace'
   rust:
     files:
       - source: rust-skills-hint.md
@@ -121,10 +130,10 @@ languages:
       - source: rust-git-ignore.txt
         target: '$workspace/.gitignore'
     skills:
-      - name: rust-coding-conventions
-        source: 'skills/rust-coding-conventions'
-      - name: rust-build-commands
-        source: 'skills/rust-build-commands'
+      - source: 'skills/rust-coding-conventions'
+        target: '$workspace'
+      - source: 'skills/rust-build-commands'
+        target: '$workspace'
   swift:
     files:
       - source: swift-skills-hint.md
@@ -136,20 +145,20 @@ languages:
       - source: swift-git-ignore.txt
         target: '$workspace/.gitignore'
     skills:
-      - name: swift-coding-conventions
-        source: 'skills/swift-coding-conventions'
-      - name: swift-build-commands
-        source: 'skills/swift-build-commands'
-      - name: swift-concurrency-pro
-        source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
-      - name: swift-testing-pro
-        source: 'https://github.com/twostraws/Swift-Testing-Agent-Skill'
+      - source: 'skills/swift-coding-conventions'
+        target: '$workspace'
+      - source: 'skills/swift-build-commands'
+        target: '$workspace'
+      - source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
+        target: '$workspace'
+      - source: 'https://github.com/twostraws/Swift-Testing-Agent-Skill'
+        target: '$workspace'
 
   swiftui:
     includes: [swift]
     skills:
-      - name: swiftui-pro
-        source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
+      - source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
+        target: '$workspace'
 
 # Integration templates for specific tools/workflows
 integration:
@@ -185,7 +194,7 @@ mission:
 # Agent/language-specific skills use the same format under agents.<name>.skills
 # or languages.<name>.skills respectively (see V4 additions above).
 skills:
-  - name: git-workflow
-    source: 'skills/git-workflow'
-  - name: semantic-versioning
-    source: 'skills/semantic-versioning'
+  - source: 'skills/git-workflow'
+    target: '$workspace'
+  - source: 'skills/semantic-versioning'
+    target: '$workspace'

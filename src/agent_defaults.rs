@@ -1,15 +1,25 @@
 //! Default filesystem paths and conventions for known AI coding agents
 //!
 //! Provides a registry of agent-specific paths for workspace detection markers,
-//! prompt/command directories, and skill directories. Used by the install
-//! flow to resolve where skills and other agent-agnostic artifacts go.
-//!
-//! Detection markers are files or directories whose presence indicates a particular
-//! agent is active in the workspace. Preferred markers are native agent-created
-//! paths (e.g. `.claude/`, `.cursor/`). Copilot has no native marker so its
-//! detection relies on the `.github/prompts/` directory that slopctl installs.
+//! prompt/command directories, and skill directories. The registry is loaded
+//! from `agent-defaults.yml` in the global template cache, with an embedded
+//! fallback for first-run behavior.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Component, Path, PathBuf},
+    sync::OnceLock
+};
+
+use serde::{Deserialize, Serialize};
+
+use crate::Result;
+
+/// File name of the agent defaults catalog
+pub const AGENT_DEFAULTS_FILE: &str = "agent-defaults.yml";
+
+const EMBEDDED_AGENT_DEFAULTS: &str = include_str!("../templates/v5/agent-defaults.yml");
 
 /// Placeholder for the project workspace root directory
 pub const PLACEHOLDER_WORKSPACE: &str = "$workspace";
@@ -24,19 +34,17 @@ pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 /// this path — they only scan their own native skill directories.
 pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 
-/// A file or directory whose presence indicates a particular agent is active
-/// in the workspace.
+/// A directory whose presence indicates a particular agent is active in the workspace.
 ///
-/// The path is joined to `placeholder` (workspace or userprofile root) and
-/// tested with `Path::exists()`, which returns `true` for both files and
-/// directories. Use a directory path (e.g. `.claude`) when the agent reliably
-/// creates that directory itself; use a specific file when only a file works.
+/// Catalog markers are workspace-relative directory paths. The `placeholder`
+/// field is synthesized as `$workspace` for source compatibility with existing
+/// call sites that still iterate over `workspace_markers`.
 #[derive(Debug, Clone)]
 pub struct WorkspaceMarker
 {
-    /// Relative path within the placeholder root (e.g. `.claude`, `opencode.json`)
+    /// Relative directory path within the workspace root (e.g. `.claude`)
     pub path:        &'static str,
-    /// Root placeholder: `$workspace` or `$userprofile`
+    /// Root placeholder, always `$workspace` for catalog markers
     pub placeholder: &'static str
 }
 
@@ -50,8 +58,13 @@ pub struct AgentDefaults
     pub workspace_markers:         &'static [WorkspaceMarker],
     /// Directory for agent prompts/commands, with placeholder prefix
     pub prompt_dir:                &'static str,
-    /// Directory for agent skills, with placeholder prefix
+    /// Primary skill installation directory, with placeholder prefix.
+    /// Agent files are installed to the workspace by default when the agent supports it.
     pub skill_dir:                 &'static str,
+    /// Explicit userprofile-scoped skill dir for opt-in global installs.
+    /// Userprofile installs are the exception; use them only when a template explicitly
+    /// requests `target: '$userprofile'`.
+    pub userprofile_skill_dir:     Option<&'static str>,
     /// Whether this agent scans `.agents/skills/` in addition to its native skill dir.
     ///
     /// When `false` (Claude Code, Mistral Vibe), slopctl routes skill installation
@@ -60,75 +73,225 @@ pub struct AgentDefaults
     pub reads_cross_client_skills: bool
 }
 
-// Claude Code creates `.claude/` when it initialises a project
-const CLAUDE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".claude", placeholder: PLACEHOLDER_WORKSPACE }];
+/// YAML representation of the agent defaults catalog
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentCatalog
+{
+    /// Catalog schema version
+    #[serde(default = "default_catalog_version")]
+    pub version: u32,
+    /// Known agent defaults in detection order
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents:  Vec<AgentDefaultsEntry>
+}
 
-// Cursor IDE creates `.cursor/` when it opens a project
-const CURSOR_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".cursor", placeholder: PLACEHOLDER_WORKSPACE }];
+/// YAML representation of an agent default entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDefaultsEntry
+{
+    /// Agent identifier
+    pub name:                      String,
+    /// Workspace-relative marker directories whose presence indicates this agent is active
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers:                   Vec<String>,
+    /// Directory for agent prompts/commands, with placeholder prefix
+    pub prompt_dir:                String,
+    /// Primary skill installation directory, with placeholder prefix
+    pub skill_dir:                 String,
+    /// Explicit userprofile-scoped skill dir for opt-in global installs
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub userprofile_skill_dir:     Option<String>,
+    /// Whether this agent scans `.agents/skills/` in addition to its native skill dir
+    pub reads_cross_client_skills: bool
+}
 
-// Copilot has no native workspace marker; the prompt directory is used as a proxy
-// (created by slopctl when `init --agent copilot` installs the prompt files)
-const COPILOT_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".github/prompts", placeholder: PLACEHOLDER_WORKSPACE }];
+static DEFAULT_AGENT_DEFAULTS: OnceLock<&'static [AgentDefaults]> = OnceLock::new();
 
-// Codex creates `.codex/` when it initialises a project
-const CODEX_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".codex", placeholder: PLACEHOLDER_WORKSPACE }];
+fn default_catalog_version() -> u32
+{
+    1
+}
 
-// Mistral Vibe creates `.vibe/` when it initialises a project
-const VIBE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: ".vibe", placeholder: PLACEHOLDER_WORKSPACE }];
-
-// OpenCode writes `opencode.json` to the workspace root when initialised
-const OPENCODE_MARKERS: &[WorkspaceMarker] = &[WorkspaceMarker { path: "opencode.json", placeholder: PLACEHOLDER_WORKSPACE }];
-
-/// Built-in registry of known agents and their filesystem conventions
-const KNOWN_AGENTS: &[AgentDefaults] = &[
-    AgentDefaults {
-        name:                      "cursor",
-        workspace_markers:         CURSOR_MARKERS,
-        prompt_dir:                "$workspace/.cursor/commands",
-        skill_dir:                 "$workspace/.cursor/skills",
-        reads_cross_client_skills: true
-    },
-    AgentDefaults {
-        name:                      "claude",
-        workspace_markers:         CLAUDE_MARKERS,
-        prompt_dir:                "$workspace/.claude/commands",
-        skill_dir:                 "$workspace/.claude/skills",
-        reads_cross_client_skills: false
-    },
-    AgentDefaults {
-        name:                      "codex",
-        workspace_markers:         CODEX_MARKERS,
-        prompt_dir:                "$userprofile/.codex/prompts",
-        skill_dir:                 "$userprofile/.codex/skills",
-        reads_cross_client_skills: true
-    },
-    AgentDefaults {
-        name:                      "copilot",
-        workspace_markers:         COPILOT_MARKERS,
-        prompt_dir:                "$workspace/.github/prompts",
-        skill_dir:                 "$workspace/.github/skills",
-        reads_cross_client_skills: true
-    },
-    AgentDefaults {
-        name:                      "vibe",
-        workspace_markers:         VIBE_MARKERS,
-        prompt_dir:                "$userprofile/.vibe/prompts",
-        skill_dir:                 "$workspace/.vibe/skills",
-        reads_cross_client_skills: false
-    },
-    AgentDefaults {
-        name:                      "opencode",
-        workspace_markers:         OPENCODE_MARKERS,
-        prompt_dir:                "$workspace/.opencode",
-        skill_dir:                 "$workspace/.opencode/skills",
-        reads_cross_client_skills: true
+/// Load the agent defaults catalog from a template cache directory
+///
+/// Falls back to the embedded catalog when `agent-defaults.yml` is absent.
+///
+/// # Errors
+///
+/// Returns an error if the catalog file exists but cannot be read, parsed, or
+/// validated, or if the embedded fallback is invalid.
+pub fn load_agent_catalog_from_dir(config_dir: &Path) -> Result<AgentCatalog>
+{
+    let path = config_dir.join(AGENT_DEFAULTS_FILE);
+    if path.exists() == true
+    {
+        return load_agent_catalog_file(&path);
     }
-];
+    load_embedded_agent_catalog()
+}
+
+/// Load the cached agent defaults catalog from a template cache directory
+///
+/// Unlike `load_agent_catalog_from_dir`, this requires the cache file to exist.
+///
+/// # Errors
+///
+/// Returns an error if `agent-defaults.yml` is missing or invalid.
+pub fn load_cached_agent_catalog_from_dir(config_dir: &Path) -> Result<AgentCatalog>
+{
+    let path = config_dir.join(AGENT_DEFAULTS_FILE);
+    require!(path.exists() == true, Err(anyhow::anyhow!("{} not found in global template directory", AGENT_DEFAULTS_FILE)));
+    load_agent_catalog_file(&path)
+}
+
+/// Load the embedded fallback agent defaults catalog
+///
+/// # Errors
+///
+/// Returns an error if the embedded catalog is invalid.
+pub fn load_embedded_agent_catalog() -> Result<AgentCatalog>
+{
+    parse_agent_catalog(EMBEDDED_AGENT_DEFAULTS)
+}
+
+/// Load an agent defaults catalog from a specific file
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, parsed, or validated.
+pub fn load_agent_catalog_file(path: &Path) -> Result<AgentCatalog>
+{
+    let content = fs::read_to_string(path)?;
+    parse_agent_catalog(&content)
+}
+
+/// Parse and validate an agent defaults YAML catalog
+///
+/// # Errors
+///
+/// Returns an error if YAML parsing or validation fails.
+pub fn parse_agent_catalog(content: &str) -> Result<AgentCatalog>
+{
+    let catalog: AgentCatalog = serde_yaml::from_str(content)?;
+    validate_agent_catalog(&catalog)?;
+    Ok(catalog)
+}
+
+/// Validate agent defaults catalog structure and placeholder usage
+///
+/// # Errors
+///
+/// Returns an error when required fields are empty, names are duplicated, or
+/// path placeholders are unsupported.
+pub fn validate_agent_catalog(catalog: &AgentCatalog) -> Result<()>
+{
+    require!(catalog.version == 1, Err(anyhow::anyhow!("unsupported agent defaults version: {}", catalog.version)));
+    require!(catalog.agents.is_empty() == false, Err(anyhow::anyhow!("agent defaults catalog must contain at least one agent")));
+
+    let mut names = HashSet::new();
+    for agent in &catalog.agents
+    {
+        require!(agent.name.trim().is_empty() == false, Err(anyhow::anyhow!("agent name cannot be empty")));
+        require!(names.insert(agent.name.as_str()) == true, Err(anyhow::anyhow!("duplicate agent defaults entry: {}", agent.name)));
+        require!(agent.markers.is_empty() == false, Err(anyhow::anyhow!("agent '{}' must declare at least one marker", agent.name)));
+        validate_placeholder_path(&agent.prompt_dir, &format!("agent '{}'.prompt_dir", agent.name))?;
+        validate_placeholder_path(&agent.skill_dir, &format!("agent '{}'.skill_dir", agent.name))?;
+        if let Some(userprofile_skill_dir) = &agent.userprofile_skill_dir
+        {
+            validate_placeholder_path(userprofile_skill_dir, &format!("agent '{}'.userprofile_skill_dir", agent.name))?;
+        }
+
+        for marker in &agent.markers
+        {
+            validate_marker_path(marker, &agent.name)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_placeholder_path(path: &str, field: &str) -> Result<()>
+{
+    require!(path.trim().is_empty() == false, Err(anyhow::anyhow!("{} cannot be empty", field)));
+    require!(
+        path.starts_with(PLACEHOLDER_WORKSPACE) == true || path.starts_with(PLACEHOLDER_USERPROFILE) == true,
+        Err(anyhow::anyhow!("{} must start with {} or {}", field, PLACEHOLDER_WORKSPACE, PLACEHOLDER_USERPROFILE))
+    );
+    Ok(())
+}
+
+fn validate_marker_path(marker: &str, agent_name: &str) -> Result<()>
+{
+    require!(marker.trim().is_empty() == false, Err(anyhow::anyhow!("agent '{}' has an empty marker path", agent_name)));
+    require!(marker.contains('$') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must not contain placeholders", agent_name, marker)));
+    let path = Path::new(marker);
+    require!(path.is_absolute() == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be relative", agent_name, marker)));
+    require!(marker.contains(':') == false, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a relative directory path", agent_name, marker)));
+
+    for component in path.components()
+    {
+        match component
+        {
+            | Component::Normal(_) =>
+            {}
+            | _ => return Err(anyhow::anyhow!("agent '{}' marker '{}' must not escape the workspace", agent_name, marker))
+        }
+    }
+
+    let Some(_file_name) = path.file_name().and_then(|name| name.to_str())
+    else
+    {
+        return Err(anyhow::anyhow!("agent '{}' marker '{}' must be a directory path", agent_name, marker));
+    };
+    require!(path.extension().is_none() == true, Err(anyhow::anyhow!("agent '{}' marker '{}' must be a directory path, not a file", agent_name, marker)));
+
+    Ok(())
+}
+
+fn default_agent_defaults() -> &'static [AgentDefaults]
+{
+    DEFAULT_AGENT_DEFAULTS.get_or_init(|| {
+        let catalog = load_default_agent_catalog().or_else(|_| load_embedded_agent_catalog()).expect("embedded agent defaults catalog must be valid");
+        leak_agent_defaults(catalog)
+    })
+}
+
+fn load_default_agent_catalog() -> Result<AgentCatalog>
+{
+    let data_dir = dirs::data_local_dir().ok_or_else(|| anyhow::anyhow!("Could not determine local data directory"))?;
+    load_agent_catalog_from_dir(&data_dir.join("slopctl/templates"))
+}
+
+fn leak_agent_defaults(catalog: AgentCatalog) -> &'static [AgentDefaults]
+{
+    let agents: Vec<AgentDefaults> = catalog
+        .agents
+        .into_iter()
+        .map(|agent| {
+            let markers: Vec<WorkspaceMarker> =
+                agent.markers.into_iter().map(|marker| WorkspaceMarker { path: leak_str(marker), placeholder: PLACEHOLDER_WORKSPACE }).collect();
+            AgentDefaults {
+                name:                      leak_str(agent.name),
+                workspace_markers:         Box::leak(markers.into_boxed_slice()),
+                prompt_dir:                leak_str(agent.prompt_dir),
+                skill_dir:                 leak_str(agent.skill_dir),
+                userprofile_skill_dir:     agent.userprofile_skill_dir.map(leak_str),
+                reads_cross_client_skills: agent.reads_cross_client_skills
+            }
+        })
+        .collect();
+    Box::leak(agents.into_boxed_slice())
+}
+
+fn leak_str(value: String) -> &'static str
+{
+    Box::leak(value.into_boxed_str())
+}
 
 /// Look up defaults for an agent by name
 pub fn get_defaults(agent: &str) -> Option<&'static AgentDefaults>
 {
-    KNOWN_AGENTS.iter().find(|a| a.name == agent)
+    default_agent_defaults().iter().find(|a| a.name == agent)
 }
 
 /// Get the skill installation directory for an agent
@@ -151,10 +314,38 @@ pub fn reads_cross_client_skills(agent: &str) -> bool
     get_defaults(agent).is_none_or(|d| d.reads_cross_client_skills)
 }
 
+/// Return the userprofile-scoped skill directory for an agent
+///
+/// Returns the raw placeholder path (e.g. `$userprofile/.codex/skills`).
+/// Unknown agents fall back to `$userprofile/.agents/skills`. Caller must resolve
+/// the placeholder to an actual path.
+pub fn get_effective_userprofile_skill_dir(agent: &str) -> &'static str
+{
+    get_defaults(agent).map(|d| d.userprofile_skill_dir.unwrap_or("$userprofile/.agents/skills")).unwrap_or("$userprofile/.agents/skills")
+}
+
 /// List all known agent names
 pub fn known_agents() -> Vec<&'static str>
 {
-    KNOWN_AGENTS.iter().map(|a| a.name).collect()
+    default_agent_defaults().iter().map(|a| a.name).collect()
+}
+
+/// Return workspace marker directories for an agent resolved under `workspace`
+///
+/// Markers in `agent-defaults.yml` are validated as relative directory paths, so
+/// these paths are safe for `slopctl init --agent` to create.
+///
+/// # Arguments
+///
+/// * `agent` - Agent identifier
+/// * `workspace` - Workspace root directory
+pub fn get_workspace_marker_dirs(agent: &str, workspace: &Path) -> Vec<PathBuf>
+{
+    get_defaults(agent)
+        .map(|defaults| {
+            defaults.workspace_markers.iter().filter(|marker| marker.placeholder == PLACEHOLDER_WORKSPACE).map(|marker| workspace.join(marker.path)).collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Resolve a placeholder path to an absolute filesystem path
@@ -211,8 +402,7 @@ pub fn get_all_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<Pa
 /// Return only workspace-scoped skill directories safe for filesystem scanning
 ///
 /// Like `get_all_skill_search_dirs` but excludes `$userprofile`-based skill
-/// directories (e.g. codex's `~/.codex/skills`). Those directories are
-/// user-global and may contain agent-internal files or skills from other
+/// directories. Those directories are user-global and may contain agent-internal files or skills from other
 /// workspaces. Use `FileTracker` to manage userprofile skills instead.
 ///
 /// # Arguments
@@ -255,7 +445,7 @@ pub fn get_workspace_skill_search_dirs(workspace: &Path, userprofile: &Path) -> 
 /// * `workspace` - Path to the project workspace root
 pub fn detect_installed_agent(workspace: &Path) -> Option<String>
 {
-    for agent in KNOWN_AGENTS
+    for agent in default_agent_defaults()
     {
         for marker in agent.workspace_markers
         {
@@ -283,7 +473,7 @@ pub fn detect_installed_agent(workspace: &Path) -> Option<String>
 pub fn detect_all_installed_agents(workspace: &Path) -> Vec<String>
 {
     let mut found = Vec::new();
-    for agent in KNOWN_AGENTS
+    for agent in default_agent_defaults()
     {
         for marker in agent.workspace_markers
         {
@@ -325,13 +515,170 @@ mod tests
     }
 
     #[test]
+    fn test_load_agent_catalog_from_dir_valid() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        std::fs::write(
+            temp_dir.path().join(AGENT_DEFAULTS_FILE),
+            r#"
+version: 1
+agents:
+  - name: test-agent
+    markers:
+      - .test-agent
+    prompt_dir: '$workspace/.test-agent/prompts'
+    skill_dir: '$workspace/.test-agent/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
+
+        let catalog = load_agent_catalog_from_dir(temp_dir.path())?;
+        assert_eq!(catalog.agents.len(), 1);
+        assert_eq!(catalog.agents[0].name, "test-agent");
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_agent_catalog_from_dir_missing_uses_embedded() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let catalog = load_agent_catalog_from_dir(temp_dir.path())?;
+        assert!(catalog.agents.iter().any(|agent| agent.name == "cursor") == true);
+        assert!(catalog.agents.iter().any(|agent| agent.name == "claude") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_duplicate_names()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: duplicate
+    markers:
+      - .one
+    prompt_dir: '$workspace/.one/prompts'
+    skill_dir: '$workspace/.one/skills'
+    reads_cross_client_skills: true
+  - name: duplicate
+    markers:
+      - .two
+    prompt_dir: '$workspace/.two/prompts'
+    skill_dir: '$workspace/.two/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("duplicate agent defaults entry") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_invalid_placeholder()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - .invalid
+    prompt_dir: '$project/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("prompt_dir must start") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_marker_placeholder()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - '$workspace/.invalid'
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must not contain placeholders") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_absolute_marker()
+    {
+        #[cfg(windows)]
+        let marker_path =
+            std::env::var_os("TEMP").or_else(|| std::env::var_os("TMP")).map(PathBuf::from).unwrap_or_else(std::env::temp_dir).join("slopctl-invalid-marker");
+        #[cfg(not(windows))]
+        let marker_path = PathBuf::from("/tmp/invalid");
+        let marker = marker_path.to_string_lossy().replace('\'', "''");
+        let err = parse_agent_catalog(&format!(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - '{marker}'
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        ))
+        .unwrap_err();
+        assert!(err.to_string().contains("must be relative") == true);
+    }
+
+    #[test]
+    fn test_parse_agent_catalog_rejects_file_marker()
+    {
+        let err = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: invalid
+    markers:
+      - opencode.json
+    prompt_dir: '$workspace/.invalid/prompts'
+    skill_dir: '$workspace/.invalid/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a file") == true);
+    }
+
+    #[test]
     fn test_get_skill_dir()
     {
         assert_eq!(get_skill_dir("claude"), Some("$workspace/.claude/skills"));
-        assert_eq!(get_skill_dir("codex"), Some("$userprofile/.codex/skills"));
+        assert_eq!(get_skill_dir("codex"), Some("$workspace/.codex/skills"));
         assert_eq!(get_skill_dir("vibe"), Some("$workspace/.vibe/skills"));
         assert_eq!(get_skill_dir("opencode"), Some("$workspace/.opencode/skills"));
         assert_eq!(get_skill_dir("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_codex_defaults_use_workspace_dirs()
+    {
+        let defaults = get_defaults("codex").expect("codex defaults should exist");
+        assert_eq!(defaults.prompt_dir, "$workspace/.codex/prompts");
+        assert_eq!(defaults.skill_dir, "$workspace/.codex/skills");
+        assert_eq!(defaults.userprofile_skill_dir, Some("$userprofile/.codex/skills"));
+    }
+
+    #[test]
+    fn test_opencode_prompt_dir_uses_commands()
+    {
+        let defaults = get_defaults("opencode").expect("opencode defaults should exist");
+        assert_eq!(defaults.prompt_dir, "$workspace/.opencode/commands");
     }
 
     #[test]
@@ -416,8 +763,17 @@ mod tests
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
 
-        std::fs::write(workspace.join("opencode.json"), b"{}")?;
+        std::fs::create_dir(workspace.join(".opencode"))?;
         assert_eq!(detect_installed_agent(workspace), Some("opencode".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_workspace_marker_dirs_resolves_marker_directories() -> anyhow::Result<()>
+    {
+        let temp_dir = tempfile::TempDir::new()?;
+        let dirs = get_workspace_marker_dirs("opencode", temp_dir.path());
+        assert_eq!(dirs, vec![temp_dir.path().join(".opencode")]);
         Ok(())
     }
 
@@ -489,7 +845,7 @@ mod tests
     }
 
     #[test]
-    fn test_get_workspace_skill_search_dirs_excludes_codex() -> anyhow::Result<()>
+    fn test_get_workspace_skill_search_dirs_includes_codex_workspace_dir() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
@@ -501,9 +857,10 @@ mod tests
         let all_dirs = get_all_skill_search_dirs(workspace, &home);
         let ws_dirs = get_workspace_skill_search_dirs(workspace, &home);
 
-        // all_dirs includes codex's userprofile skill dir
-        assert!(all_dirs.contains(&home.join(".codex/skills")) == true);
-        // workspace-only dirs exclude it
+        // all_dirs includes codex's workspace-local skill dir
+        assert!(all_dirs.contains(&workspace.join(".codex/skills")) == true);
+        // workspace-only dirs include codex because its native dir is project-scoped
+        assert!(ws_dirs.contains(&workspace.join(".codex/skills")) == true);
         assert!(ws_dirs.contains(&home.join(".codex/skills")) == false);
         // workspace-scoped dirs are still present
         assert!(ws_dirs.contains(&workspace.join(".cursor/skills")) == true);

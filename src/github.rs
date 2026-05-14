@@ -1,9 +1,8 @@
 //! GitHub API integration for downloading files and listing directory contents
 //!
-//! Provides helpers for resolving GitHub URLs, expanding CLI shorthand notation,
-//! listing repository directory contents via the GitHub Contents API, and
-//! downloading individual files. Used during the `install` flow to fetch
-//! remote sources on-the-fly.
+//! Provides helpers for resolving full GitHub URLs, listing repository directory
+//! contents via the GitHub Contents API, and downloading individual files. Used
+//! during the `init` flow to fetch remote template sources on-the-fly.
 
 use std::{
     cell::RefCell,
@@ -221,46 +220,6 @@ pub fn parse_github_url(url: &str) -> Option<GitHubUrl>
 
     // Unrecognized structure, default to main
     Some(GitHubUrl { owner, repo, branch: "main".to_string(), path: String::new() })
-}
-
-/// Expand CLI shorthand to a full GitHub URL
-///
-/// Only used for `--skill` CLI arguments, never for templates.yml sources.
-///
-/// Shorthand formats:
-/// - `user/repo` -> `https://github.com/user/repo/tree/main`
-/// - `user/repo/sub/path` -> `https://github.com/user/repo/tree/main/sub/path`
-///
-/// If the input is already a full URL, it is returned as-is.
-///
-/// # Arguments
-///
-/// * `input` - CLI shorthand or full URL
-pub fn expand_shorthand(input: &str) -> String
-{
-    if is_url(input) == true
-    {
-        return input.to_string();
-    }
-
-    let parts: Vec<&str> = input.split('/').collect();
-    if parts.len() < 2
-    {
-        return input.to_string();
-    }
-
-    let owner = parts[0];
-    let repo = parts[1];
-
-    if parts.len() > 2
-    {
-        let sub_path = parts[2..].join("/");
-        format!("https://github.com/{}/{}/tree/main/{}", owner, repo, sub_path)
-    }
-    else
-    {
-        format!("https://github.com/{}/{}/tree/main", owner, repo)
-    }
 }
 
 /// List directory contents via the GitHub Contents API
@@ -573,31 +532,6 @@ mod tests
     {
         assert!(parse_github_url("https://gitlab.com/user/repo").is_none());
         assert!(parse_github_url("not-a-url").is_none());
-    }
-
-    #[test]
-    fn test_expand_shorthand_user_repo()
-    {
-        assert_eq!(expand_shorthand("user/repo"), "https://github.com/user/repo/tree/main");
-    }
-
-    #[test]
-    fn test_expand_shorthand_with_path()
-    {
-        assert_eq!(expand_shorthand("user/repo/skills/create-rule"), "https://github.com/user/repo/tree/main/skills/create-rule");
-    }
-
-    #[test]
-    fn test_expand_shorthand_full_url_passthrough()
-    {
-        let url = "https://github.com/user/repo/tree/develop/path";
-        assert_eq!(expand_shorthand(url), url);
-    }
-
-    #[test]
-    fn test_expand_shorthand_single_segment()
-    {
-        assert_eq!(expand_shorthand("just-a-name"), "just-a-name");
     }
 
     #[test]

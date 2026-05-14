@@ -5,11 +5,15 @@ use clap_complete::generate;
 use owo_colors::OwoColorize;
 use slopctl::{
     Config, EffectiveConfig, MergeOptions, Result, TemplateManager, UpdateOptions,
+    agent_defaults::AGENT_DEFAULTS_FILE,
     cli::{Cli, Commands}
 };
 
 /// Default template source URL (V5 templates - agents.md standard)
 const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
+
+/// Default agent defaults source URL
+const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -35,6 +39,32 @@ fn resolve_source(from: Option<String>) -> (String, bool, Option<String>)
     else
     {
         (DEFAULT_SOURCE_URL.to_string(), false)
+    };
+
+    (source, is_configured, fallback_source)
+}
+
+/// Resolves agent defaults source URL from CLI argument, config, or default
+///
+/// Returns (source_url, is_configured, fallback_url).
+fn resolve_agents_source(from: Option<String>) -> (String, bool, Option<String>)
+{
+    let cwd = std::env::current_dir().ok();
+    let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
+    let configured_source = effective.as_ref().and_then(|c| c.get("agents.uri"));
+    let fallback_source = effective.as_ref().and_then(|c| c.get("agents.fallbackUri"));
+
+    let (source, is_configured) = if let Some(from_url) = from
+    {
+        (from_url, false)
+    }
+    else if let Some(config_url) = configured_source
+    {
+        (config_url, true)
+    }
+    else
+    {
+        (DEFAULT_AGENTS_SOURCE_URL.to_string(), false)
     };
 
     (source, is_configured, fallback_source)
@@ -73,6 +103,77 @@ fn download_with_fallback(manager: &TemplateManager, source: &str, fallback: Opt
             }
         }
     }
+}
+
+/// Downloads or copies agent defaults with automatic fallback
+///
+/// # Errors
+///
+/// Returns an error if both primary and fallback sources fail.
+fn download_agent_defaults_with_fallback(manager: &TemplateManager, source: &str, fallback: Option<String>) -> Result<()>
+{
+    match manager.download_or_copy_agent_defaults(source)
+    {
+        | Ok(()) => Ok(()),
+        | Err(e) =>
+        {
+            if let Some(fallback_url) = fallback
+            {
+                println!("{} Primary agent defaults source failed: {}", "!".yellow(), e);
+                println!("{} Trying fallback source: {}", "→".blue(), fallback_url.yellow());
+                manager.download_or_copy_agent_defaults(&fallback_url)
+            }
+            else
+            {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Bootstrap agent defaults after template download when the catalog is missing
+///
+/// # Errors
+///
+/// Returns an error if all bootstrap sources fail.
+fn bootstrap_agent_defaults_if_missing(manager: &TemplateManager, template_source: &str, dry_run: bool) -> Result<()>
+{
+    if manager.has_agent_defaults() == true
+    {
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir().ok();
+    let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
+    let configured_agent_source = effective.as_ref().and_then(|c| c.get("agents.uri"));
+    let configured_agent_fallback = effective.as_ref().and_then(|c| c.get("agents.fallbackUri"));
+
+    let mut candidates: Vec<String> = Vec::new();
+    for candidate in
+        [configured_agent_source, configured_agent_fallback, Some(template_source.to_string()), Some(DEFAULT_AGENTS_SOURCE_URL.to_string())].into_iter().flatten()
+    {
+        if candidates.contains(&candidate) == false
+        {
+            candidates.push(candidate);
+        }
+    }
+
+    if dry_run == true
+    {
+        println!("{} Missing {}; would bootstrap from {}", "→".blue(), AGENT_DEFAULTS_FILE.yellow(), candidates.join(", ").yellow());
+        return Ok(());
+    }
+
+    for source in candidates
+    {
+        match manager.download_or_copy_agent_defaults(&source)
+        {
+            | Ok(()) => return Ok(()),
+            | Err(e) => println!("{} Could not bootstrap {} from {}: {}", "!".yellow(), AGENT_DEFAULTS_FILE.yellow(), source.yellow(), e)
+        }
+    }
+
+    Err(anyhow::anyhow!("Failed to bootstrap {}; run slopctl agents --update", AGENT_DEFAULTS_FILE))
 }
 
 /// Resolves mission content from CLI argument
@@ -295,19 +396,16 @@ fn main()
 
     let result = match cli.command
     {
-        | Commands::Init { lang, agent, mission, skill, force, dry_run } =>
+        | Commands::Init { lang, agent, mission, force, dry_run } =>
         {
-            if lang.is_none() == true && agent.is_none() == true && skill.is_empty() == true
+            if lang.is_none() == true && agent.is_none() == true
             {
-                eprintln!("{} Must specify at least one of --lang, --agent, or --skill", "✗".red());
+                eprintln!("{} Must specify at least one of --lang or --agent", "✗".red());
                 eprintln!("{} Examples: slopctl init --lang rust", "→".blue());
                 eprintln!("{}          slopctl init --agent cursor", "→".blue());
                 eprintln!("{}          slopctl init --lang rust --agent cursor", "→".blue());
-                eprintln!("{}          slopctl init --skill user/my-skill", "→".blue());
                 std::process::exit(1);
             }
-
-            let skill_only = lang.is_none() == true && agent.is_none() == true;
 
             let resolved_mission = if let Some(ref mission_value) = mission
             {
@@ -326,22 +424,8 @@ fn main()
                 None
             };
 
-            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill, force, dry_run };
+            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), force, dry_run };
 
-            if skill_only == true
-            {
-                let prefix = if dry_run == true
-                {
-                    "Dry run: previewing"
-                }
-                else
-                {
-                    "Installing"
-                };
-                println!("{} {} skills", "→".blue(), prefix);
-                manager.install_skills(&options)
-            }
-            else
             {
                 if manager.has_global_templates() == false
                 {
@@ -364,6 +448,11 @@ fn main()
                         eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
                         std::process::exit(1);
                     }
+                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, &source, false)
+                    {
+                        eprintln!("{} Failed to bootstrap agent defaults: {}", "✗".red(), e);
+                        std::process::exit(1);
+                    }
                 }
 
                 let prefix = if dry_run == true
@@ -379,7 +468,7 @@ fn main()
                     | (Some(l), Some(a)) => println!("{} {} {} with {}", "→".blue(), prefix, l.green(), a.green()),
                     | (Some(l), None) => println!("{} {} {}", "→".blue(), prefix, l.green()),
                     | (None, Some(a)) => println!("{} {} {}", "→".blue(), prefix, a.green()),
-                    | (None, None) => println!("{} {} skills", "→".blue(), prefix)
+                    | (None, None) => unreachable!("validated at least one init target")
                 }
 
                 manager.update(&options)
@@ -419,8 +508,15 @@ fn main()
                         println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
                     }
                     println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
-                    println!("\n{} Dry run complete. No files were modified.", "✓".green());
-                    Ok(())
+                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, &source, true)
+                    {
+                        Err(e)
+                    }
+                    else
+                    {
+                        println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                        Ok(())
+                    }
                 }
                 else
                 {
@@ -429,7 +525,7 @@ fn main()
                         println!("{} Using configured source", "→".blue());
                     }
                     println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-                    download_with_fallback(&manager, &source, fallback)
+                    download_with_fallback(&manager, &source, fallback).and_then(|()| bootstrap_agent_defaults_if_missing(&manager, &source, false))
                 }
             }
             else
@@ -459,7 +555,85 @@ fn main()
                     }
                 })
         }
-        | Commands::Remove { agent, lang, all, skill, purge, force, dry_run } =>
+        | Commands::Agents { update, list, verify, from, dry_run } =>
+        {
+            if update == false && list == false && verify == false
+            {
+                eprintln!("{} Must specify --update, --list, or --verify", "✗".red());
+                eprintln!("{} Examples: slopctl agents --update", "→".blue());
+                eprintln!("{}          slopctl agents --list", "→".blue());
+                eprintln!("{}          slopctl agents --verify", "→".blue());
+                eprintln!("{}          slopctl agents --update --list", "→".blue());
+                std::process::exit(1);
+            }
+
+            if from.is_some() == true && update == false && verify == false
+            {
+                eprintln!("{} --from requires --update or --verify", "✗".red());
+                std::process::exit(1);
+            }
+
+            let (source, is_configured, fallback) = resolve_agents_source(from);
+
+            let update_result = if update == true
+            {
+                if dry_run == true
+                {
+                    if is_configured == true
+                    {
+                        println!("{} Using configured agent defaults source", "→".blue());
+                    }
+                    println!("{} Dry run: would update agent defaults from {}", "→".blue(), source.yellow());
+                    if let Some(ref fallback_url) = fallback
+                    {
+                        println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    }
+                    println!(
+                        "{} Agent defaults would be downloaded to: {}",
+                        "→".blue(),
+                        manager.get_config_dir().join(AGENT_DEFAULTS_FILE).display().to_string().yellow()
+                    );
+                    println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                    Ok(())
+                }
+                else
+                {
+                    if is_configured == true
+                    {
+                        println!("{} Using configured agent defaults source", "→".blue());
+                    }
+                    println!("{} Updating agent defaults from {}", "→".blue(), source.yellow());
+                    download_agent_defaults_with_fallback(&manager, &source, fallback)
+                }
+            }
+            else
+            {
+                Ok(())
+            };
+
+            update_result
+                .and_then(|()| {
+                    if verify == true
+                    {
+                        manager.verify_agents(&source)
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+                .and_then(|()| {
+                    if list == true
+                    {
+                        manager.list_agents()
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+        }
+        | Commands::Remove { agent, lang, all, purge, force, dry_run } =>
         {
             if purge == true
             {
@@ -469,16 +643,16 @@ fn main()
             {
                 Err(anyhow::anyhow!("Cannot specify --agent or --lang together with --all"))
             }
-            else if all == false && agent.is_none() == true && lang.is_none() == true && skill.is_empty() == true
+            else if all == false && agent.is_none() == true && lang.is_none() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, --skill, or --purge"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --purge"))
             }
             else
             {
-                manager.remove(agent.as_deref(), lang.as_deref(), &skill, force, dry_run)
+                manager.remove(agent.as_deref(), lang.as_deref(), force, dry_run)
             }
         }
-        | Commands::Merge { lang, agent, mission, skill, preview, dry_run, verbose } =>
+        | Commands::Merge { lang, agent, mission, preview, dry_run, verbose } =>
         {
             let resolved_mission = if let Some(ref mission_value) = mission
             {
@@ -497,7 +671,7 @@ fn main()
                 None
             };
 
-            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), skills: &skill };
+            let merge_options = MergeOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref() };
 
             if dry_run == true
             {

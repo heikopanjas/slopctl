@@ -89,13 +89,34 @@ pub struct MainConfig
 /// Skill definition used in agents, languages, and top-level skills sections
 ///
 /// Skills are directories containing SKILL.md + optional supporting files.
-/// The install target is resolved based on context: agent-specific dir for agent
-/// skills, cross-client `.agents/skills/` for language and top-level skills.
+/// The skill name is derived from the last path component of `source` (which
+/// must match the SKILL.md `name` frontmatter per the agentskills.io spec).
+/// The optional `target` field overrides the default install directory:
+/// - Absent: inferred from install context (agent/language routing)
+/// - `"$workspace"`: agent's workspace skill dir, or `.agents/skills/` if no agent
+/// - `"$userprofile"`: agent's userprofile skill dir, or `~/.agents/skills/` if no agent
+/// - Any full path (e.g. `"$workspace/.agents/skills"`): resolved as-is
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillDefinition
 {
-    pub name:   String,
-    pub source: String
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>
+}
+
+impl SkillDefinition
+{
+    /// Derives the skill name from the last path component of `source`.
+    ///
+    /// For local paths (e.g. `"skills/rust-coding-conventions"`) returns
+    /// `"rust-coding-conventions"`. For GitHub URLs the last component is
+    /// typically the repo name, but `discover_skills()` overrides this with
+    /// the actual in-repo directory name (which matches the SKILL.md `name`
+    /// frontmatter per the agentskills.io spec).
+    pub fn derive_name(&self) -> &str
+    {
+        self.source.rsplit(['/', '\\']).next().filter(|s| s.is_empty() == false).unwrap_or(&self.source)
+    }
 }
 
 /// Default version for templates.yml (used when version field is missing)
@@ -873,8 +894,7 @@ agents:
       - source: claude/CLAUDE.md
         target: '$workspace/CLAUDE.md'
     skills:
-      - name: claude-skill
-        source: 'https://github.com/user/claude-skills/tree/main/skill-a'
+      - source: 'https://github.com/user/claude-skills/tree/main/skill-a'
     directories:
       - target: '$workspace/.claude/plans'
 shared:
@@ -883,8 +903,7 @@ shared:
       - source: cmake-build.md
         target: '$instructions'
     skills:
-      - name: cmake-skill
-        source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+      - source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
 languages:
   c:
     includes: [cmake]
@@ -896,8 +915,7 @@ languages:
       - source: rust.md
         target: '$instructions'
     skills:
-      - name: rust-analyzer
-        source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
+      - source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
 integration:
   git:
     files:
@@ -910,8 +928,7 @@ mission:
   - source: mission.md
     target: '$instructions'
 skills:
-  - name: my-skill
-    source: 'https://github.com/user/repo/tree/main/skills/my-skill'
+  - source: 'https://github.com/user/repo/tree/main/skills/my-skill'
 "#;
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.version, 5);
@@ -925,7 +942,7 @@ skills:
         let cmake_shared = config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?;
         assert_eq!(cmake_shared.files.len(), 1);
         assert_eq!(cmake_shared.skills.len(), 1);
-        assert_eq!(cmake_shared.skills[0].name, "cmake-skill");
+        assert_eq!(cmake_shared.skills[0].derive_name(), "cmake-skill");
         assert_eq!(config.languages.len(), 2);
         assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.includes.is_empty() == false);
         assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.skills.is_empty() == true);
@@ -935,7 +952,7 @@ skills:
         assert!(config.principles.is_empty() == false);
         assert!(config.mission.is_empty() == false);
         assert!(config.skills.is_empty() == false);
-        assert_eq!(config.skills[0].name, "my-skill");
+        assert_eq!(config.skills[0].derive_name(), "my-skill");
         Ok(())
     }
 
@@ -958,12 +975,11 @@ files:
   - source: rust.md
     target: '$instructions'
 skills:
-  - name: rust-analyzer
-    source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
+  - source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
 "#;
         let config: LanguageConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.skills.len(), 1);
-        assert_eq!(config.skills[0].name, "rust-analyzer");
+        assert_eq!(config.skills[0].derive_name(), "rust-analyzer");
         Ok(())
     }
 
@@ -977,12 +993,11 @@ instructions:
   - source: cursor/cursorrules
     target: '$workspace/.cursorrules'
 skills:
-  - name: create-rule
-    source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+  - source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
 "#;
         let config: AgentConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.skills.len(), 1);
-        assert_eq!(config.skills[0].name, "create-rule");
+        assert_eq!(config.skills[0].derive_name(), "create-rule");
         assert_eq!(config.instructions.len(), 1);
         Ok(())
     }
@@ -1049,13 +1064,12 @@ files:
   - source: cmake-build.md
     target: '$instructions'
 skills:
-  - name: cmake-skill
-    source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+  - source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
 "#;
         let config: SharedConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.files.len(), 1);
         assert_eq!(config.skills.len(), 1);
-        assert_eq!(config.skills[0].name, "cmake-skill");
+        assert_eq!(config.skills[0].derive_name(), "cmake-skill");
         Ok(())
     }
 
@@ -1083,12 +1097,12 @@ skills:
         config.languages.insert("rust".to_string(), LanguageConfig {
             includes: vec![],
             files:    vec![make_mapping("rust.md", "$instructions")],
-            skills:   vec![SkillDefinition { name: "rust-analyzer".to_string(), source: "https://example.com/rust-analyzer".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/rust-analyzer".to_string(), target: None }]
         });
 
         let skills = resolve_language_skills("rust", &config)?;
         assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "rust-analyzer");
+        assert_eq!(skills[0].derive_name(), "rust-analyzer");
         Ok(())
     }
 
@@ -1098,13 +1112,13 @@ skills:
         let mut config = minimal_config();
         config.shared.insert("cmake".to_string(), SharedConfig {
             files:  vec![make_mapping("cmake.md", "$instructions")],
-            skills: vec![SkillDefinition { name: "cmake-skill".to_string(), source: "https://example.com/cmake-skill".to_string() }]
+            skills: vec![SkillDefinition { source: "https://example.com/cmake-skill".to_string(), target: None }]
         });
         config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
 
         let skills = resolve_language_skills("c", &config)?;
         assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].name, "cmake-skill");
+        assert_eq!(skills[0].derive_name(), "cmake-skill");
         Ok(())
     }
 
@@ -1114,18 +1128,18 @@ skills:
         let mut config = minimal_config();
         config.shared.insert("cmake".to_string(), SharedConfig {
             files:  vec![make_mapping("cmake.md", "$instructions")],
-            skills: vec![SkillDefinition { name: "cmake-skill".to_string(), source: "https://example.com/cmake-skill".to_string() }]
+            skills: vec![SkillDefinition { source: "https://example.com/cmake-skill".to_string(), target: None }]
         });
         config.languages.insert("c".to_string(), LanguageConfig {
             includes: vec!["cmake".to_string()],
             files:    vec![make_mapping("c.md", "$instructions")],
-            skills:   vec![SkillDefinition { name: "c-skill".to_string(), source: "https://example.com/c-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/c-skill".to_string(), target: None }]
         });
 
         let skills = resolve_language_skills("c", &config)?;
         assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].name, "cmake-skill");
-        assert_eq!(skills[1].name, "c-skill");
+        assert_eq!(skills[0].derive_name(), "cmake-skill");
+        assert_eq!(skills[1].derive_name(), "c-skill");
         Ok(())
     }
 
@@ -1136,18 +1150,18 @@ skills:
         config.languages.insert("swift".to_string(), LanguageConfig {
             includes: vec![],
             files:    vec![make_mapping("swift.md", "$instructions")],
-            skills:   vec![SkillDefinition { name: "swift-skill".to_string(), source: "https://example.com/swift-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/swift-skill".to_string(), target: None }]
         });
         config.languages.insert("swiftui".to_string(), LanguageConfig {
             includes: vec!["swift".to_string()],
             files:    vec![make_mapping("swiftui.md", "$instructions")],
-            skills:   vec![SkillDefinition { name: "swiftui-skill".to_string(), source: "https://example.com/swiftui-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/swiftui-skill".to_string(), target: None }]
         });
 
         let skills = resolve_language_skills("swiftui", &config)?;
         assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].name, "swift-skill");
-        assert_eq!(skills[1].name, "swiftui-skill");
+        assert_eq!(skills[0].derive_name(), "swift-skill");
+        assert_eq!(skills[1].derive_name(), "swiftui-skill");
         Ok(())
     }
 
@@ -1158,24 +1172,24 @@ skills:
         config.languages.insert("base".to_string(), LanguageConfig {
             includes: vec![],
             files:    vec![],
-            skills:   vec![SkillDefinition { name: "base-skill".to_string(), source: "https://example.com/base-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/base-skill".to_string(), target: None }]
         });
         config.languages.insert("mid".to_string(), LanguageConfig {
             includes: vec!["base".to_string()],
             files:    vec![],
-            skills:   vec![SkillDefinition { name: "mid-skill".to_string(), source: "https://example.com/mid-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/mid-skill".to_string(), target: None }]
         });
         config.languages.insert("top".to_string(), LanguageConfig {
             includes: vec!["mid".to_string()],
             files:    vec![],
-            skills:   vec![SkillDefinition { name: "top-skill".to_string(), source: "https://example.com/top-skill".to_string() }]
+            skills:   vec![SkillDefinition { source: "https://example.com/top-skill".to_string(), target: None }]
         });
 
         let skills = resolve_language_skills("top", &config)?;
         assert_eq!(skills.len(), 3);
-        assert_eq!(skills[0].name, "base-skill");
-        assert_eq!(skills[1].name, "mid-skill");
-        assert_eq!(skills[2].name, "top-skill");
+        assert_eq!(skills[0].derive_name(), "base-skill");
+        assert_eq!(skills[1].derive_name(), "mid-skill");
+        assert_eq!(skills[2].derive_name(), "top-skill");
         Ok(())
     }
 

@@ -277,8 +277,8 @@ impl FileTracker
         }
 
         // Adopt agent instruction files (category "agent") for all known agents.
-        // Only workspace-scoped FILE markers are adopted; directory markers (used by
-        // agents such as Claude and Cursor that create their own directory) are skipped.
+        // Agent markers are directories used for detection, not managed files, so they
+        // are skipped here and skills/prompts are adopted by the directory scans below.
         for agent_name in agent_defaults::known_agents()
         {
             if let Some(defaults) = agent_defaults::get_defaults(agent_name)
@@ -818,8 +818,8 @@ mod tests
 
         // AGENTS.md → "main"
         fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-        // opencode.json is a file-based workspace marker (OpenCode creates it)
-        fs::write(workspace.join("opencode.json"), b"{}")?;
+        // .opencode is the workspace marker for OpenCode.
+        fs::create_dir_all(workspace.join(".opencode"))?;
         // Claude skill and command (adopted via skill/command dir scans, not marker)
         fs::create_dir_all(workspace.join(".claude/skills/git-workflow"))?;
         fs::write(workspace.join(".claude/skills/git-workflow/SKILL.md"), b"# Skill")?;
@@ -830,14 +830,13 @@ mod tests
         assert_eq!(tracker.get_entries().len(), 0);
 
         let adopted = tracker.adopt_untracked_files(workspace)?;
-        assert_eq!(adopted, 4);
+        assert_eq!(adopted, 3);
 
         let entries = tracker.get_entries();
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.len(), 3);
 
         let categories: Vec<&str> = entries.iter().map(|(_, m)| m.category.as_str()).collect();
         assert!(categories.contains(&"main"));
-        assert!(categories.contains(&"agent"));
         assert!(categories.contains(&"skill"));
         assert!(categories.contains(&"command"));
 
