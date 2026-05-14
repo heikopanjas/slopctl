@@ -860,7 +860,9 @@ One AGENTS.md for all agents. Agent-specific files (e.g. CLAUDE.md) reference AG
 
 ## Supported Languages
 
-Currently configured in `templates.yml`:
+The default `templates/v5/templates.yml` is a starter catalog, not a hard-coded language list. It ships useful examples for common languages, but language support is data-driven: add a new entry under `languages:` and provide the referenced files or skills in your template source.
+
+Currently configured in the default template catalog:
 
 - **C** - C programming language (skills: `c-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
 - **C++** - C++ programming language (skills: `cpp-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
@@ -869,6 +871,8 @@ Currently configured in `templates.yml`:
 - **SwiftUI** - SwiftUI framework (includes all Swift skills and config files plus `swiftui-pro` skill)
 
 Coding conventions and build commands are installed as [Agent Skills](https://agentskills.io) rather than fragments merged into AGENTS.md. A slim hint fragment is merged into AGENTS.md to inform agents that skills are available. Additional language templates can be added to `templates.yml` configuration.
+
+Supported agents are different: slopctl has built-in knowledge of agent filesystem conventions (prompt directories, skill directories, workspace detection markers). You can customize the files for known agents in `templates.yml`, but adding a new agent requires slopctl support in the binary.
 
 ## How It Works
 
@@ -1019,6 +1023,8 @@ Each entry in `directories` has a single field:
 
 The `templates.yml` file defines the template structure with a version field and multiple sections:
 
+The bundled `templates/v5/templates.yml` should be read as an example catalog. It demonstrates how to model languages, shared groups, agent prompts, integrations, and skills. You can replace or extend the language section for your own stack without changing slopctl itself, as long as the referenced source files exist in your template cache or use explicit full GitHub URLs.
+
 **Version Field:**
 
 - `version: 5` (default) - Agent, language, and shared group skill associations, composable languages
@@ -1127,6 +1133,29 @@ mission:
     - source: mission-statement.md
       target: '$instructions'
 ```
+
+**Example custom language: Elixir**
+
+To add Elixir support, add a language entry to your template catalog and provide the referenced files in the same template source. slopctl does not need Elixir-specific code:
+
+```yaml
+languages:
+  elixir:
+    files:
+      - source: elixir-skills-hint.md
+        target: '$instructions'
+      - source: elixir-format.exs
+        target: '$workspace/.formatter.exs'
+      - source: elixir-git-ignore.txt
+        target: '$workspace/.gitignore'
+    skills:
+      - source: 'skills/elixir-coding-conventions'
+        target: '$workspace'
+      - source: 'skills/mix-build-commands'
+        target: '$workspace'
+```
+
+With that catalog installed, `slopctl init --lang elixir` resolves these files and skills the same way as Rust, Swift, or any other language.
 
 ### `includes`: Composable Languages and Shared Groups
 
