@@ -16,11 +16,11 @@
 slopctl is a command-line tool that helps you:
 
 - **Manage templates globally** – Store templates in platform-specific directories (e.g., `~/Library/Application Support/slopctl/templates` on macOS)
-- **Configure via YAML** – Define template structure and file mappings in `templates.yml`
+- **Configure via YAML** – Define template structure in `templates.yml` and agent filesystem defaults in `agent-defaults.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – Follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
 - **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates; local directories and full GitHub URLs are supported in `templates.yml`
-- **Keep templates synchronized** – Update global templates from remote sources
+- **Keep catalogs synchronized** – Update global templates and agent defaults from remote sources
 - **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
 - **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`; run `doctor --smart` for AI-assisted linting of `AGENTS.md`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
@@ -59,6 +59,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 
 ```bash
 slopctl templates --update            # Downloads V5 templates
+slopctl agents --update               # Downloads agent filesystem defaults
 slopctl init --lang rust           # With language conventions
 slopctl init --agent cursor        # Agent only (AGENTS.md + agent prompts, no language files)
 ```
@@ -417,6 +418,31 @@ slopctl templates --update --verify --list
 
 **Note:** Run `templates --update` first to download templates before using `init` to set up a project.
 
+### `agents` - Manage Global Agent Defaults Catalog
+
+Download, update, verify, or browse the global agent defaults catalog. This catalog defines agent filesystem conventions such as prompt directories, skill directories, workspace detection markers, and whether an agent reads `.agents/skills/`.
+
+**Usage:**
+
+```bash
+slopctl agents --update [--from <PATH or URL>] [--dry-run]
+slopctl agents --verify [--from <PATH or URL>]
+slopctl agents --list
+slopctl agents --update --verify --list
+```
+
+**Options:**
+
+- `--update` / `-u` - Download or update global agent defaults from source
+- `--verify` / `-V` - Validate local `agent-defaults.yml` and compare it with the configured source
+- `--list` / `-l` - Show known agents and their default prompt, skill, and marker paths
+- `--from` / `-f` - Path or URL used by `--update` and `--verify`
+- `--dry-run` / `-n` - Preview what would be downloaded (requires `--update`)
+
+At least one of `--update`, `--verify`, or `--list` is required. All three can be combined; execution order is `--update` → `--verify` → `--list`.
+
+`templates --update` bootstraps `agent-defaults.yml` only when it is missing. After that, use `agents --update` to update agent defaults independently from templates.
+
 ### `init` - Initialize Agent Instructions and Skills
 
 Initialize instruction files and skills for AI coding agents in your project.
@@ -772,7 +798,7 @@ slopctl config --global --delete <k>  # Delete from global configuration
 
 Configuration keys follow the convention `<command>.<parameter>`, e.g. `templates.uri` configures the `templates` command and `merge.provider` configures the `merge` command.
 
-`templates.uri` and `templates.fallbackUri` accept either a remote URL or a local filesystem path, so the same key works for `https://github.com/...` sources and for `/local/path/to/templates`.
+`templates.uri`, `templates.fallbackUri`, `agents.uri`, and `agents.fallbackUri` accept either a remote URL or a local filesystem path, so the same key works for `https://github.com/...` sources and local catalog directories.
 
 **Examples:**
 
@@ -801,6 +827,9 @@ slopctl config --global --delete templates.uri
 # Set fallback source for resilience (global)
 slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl/tree/develop/templates
 
+# Set an independent agent defaults source
+slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/templates
+
 # Set default LLM provider for merge (workspace-specific)
 slopctl config --set merge.provider anthropic
 
@@ -812,6 +841,8 @@ slopctl config --global --set merge.model claude-sonnet-4-20250514
 
 - `templates.uri` - Default template source (URL or local filesystem path) used by `templates --update` and `init` when `--from` is not specified
 - `templates.fallbackUri` - Fallback source (URL or local filesystem path) used when the primary source fails or is unreachable
+- `agents.uri` - Default agent defaults source used by `agents --update`; also used by `templates --update` when bootstrapping missing agent defaults
+- `agents.fallbackUri` - Fallback source for agent defaults when the primary source fails or is unreachable
 - `merge.provider` - Default LLM provider for the `merge` command (openai, anthropic, ollama, mistral)
 - `merge.model` - Default model for the `merge` command (e.g., `gpt-4o`, `claude-sonnet-4-20250514`)
 
@@ -823,14 +854,16 @@ slopctl config --global --set merge.model claude-sonnet-4-20250514
 
 **Precedence:**
 
-Consumer commands (`templates --update`, `init`, `merge`, `list-models`) read the effective merged config. For each key, the workspace value wins; if not set there, the global value is used. This allows setting shared defaults globally while overriding per-project as needed.
+Consumer commands (`templates --update`, `agents --update`, `init`, `merge`, `list-models`) read the effective merged config. For each key, the workspace value wins; if not set there, the global value is used. This allows setting shared defaults globally while overriding per-project as needed.
 
 **Behavior:**
 
 - Configuration persists between sessions
 - `templates --update` command uses `templates.uri` if set and `--from` not specified
+- `agents --update` command uses `agents.uri` if set and `--from` not specified
 - `init` command uses `templates.uri` when downloading missing global templates
 - If primary source fails and `templates.fallbackUri` is configured, automatically tries the fallback
+- If missing during `templates --update`, `agent-defaults.yml` is bootstrapped from `agents.uri`, then the template source, then the default repository
 - Empty configuration file is valid (all defaults used)
 - `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
 
@@ -872,7 +905,7 @@ Currently configured in the default template catalog:
 
 Coding conventions and build commands are installed as [Agent Skills](https://agentskills.io) rather than fragments merged into AGENTS.md. A slim hint fragment is merged into AGENTS.md to inform agents that skills are available. Additional language templates can be added to `templates.yml` configuration.
 
-Supported agents are different: slopctl has built-in knowledge of agent filesystem conventions (prompt directories, skill directories, workspace detection markers). You can customize the files for known agents in `templates.yml`, but adding a new agent requires slopctl support in the binary.
+Supported agents are also data-driven: `agent-defaults.yml` defines agent filesystem conventions (prompt directories, skill directories, workspace detection markers). You can update these defaults with `slopctl agents --update` without recompiling slopctl.
 
 ## How It Works
 
@@ -887,6 +920,7 @@ Templates are stored in platform-specific directories:
 Templates include:
 
 - **templates.yml**: Configuration file defining structure and file mappings (with version field)
+- **agent-defaults.yml**: Configuration file defining known agent filesystem conventions
 - **Main template**: AGENTS.md (primary instruction file)
 - **Language fragments**: Language-specific coding standards and build commands - merged into AGENTS.md
 - **Integration fragments**: Tool/workflow templates (e.g., git-workflow-conventions.md) - merged into AGENTS.md

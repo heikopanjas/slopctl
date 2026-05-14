@@ -94,6 +94,29 @@ pub enum Commands
         #[arg(short = 'n', long, default_value = "false", requires = "update")]
         dry_run: bool
     },
+    /// Manage global agent defaults catalog
+    Agents
+    {
+        /// Download or update global agent defaults from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show known agents and their default locations
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
+        /// Verify local agent defaults: YAML validity and source freshness
+        #[arg(short = 'V', long, default_value = "false")]
+        verify: bool,
+
+        /// Path or URL to use as source (applies to --update and --verify)
+        #[arg(short, long)]
+        from: Option<String>,
+
+        /// Preview changes without applying them
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
+        dry_run: bool
+    },
     /// Remove installed files from the current workspace
     Remove
     {

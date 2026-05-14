@@ -47,6 +47,8 @@ pub struct Config
     #[serde(default)]
     pub templates: TemplatesConfig,
     #[serde(default)]
+    pub agents:    AgentsConfig,
+    #[serde(default)]
     pub merge:     MergeConfig
 }
 
@@ -57,6 +59,18 @@ pub struct Config
 /// filesystem path (e.g. `/path/to/templates` or `~/work/templates`).
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TemplatesConfig
+{
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri:          Option<String>,
+    #[serde(rename = "fallbackUri", skip_serializing_if = "Option::is_none")]
+    pub fallback_uri: Option<String>
+}
+
+/// Configuration for the `agents` command
+///
+/// `uri` and `fallback_uri` may be either a remote URL or a local filesystem path.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AgentsConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri:          Option<String>,
@@ -192,6 +206,8 @@ impl Config
         {
             | "templates.uri" => self.templates.uri.clone(),
             | "templates.fallbackUri" => self.templates.fallback_uri.clone(),
+            | "agents.uri" => self.agents.uri.clone(),
+            | "agents.fallbackUri" => self.agents.fallback_uri.clone(),
             | "merge.provider" => self.merge.provider.clone(),
             | "merge.model" => self.merge.model.clone(),
             | _ => None
@@ -213,6 +229,16 @@ impl Config
             | "templates.fallbackUri" =>
             {
                 self.templates.fallback_uri = Some(value.to_string());
+                Ok(())
+            }
+            | "agents.uri" =>
+            {
+                self.agents.uri = Some(value.to_string());
+                Ok(())
+            }
+            | "agents.fallbackUri" =>
+            {
+                self.agents.fallback_uri = Some(value.to_string());
                 Ok(())
             }
             | "merge.provider" =>
@@ -246,6 +272,16 @@ impl Config
                 self.templates.fallback_uri = None;
                 Ok(())
             }
+            | "agents.uri" =>
+            {
+                self.agents.uri = None;
+                Ok(())
+            }
+            | "agents.fallbackUri" =>
+            {
+                self.agents.fallback_uri = None;
+                Ok(())
+            }
             | "merge.provider" =>
             {
                 self.merge.provider = None;
@@ -277,6 +313,16 @@ impl Config
             values.insert("templates.fallbackUri".to_string(), fallback_uri.clone());
         }
 
+        if let Some(uri) = &self.agents.uri
+        {
+            values.insert("agents.uri".to_string(), uri.clone());
+        }
+
+        if let Some(fallback_uri) = &self.agents.fallback_uri
+        {
+            values.insert("agents.fallbackUri".to_string(), fallback_uri.clone());
+        }
+
         if let Some(provider) = &self.merge.provider
         {
             values.insert("merge.provider".to_string(), provider.clone());
@@ -293,7 +339,7 @@ impl Config
     /// Get list of all valid config keys
     pub fn valid_keys() -> Vec<&'static str>
     {
-        vec!["templates.uri", "templates.fallbackUri", "merge.provider", "merge.model"]
+        vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "merge.provider", "merge.model"]
     }
 }
 
@@ -370,6 +416,8 @@ mod tests
         let config = Config::default();
         assert!(config.templates.uri.is_none() == true);
         assert!(config.templates.fallback_uri.is_none() == true);
+        assert!(config.agents.uri.is_none() == true);
+        assert!(config.agents.fallback_uri.is_none() == true);
     }
 
     #[test]
@@ -387,6 +435,24 @@ mod tests
         let mut config = Config::default();
         config.set("templates.fallbackUri", "https://fallback.com")?;
         assert_eq!(config.get("templates.fallbackUri").ok_or_else(|| anyhow::anyhow!("templates.fallbackUri not set"))?, "https://fallback.com");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_get_set_agents_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("agents.uri", "https://example.com/agents")?;
+        assert_eq!(config.get("agents.uri").ok_or_else(|| anyhow::anyhow!("agents.uri not set"))?, "https://example.com/agents");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_get_set_agents_fallback_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("agents.fallbackUri", "https://fallback.com/agents")?;
+        assert_eq!(config.get("agents.fallbackUri").ok_or_else(|| anyhow::anyhow!("agents.fallbackUri not set"))?, "https://fallback.com/agents");
         Ok(())
     }
 
@@ -435,6 +501,16 @@ mod tests
     }
 
     #[test]
+    fn test_config_unset_agents_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("agents.uri", "https://example.com/agents")?;
+        config.unset("agents.uri")?;
+        assert!(config.get("agents.uri").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
     fn test_config_unset_unknown_key()
     {
         let mut config = Config::default();
@@ -467,7 +543,7 @@ mod tests
     fn test_config_valid_keys()
     {
         let keys = Config::valid_keys();
-        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "merge.provider", "merge.model"]);
+        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "merge.provider", "merge.model"]);
     }
 
     #[test]

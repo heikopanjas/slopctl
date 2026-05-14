@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.0.0)
+**Last updated:** 2026-05-14 (v20.1.0)
 
 <!-- {mission} -->
 
@@ -13,7 +13,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
-- **Serialization:** serde + serde_yaml for templates.yml and file tracker, serde_json for legacy migration
+- **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
@@ -824,6 +824,16 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-14 (v20.1.0, YAML-backed agent defaults)
+
+- Added `templates/v5/agent-defaults.yml` as the data source for agent filesystem conventions: workspace markers, prompt directories, skill directories, userprofile skill directories, and cross-client skill support
+- Refactored `src/agent_defaults.rs` to load the cached `agent-defaults.yml` catalog with an embedded fallback, while preserving the existing borrowed lookup helper API for current call sites
+- Added `slopctl agents` as a catalog-management subcommand mirroring `slopctl templates`: `--update`, `--verify`, `--list`, `--from`, and `--dry-run`
+- Added `agents.uri` and `agents.fallbackUri` config keys so agent defaults can be updated independently from templates
+- `slopctl templates --update` now bootstraps `agent-defaults.yml` only when the cached file is missing; existing agent defaults are left untouched so `slopctl agents --update` remains the normal update path
+- Rationale: coding-agent filesystem conventions change independently from slopctl releases, so they should be data-driven and updateable without recompiling the CLI
+- Version bump: 20.0.0 → 20.1.0 (MINOR — new `agents` subcommand and runtime-updateable agent defaults)
 
 ### 2026-05-14 (v20.0.0, remove workspace_skill_dir override)
 

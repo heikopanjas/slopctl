@@ -1,5 +1,6 @@
 //! Template management functionality for slopctl
 
+mod agents;
 mod doctor;
 mod list;
 mod merge;

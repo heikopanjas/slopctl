@@ -183,6 +183,10 @@ Home: `~/.config/opencode/`
 
 All paths use Unix notation; `~` = `%USERPROFILE%` on Windows. `$CODEX_HOME`, `$VIBE_HOME` override their respective defaults.
 
+### slopctl agent defaults
+
+slopctl keeps the agent filesystem conventions from this document in `agent-defaults.yml`, stored next to `templates.yml` in the global template cache. Use `slopctl agents --update` to refresh agent prompt, skill, marker, and cross-client-skill defaults independently from templates. `slopctl templates --update` bootstraps this file only when it is missing.
+
 ---
 
 *Last verified: 2026-05-09*
