@@ -239,6 +239,12 @@ pub fn get_workspace_marker_dirs_from_catalog(catalog: &AgentCatalog, agent: &st
     get_catalog_entry(catalog, agent).map(|entry| entry.markers.iter().map(|marker| workspace.join(marker)).collect()).unwrap_or_default()
 }
 
+/// Return the names of all agents in a specific catalog
+pub fn list_agent_names_from_catalog(catalog: &AgentCatalog) -> Vec<&str>
+{
+    catalog.agents.iter().map(|entry| entry.name.as_str()).collect()
+}
+
 /// Detect all agents installed in a workspace using a specific catalog
 pub fn detect_all_installed_agents_from_catalog(catalog: &AgentCatalog, workspace: &Path) -> Vec<String>
 {

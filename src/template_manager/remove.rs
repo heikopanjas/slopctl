@@ -48,6 +48,7 @@ impl TemplateManager
 
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
+        let mut dirs_to_cleanup: Vec<PathBuf> = Vec::new();
 
         // Collect agent files when agent or --all is requested.
         // Tries BoM first (templates.yml); falls back to FileTracker when the
@@ -181,6 +182,7 @@ impl TemplateManager
                 }
 
                 description_parts.push(format!("agent '{}'", agent_name.yellow()));
+                dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &current_dir));
             }
             else
             {
@@ -249,6 +251,10 @@ impl TemplateManager
                 }
 
                 description_parts.push("all agents and skills".to_string());
+                for name in agent_defaults::list_agent_names_from_catalog(&agent_catalog)
+                {
+                    dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, name, &current_dir));
+                }
             }
         }
 
@@ -363,6 +369,14 @@ impl TemplateManager
                 println!("  {} {}", "●".red(), file.display());
             }
 
+            for dir in &dirs_to_cleanup
+            {
+                if dir.exists() == true
+                {
+                    println!("  {} {} (removed if empty)", "○".yellow(), dir.display());
+                }
+            }
+
             println!("\n{} Dry run complete. No files were modified.", "✓".green());
             return Ok(());
         }
@@ -401,6 +415,14 @@ impl TemplateManager
         }
 
         file_tracker.save()?;
+
+        for dir in &dirs_to_cleanup
+        {
+            if dir.exists() == true && fs::remove_dir(dir).is_ok() == true
+            {
+                println!("{} Removed empty directory {}", "✓".green(), dir.display());
+            }
+        }
 
         println!("\n{} Removed {} file(s) for {}", "✓".green(), removed_count, description);
 
@@ -476,6 +498,18 @@ impl TemplateManager
         }
 
         file_tracker.save()?;
+
+        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        for name in agent_defaults::list_agent_names_from_catalog(&agent_catalog)
+        {
+            for dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, name, &current_dir)
+            {
+                if dir.exists() == true && fs::remove_dir(&dir).is_ok() == true
+                {
+                    println!("{} Removed empty directory {}", "✓".green(), dir.display());
+                }
+            }
+        }
 
         if agents_md_skipped == true
         {
@@ -1081,6 +1115,65 @@ mod tests
         assert!(result.is_ok() == true);
         // The cross-client skill must be deleted because this was the last cross-client agent.
         assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_cleans_up_empty_marker_dir() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None)])?;
+
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&agent_file, "test")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("bogus"), None, true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(agent_file.exists() == false);
+        assert!(workspace.path().join(".bogus").exists() == false, ".bogus/ should be removed when empty");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_keeps_nonempty_marker_dir() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None)])?;
+
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        let user_file = workspace.path().join(".bogus/user-notes.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&agent_file, "test")?;
+        fs::write(&user_file, "my notes")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("bogus"), None, true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(agent_file.exists() == false);
+        assert!(workspace.path().join(".bogus").exists() == true, ".bogus/ should be kept when non-empty");
+        assert!(user_file.exists() == true, "user file in .bogus/ must not be deleted");
         Ok(())
     }
 }

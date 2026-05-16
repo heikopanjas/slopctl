@@ -1,6 +1,6 @@
 # slopctl Roadmap
 
-**Last updated:** 2026-04-18
+**Last updated:** 2026-05-16
 
 This document indexes planned work for slopctl. Each plan originated
 in a Cursor chat session; the links below point to the original
@@ -16,6 +16,30 @@ transcripts so future sessions can pick up context quickly.
   features rather than Codex-specific fields. Cursor, Claude Code, and
   Copilot have their own emerging patterns; a good abstraction should
   cover all of them uniformly.
+
+---
+
+## Planned: release artifacts and corporate licensing
+
+For downstream corporate use, legal and security teams often expect
+self-contained artifacts and dependency transparency.
+
+- **Template package (CI release asset):** Bundle the repository root
+  `LICENSE` (MIT) inside the template tarball/zip alongside
+  `templates/v5/` (and any other shipped paths) so installs that do not
+  clone the full repo still carry explicit license text.
+- **Binary releases:** Ship `LICENSE` next to each binary (standalone
+  upload) or inside the same archive as the binary (e.g.
+  `slopctl-<version>-<target>.tar.gz` containing `slopctl` + `LICENSE`).
+  The binary itself does not embed license text; MIT does not require
+  that, but bundling the file aids audits.
+- **Third-party licenses (optional, enterprise-friendly):** Generate a
+  transitive dependency license manifest (e.g. `cargo-about`) in CI and
+  attach it as a release asset such as `THIRD-PARTY-LICENSES.html` for
+  SBOM-style review.
+- **Implementation hook:** Extend `.github/workflows/release.yml` (or
+  the step that assembles artifacts) to copy `LICENSE` into staging
+  before creating archives so this stays automatic per release.
 
 ---
 
