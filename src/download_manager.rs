@@ -15,7 +15,8 @@ use crate::{
     Result,
     agent_defaults::{self, AGENT_DEFAULTS_FILE},
     bom::TemplateConfig,
-    github
+    github,
+    model_defaults::{self, MODEL_DEFAULTS_FILE}
 };
 
 /// Manages downloading templates from remote sources
@@ -205,6 +206,59 @@ impl DownloadManager
             {
                 println!("{}", "✗".red());
                 Err(anyhow::anyhow!("Failed to download {}: {}", AGENT_DEFAULTS_FILE, e))
+            }
+        }
+    }
+
+    /// Downloads the model defaults catalog from a GitHub URL
+    ///
+    /// Downloads only `model-defaults.yml` into the global template cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - GitHub URL to download from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if URL parsing or download fails
+    pub fn download_model_defaults_from_url(&self, url: &str) -> Result<()>
+    {
+        let parsed =
+            github::parse_github_url(url).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path"))?;
+
+        println!("{} Repository: {}/{} (branch: {})", "→".blue(), parsed.owner.green(), parsed.repo.green(), parsed.branch.yellow());
+
+        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", parsed.owner, parsed.repo, parsed.branch);
+        let url_path = if parsed.path.is_empty() == false
+        {
+            format!("/{}", parsed.path)
+        }
+        else
+        {
+            String::new()
+        };
+
+        let catalog_url = format!("{}{}/{}", base_url, url_path, MODEL_DEFAULTS_FILE);
+        let temp_dir = tempfile::TempDir::new()?;
+        let temp_path = temp_dir.path().join(MODEL_DEFAULTS_FILE);
+
+        print!("{} Downloading {}... ", "→".blue(), MODEL_DEFAULTS_FILE.yellow());
+        io::stdout().flush()?;
+
+        match github::download_file(&catalog_url, &temp_path)
+        {
+            | Ok(_) =>
+            {
+                model_defaults::load_model_catalog_file(&temp_path)?;
+                fs::create_dir_all(&self.config_dir)?;
+                fs::copy(&temp_path, self.config_dir.join(MODEL_DEFAULTS_FILE))?;
+                println!("{}", "✓".green());
+                Ok(())
+            }
+            | Err(e) =>
+            {
+                println!("{}", "✗".red());
+                Err(anyhow::anyhow!("Failed to download {}: {}", MODEL_DEFAULTS_FILE, e))
             }
         }
     }

@@ -83,62 +83,6 @@ You are a file merge assistant that combines user-customized configuration files
 
 impl TemplateManager
 {
-    /// Lists available models from the selected LLM provider
-    ///
-    /// When `provider_override` is supplied it is used directly; otherwise the
-    /// provider is resolved from config (`merge.provider`) or env auto-detect.
-    /// The currently configured default model is marked in the output.
-    ///
-    /// # Arguments
-    ///
-    /// * `provider_override` - Optional CLI-supplied provider name (overrides config/env)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if provider resolution or the API call fails
-    pub fn list_models(&self, provider_override: Option<&str>) -> Result<()>
-    {
-        let (provider_name, model_name) = if let Some(p) = provider_override
-        {
-            let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
-            let model = config.as_ref().and_then(|c| c.get("merge.model"));
-            let provider_enum = Provider::from_name(p)?;
-            let effective_model = model.clone().unwrap_or_else(|| provider_enum.default_model().to_string());
-            println!("{} Using provider: {} ({})", "→".blue(), p.green(), effective_model.yellow());
-            (p.to_string(), model)
-        }
-        else
-        {
-            Self::resolve_provider_and_model()?
-        };
-        let provider_enum = Provider::from_name(&provider_name)?;
-        let default_model = model_name.as_deref().unwrap_or(provider_enum.default_model());
-
-        let client = LlmClient::new(provider_enum, None)?;
-        let models = client.list_models()?;
-
-        if models.is_empty() == true
-        {
-            println!("{} No models found from {}", "→".blue(), provider_name.yellow());
-            return Ok(());
-        }
-
-        println!("{}", format!("Models available from {}:", provider_name).bold());
-        for m in &models
-        {
-            if m == default_model
-            {
-                println!("  {} {}", m.green(), "(default)".dimmed());
-            }
-            else
-            {
-                println!("  {}", m);
-            }
-        }
-
-        Ok(())
-    }
-
     /// AI-assisted merge of customized workspace files with updated templates
     ///
     /// Follows the same file-resolution pipeline as `init`, but differs in conflict
