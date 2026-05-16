@@ -220,8 +220,9 @@ fn test_init_bogus_with_rpp() -> anyhow::Result<()>
     assert!(bogus_skills.exists() == true, "native skill dir must exist for bogus");
     assert!(has_skill_md_under(&bogus_skills) == true, "skills must be installed in .bogus/skills/");
 
-    // Tracker assertions
-    let tracker = FileTracker::new(workspace.path())?;
+    // Tracker assertions — use current_dir() for consistency with production code on Windows
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
     assert_eq!(tracker.get_installed_language(), Some("Rust++".to_string()));
 
     Ok(())
@@ -247,7 +248,7 @@ fn test_init_fake_with_rpp() -> anyhow::Result<()>
     assert!(cross_client_skills.exists() == true, "cross-client skill dir must exist");
     assert!(has_skill_md_under(&cross_client_skills) == true, "skills must be installed in .agents/skills/");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert_eq!(tracker.get_installed_language(), Some("Rust++".to_string()));
 
     Ok(())
@@ -274,7 +275,7 @@ fn test_init_foobar_with_cppscript() -> anyhow::Result<()>
     // CppScript includes cmake shared group — cmake-build-commands skill must be present
     assert!(cross_client_skills.join("cmake-build-commands/SKILL.md").exists() == true, "cmake skill inherited via shared include must exist");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert_eq!(tracker.get_installed_language(), Some("CppScript".to_string()));
 
     Ok(())
@@ -306,7 +307,7 @@ fn test_init_then_remove_agent_preserves_lang() -> anyhow::Result<()>
     assert!(workspace.path().join(".rpp.toml").exists() == true, "language config must survive agent removal");
     assert!(workspace.path().join("AGENTS.md").exists() == true, "AGENTS.md must survive agent removal");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert_eq!(tracker.get_installed_language(), Some("Rust++".to_string()), "tracker must still report language");
 
     Ok(())
@@ -334,7 +335,7 @@ fn test_init_then_remove_lang_preserves_agent() -> anyhow::Result<()>
     assert!(workspace.path().join(".bogus/instructions.md").exists() == true, "agent file must survive lang removal");
     assert!(workspace.path().join("AGENTS.md").exists() == true, "AGENTS.md must survive lang removal");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert!(tracker.get_installed_language().is_none() == true, "tracker must report no language after removal");
 
     Ok(())
@@ -358,7 +359,7 @@ fn test_init_then_remove_agent_then_remove_lang_leaves_clean() -> anyhow::Result
     assert!(workspace.path().join(".rpp.toml").exists() == false, "language file must be gone");
     assert!(workspace.path().join(".fake").exists() == false, "agent marker dir must be gone");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert!(tracker.get_installed_language().is_none() == true);
 
     let agent_entries = tracker.get_entries_by_category("agent");
@@ -411,7 +412,7 @@ fn test_init_agent_then_different_agent_coexist() -> anyhow::Result<()>
     assert!(workspace.path().join(".fake").exists() == true, "fake marker must exist after second init");
 
     // Both agents have tracked files
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     let agent_entries = tracker.get_entries_by_category("agent");
     assert!(agent_entries.len() >= 2, "both agents should have tracked entries");
 
@@ -429,7 +430,7 @@ fn test_init_lang_then_different_lang_blocked() -> anyhow::Result<()>
     std::env::set_current_dir(workspace.path())?;
 
     fixture.init(Some("fake"), Some("Rust++"))?;
-    assert_eq!(FileTracker::new(workspace.path())?.get_installed_language(), Some("Rust++".to_string()));
+    assert_eq!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language(), Some("Rust++".to_string()));
 
     // Attempting a different language must fail
     let result = fixture.init(Some("fake"), Some("CppScript"));
@@ -456,12 +457,12 @@ fn test_remove_lang_then_init_different_lang_succeeds() -> anyhow::Result<()>
 
     fixture.remove_lang("Rust++")?;
     assert!(workspace.path().join(".rpp.toml").exists() == false);
-    assert!(FileTracker::new(workspace.path())?.get_installed_language().is_none() == true);
+    assert!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language().is_none() == true);
 
     // Now a different language must be accepted
     fixture.init(Some("fake"), Some("CppScript"))?;
     assert!(workspace.path().join(".cppscript-format").exists() == true, "new language file must appear");
-    assert_eq!(FileTracker::new(workspace.path())?.get_installed_language(), Some("CppScript".to_string()));
+    assert_eq!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language(), Some("CppScript".to_string()));
 
     Ok(())
 }
@@ -493,7 +494,7 @@ fn test_remove_last_cross_client_cleans_agents_skills() -> anyhow::Result<()>
     assert!(git_skill.exists() == false, "top-level skill must be deleted when last cross-client agent removed");
 
     // Language skills must survive (owned by Rust++, not by the agent)
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert_eq!(tracker.get_installed_language(), Some("Rust++".to_string()), "language must still be installed");
 
     Ok(())
@@ -538,12 +539,12 @@ fn test_doctor_clean_after_init() -> anyhow::Result<()>
 
     fixture.init(Some("fake"), Some("Rust++"))?;
 
-    let entries_before = FileTracker::new(workspace.path())?.get_entries().len();
+    let entries_before = FileTracker::new(&std::env::current_dir()?)?.get_entries().len();
 
     // Doctor on a clean workspace must succeed and not modify the tracker
     fixture.doctor(false, false)?;
 
-    let entries_after = FileTracker::new(workspace.path())?.get_entries().len();
+    let entries_after = FileTracker::new(&std::env::current_dir()?)?.get_entries().len();
     assert_eq!(entries_before, entries_after, "doctor must not modify tracker on a clean workspace");
 
     Ok(())
@@ -567,13 +568,13 @@ fn test_doctor_detects_missing_file_after_deletion() -> anyhow::Result<()>
     fixture.doctor(false, false)?;
 
     // The tracker still has the entry (fix was not requested)
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     assert!(tracker.get_metadata(&rpp_file).is_some() == true, "tracker must still have the stale entry before fix");
 
     // Doctor with fix: prunes the stale tracker entry
     fixture.doctor(true, false)?;
 
-    let tracker_after = FileTracker::new(workspace.path())?;
+    let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
     assert!(tracker_after.get_metadata(&rpp_file).is_none() == true, "tracker must prune missing file after doctor --fix");
 
     Ok(())
@@ -621,7 +622,7 @@ fn test_doctor_fix_strips_unmerged_marker() -> anyhow::Result<()>
     fs::write(&agents_md, format!("{}\n{}", TEMPLATE_MARKER, content))?;
 
     let new_sha = FileTracker::calculate_sha256(&agents_md)?;
-    let mut tracker = FileTracker::new(workspace.path())?;
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
     tracker.record_installation(&agents_md, new_sha, 5, "Rust++".into(), "all".into(), "main".into());
     tracker.save()?;
 
@@ -838,7 +839,7 @@ fn test_merge_writes_diverged_file_via_llm_hook() -> anyhow::Result<()>
     let final_content = fs::read_to_string(&agents_md)?;
     assert!(final_content.contains("merged way") == true, "AGENTS.md must contain the LLM-merged content");
 
-    let tracker = FileTracker::new(workspace.path())?;
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
     let meta = tracker.get_metadata(&agents_md);
     assert!(meta.is_some() == true, "merged file must be tracked");
 
