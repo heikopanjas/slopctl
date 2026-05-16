@@ -844,7 +844,7 @@ mod tests
         assert!(skill_file.exists() == false);
         assert!(main_file.exists() == true);
         // Tracker consistency invariant: language must no longer be reported as installed
-        let tracker_after = FileTracker::new(workspace.path())?;
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");
         Ok(())
     }
@@ -1338,7 +1338,7 @@ mod tests
         assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
 
         // The critical invariant: status must no longer report CppScript
-        let tracker_after = FileTracker::new(workspace.path())?;
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
         Ok(())
     }
@@ -1387,7 +1387,7 @@ mod tests
         assert!(cc_skill_file.exists() == false, "cross-client lang skill must be removed");
         assert!(native_skill_file.exists() == false, "adopted native-agent copy must also be removed");
 
-        let tracker_after = FileTracker::new(workspace.path())?;
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");
         Ok(())
     }
@@ -1417,7 +1417,7 @@ mod tests
         assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --agent");
 
         // Tracker must still report CppScript as installed
-        let tracker_after = FileTracker::new(workspace.path())?;
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert_eq!(tracker_after.get_installed_language(), Some("CppScript".to_string()), "tracker must still report language after agent removal");
         Ok(())
     }
@@ -1444,7 +1444,7 @@ mod tests
         assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
 
         // Tracker must no longer report any language
-        let tracker_after = FileTracker::new(workspace.path())?;
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
         Ok(())
     }
