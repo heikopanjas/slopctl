@@ -10,6 +10,8 @@ mod smart;
 mod update;
 mod verify;
 
+#[cfg(test)] mod integration_tests;
+
 use std::{
     ffi::OsStr,
     fs, io,

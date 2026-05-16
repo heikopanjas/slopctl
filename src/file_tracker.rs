@@ -554,12 +554,18 @@ agents:
       - .bogus
     prompt_dir: '$workspace/.bogus/commands'
     skill_dir: '$workspace/.bogus/skills'
-    reads_cross_client_skills: true
+    reads_cross_client_skills: false
   - name: fake
     markers:
       - .fake
     prompt_dir: '$workspace/.fake/commands'
     skill_dir: '$workspace/.fake/skills'
+    reads_cross_client_skills: true
+  - name: foobar
+    markers:
+      - .foobar
+    prompt_dir: '$workspace/.foobar/commands'
+    skill_dir: '$workspace/.agents/skills'
     reads_cross_client_skills: true
 "#
         )

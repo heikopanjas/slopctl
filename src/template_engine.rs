@@ -1796,7 +1796,7 @@ languages:
         let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus: {}\nlanguages: {}\nintegration: {}\n";
         fs::write(config_dir.path().join("templates.yml"), yaml)?;
         fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
@@ -1859,7 +1859,7 @@ languages:
         std::env::set_current_dir(workspace.path())?;
 
         setup_skill_routing_config(config_dir.path(), "rpp-skill", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions { lang: Some("Rust++"), agent: Some("bogus"), mission: None, force: false, dry_run: false };
@@ -1881,7 +1881,7 @@ languages:
     }
 
     #[test]
-    fn test_lang_skills_route_to_cross_client_for_bogus() -> anyhow::Result<()>
+    fn test_lang_skills_route_to_cross_client_for_fake() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1889,11 +1889,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_skill_routing_config(config_dir.path(), "rpp-skill", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &["fake"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("fake"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1904,7 +1904,7 @@ languages:
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
         for t in &skill_targets
         {
-            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for bogus, got: {}", t);
+            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for fake, got: {}", t);
         }
 
         Ok(())
@@ -1929,13 +1929,14 @@ languages:
         Ok(())
     }
 
-    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool)]) -> anyhow::Result<()>
+    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool, Option<&str>)]) -> anyhow::Result<()>
     {
         let entries = agents
             .iter()
-            .map(|(name, reads_cross_client_skills)| {
+            .map(|(name, reads_cross_client_skills, skill_dir_override)| {
+                let skill = skill_dir_override.map(|d| format!("'{d}'")).unwrap_or_else(|| format!("'$workspace/.{name}/skills'"));
                 format!(
-                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: '$workspace/.{name}/skills'\n    \
+                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: {skill}\n    \
                      reads_cross_client_skills: {reads_cross_client_skills}\n"
                 )
             })
@@ -1946,7 +1947,7 @@ languages:
     }
 
     #[test]
-    fn test_toplevel_skills_route_to_cross_client_for_bogus_from_defaults() -> anyhow::Result<()>
+    fn test_toplevel_skills_route_to_cross_client_for_fake_from_defaults() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1954,11 +1955,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["fake"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1969,8 +1970,8 @@ languages:
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
         for target in &skill_targets
         {
-            assert!(target.contains(".agents/skills"), "skill target should be in .agents/skills/ for cross-client bogus, got: {}", target);
-            assert!(target.contains(".bogus/skills") == false, "cross-client bogus must not route top-level skills to native dir, got: {}", target);
+            assert!(target.contains(".agents/skills"), "skill target should be in .agents/skills/ for cross-client fake, got: {}", target);
+            assert!(target.contains(".fake/skills") == false, "cross-client fake must not route top-level skills to native dir, got: {}", target);
         }
 
         Ok(())
@@ -1986,7 +1987,7 @@ languages:
         std::env::set_current_dir(workspace.path())?;
 
         setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
@@ -2020,7 +2021,7 @@ languages:
         fs::create_dir_all(&cross_skill)?;
         fs::write(cross_skill.join("SKILL.md"), "# Existing Cross Skill")?;
         setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
@@ -2048,8 +2049,8 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["fake"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
         fs::write(config_dir.path().join("skills/git-workflow/SKILL.md"), source_content)?;
 
         let target = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
@@ -2063,7 +2064,7 @@ languages:
         }
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options)?;
         let plan = engine.preflight_installation(&resolved.context, false, &options, &resolved.files, &resolved.directories, &tracker);
         let _ = std::env::set_current_dir(&original_cwd);
@@ -2188,20 +2189,20 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["fake"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
         let target = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
         fs::create_dir_all(target.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&target, "# Untracked")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
         let result = engine.update(&options);
         let _ = std::env::set_current_dir(&original_cwd);
 
         assert!(result.is_err() == true);
         assert!(workspace.path().join("AGENTS.md").exists() == false);
-        assert!(workspace.path().join(".bogus").exists() == false);
+        assert!(workspace.path().join(".fake").exists() == false);
         Ok(())
     }
 
@@ -2223,7 +2224,7 @@ languages:
         let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus: {}\nlanguages: {}\nintegration: {}\n";
         std::fs::write(config_dir.path().join("templates.yml"), yaml)?;
         std::fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
-        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
