@@ -4,6 +4,7 @@ mod agents;
 mod doctor;
 mod list;
 mod merge;
+mod models;
 mod remove;
 mod smart;
 mod update;

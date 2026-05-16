@@ -206,12 +206,28 @@ pub enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// List available models from an LLM provider
-    ListModels
+    /// Manage global model defaults catalog
+    Models
     {
-        /// LLM provider to query (overrides config and auto-detected provider)
+        /// Download or update global model defaults from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show known providers and their default configurations
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
+        /// Verify local model defaults: YAML validity and source freshness
+        #[arg(short = 'V', long, default_value = "false")]
+        verify: bool,
+
+        /// Path or URL to use as source (applies to --update and --verify)
         #[arg(short, long)]
-        provider: Option<String>
+        from: Option<String>,
+
+        /// Preview changes without applying them
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
+        dry_run: bool
     },
     /// Manage configuration
     Config

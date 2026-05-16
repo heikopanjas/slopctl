@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v20.2.7)
+**Last updated:** 2026-05-16 (v21.0.0)
 
 <!-- {mission} -->
 
@@ -819,6 +819,21 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.0.0, models catalog subcommand)
+
+- **BREAKING**: removed the `list-models` subcommand; replaced with `models`, a full catalog-management command mirroring `agents` and `templates`
+- Added `templates/v5/model-defaults.yml` as the data source for LLM provider configurations: API endpoints, API key environment variables, and default model identifiers
+- Added `src/model_defaults.rs`: `ModelCatalog`/`ProviderEntry` serde structs, embedded fallback via `include_str!`, three loaders (`from_dir`, `cached_from_dir`, `embedded`), `validate_model_catalog`, `OnceLock`-based fast-path helpers (`get_default_model`, `get_endpoint`, `get_models_endpoint`, `get_api_key_env`, `known_providers`)
+- Added `src/template_manager/models.rs`: `has_model_defaults`, `download_or_copy_model_defaults`, `list_models_catalog`, `verify_models` on `TemplateManager`
+- Updated `src/llm.rs`: `Provider::default_model()`, `endpoint()`, `models_endpoint()`, `api_key_env_var()` now read from the model defaults catalog first and fall back to hardcoded compile-time values; updated OpenAI default from `gpt-4o` to `gpt-4.1`, Ollama default from `llama3` to `llama3.2`
+- Updated `src/config.rs`: added `ModelsConfig { uri, fallback_uri }` and `models: ModelsConfig` to `Config`; wired `models.uri`/`models.fallbackUri` into `get`/`set`/`unset`/`list`/`valid_keys`
+- Updated `src/download_manager.rs`: added `download_model_defaults_from_url` with validate-in-tempdir-before-copy pattern
+- Updated `src/main.rs`: added `DEFAULT_MODELS_SOURCE_URL`, `resolve_models_source`, `download_model_defaults_with_fallback`, `bootstrap_model_defaults_if_missing`; `templates --update` now bootstraps `model-defaults.yml` when missing
+- `slopctl models --list` shows the catalog (providers, default models, endpoints) instead of querying the live API
+- `slopctl models --update` / `--verify` / `--from` / `--dry-run` work identically to `slopctl agents`
+- Added `models.uri` and `models.fallbackUri` as new config keys
+- Version bump: 20.2.7 → 21.0.0 (MAJOR — `list-models` subcommand removed, breaking CLI change)
 
 ### 2026-05-16 (v20.2.7, synthetic source fixtures)
 

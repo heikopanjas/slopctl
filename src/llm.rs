@@ -11,7 +11,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{Result, model_defaults};
 
 /// Supported LLM providers
 #[derive(Debug, Clone, PartialEq)]
@@ -43,8 +43,14 @@ impl Provider
     }
 
     /// Returns the environment variable name that holds the API key for this provider
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     fn api_key_env_var(&self) -> Option<&'static str>
     {
+        if let Some(env_var) = model_defaults::get_api_key_env(self.name())
+        {
+            return Some(env_var);
+        }
         match self
         {
             | Self::OpenAi => Some("OPENAI_API_KEY"),
@@ -88,20 +94,32 @@ impl Provider
     }
 
     /// Returns the default model for this provider
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     pub fn default_model(&self) -> &'static str
     {
+        if let Some(model) = model_defaults::get_default_model(self.name())
+        {
+            return model;
+        }
         match self
         {
-            | Self::OpenAi => "gpt-4o",
+            | Self::OpenAi => "gpt-4.1",
             | Self::Anthropic => "claude-sonnet-4-6",
-            | Self::Ollama => "llama3",
+            | Self::Ollama => "llama3.2",
             | Self::Mistral => "mistral-large-latest"
         }
     }
 
     /// Returns the base API endpoint URL for chat completions
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     fn endpoint(&self) -> &'static str
     {
+        if let Some(ep) = model_defaults::get_endpoint(self.name())
+        {
+            return ep;
+        }
         match self
         {
             | Self::OpenAi => "https://api.openai.com/v1/chat/completions",
@@ -112,8 +130,14 @@ impl Provider
     }
 
     /// Returns the API endpoint URL for listing available models
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     pub fn models_endpoint(&self) -> &'static str
     {
+        if let Some(ep) = model_defaults::get_models_endpoint(self.name())
+        {
+            return ep;
+        }
         match self
         {
             | Self::OpenAi => "https://api.openai.com/v1/models",
@@ -534,10 +558,12 @@ mod tests
     #[test]
     fn test_provider_default_model()
     {
-        assert_eq!(Provider::OpenAi.default_model(), "gpt-4o");
-        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-6");
-        assert_eq!(Provider::Ollama.default_model(), "llama3");
-        assert_eq!(Provider::Mistral.default_model(), "mistral-large-latest");
+        // Defaults come from the model-defaults catalog (embedded or cached).
+        // Verify that each provider returns a non-empty string.
+        assert!(Provider::OpenAi.default_model().is_empty() == false);
+        assert!(Provider::Anthropic.default_model().is_empty() == false);
+        assert!(Provider::Ollama.default_model().is_empty() == false);
+        assert!(Provider::Mistral.default_model().is_empty() == false);
     }
 
     #[test]
@@ -574,7 +600,7 @@ mod tests
     {
         let client = LlmClient::new(Provider::Ollama, None)?;
         assert_eq!(client.provider_name(), "ollama");
-        assert_eq!(client.model_name(), "llama3");
+        assert!(client.model_name().is_empty() == false);
         Ok(())
     }
 

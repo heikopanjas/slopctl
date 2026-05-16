@@ -49,6 +49,8 @@ pub struct Config
     #[serde(default)]
     pub agents:    AgentsConfig,
     #[serde(default)]
+    pub models:    ModelsConfig,
+    #[serde(default)]
     pub merge:     MergeConfig
 }
 
@@ -71,6 +73,18 @@ pub struct TemplatesConfig
 /// `uri` and `fallback_uri` may be either a remote URL or a local filesystem path.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AgentsConfig
+{
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri:          Option<String>,
+    #[serde(rename = "fallbackUri", skip_serializing_if = "Option::is_none")]
+    pub fallback_uri: Option<String>
+}
+
+/// Configuration for the `models` command
+///
+/// `uri` and `fallback_uri` may be either a remote URL or a local filesystem path.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct ModelsConfig
 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri:          Option<String>,
@@ -208,6 +222,8 @@ impl Config
             | "templates.fallbackUri" => self.templates.fallback_uri.clone(),
             | "agents.uri" => self.agents.uri.clone(),
             | "agents.fallbackUri" => self.agents.fallback_uri.clone(),
+            | "models.uri" => self.models.uri.clone(),
+            | "models.fallbackUri" => self.models.fallback_uri.clone(),
             | "merge.provider" => self.merge.provider.clone(),
             | "merge.model" => self.merge.model.clone(),
             | _ => None
@@ -239,6 +255,16 @@ impl Config
             | "agents.fallbackUri" =>
             {
                 self.agents.fallback_uri = Some(value.to_string());
+                Ok(())
+            }
+            | "models.uri" =>
+            {
+                self.models.uri = Some(value.to_string());
+                Ok(())
+            }
+            | "models.fallbackUri" =>
+            {
+                self.models.fallback_uri = Some(value.to_string());
                 Ok(())
             }
             | "merge.provider" =>
@@ -282,6 +308,16 @@ impl Config
                 self.agents.fallback_uri = None;
                 Ok(())
             }
+            | "models.uri" =>
+            {
+                self.models.uri = None;
+                Ok(())
+            }
+            | "models.fallbackUri" =>
+            {
+                self.models.fallback_uri = None;
+                Ok(())
+            }
             | "merge.provider" =>
             {
                 self.merge.provider = None;
@@ -323,6 +359,16 @@ impl Config
             values.insert("agents.fallbackUri".to_string(), fallback_uri.clone());
         }
 
+        if let Some(uri) = &self.models.uri
+        {
+            values.insert("models.uri".to_string(), uri.clone());
+        }
+
+        if let Some(fallback_uri) = &self.models.fallback_uri
+        {
+            values.insert("models.fallbackUri".to_string(), fallback_uri.clone());
+        }
+
         if let Some(provider) = &self.merge.provider
         {
             values.insert("merge.provider".to_string(), provider.clone());
@@ -339,7 +385,7 @@ impl Config
     /// Get list of all valid config keys
     pub fn valid_keys() -> Vec<&'static str>
     {
-        vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "merge.provider", "merge.model"]
+        vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"]
     }
 }
 
@@ -543,7 +589,7 @@ mod tests
     fn test_config_valid_keys()
     {
         let keys = Config::valid_keys();
-        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "merge.provider", "merge.model"]);
+        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"]);
     }
 
     #[test]
