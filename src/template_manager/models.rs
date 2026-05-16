@@ -236,3 +236,98 @@ fn fetch_remote_model_defaults_yml(source: &str) -> Result<String>
     github::download_file(&url, &dest_path)?;
     Ok(fs::read_to_string(dest_path)?)
 }
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    static TEST_MODEL_YAML: &str =
+        "version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+         default_model: llama3.2\n";
+
+    #[test]
+    fn test_has_model_defaults_true_when_file_exists() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(config_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        assert!(manager.has_model_defaults() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_has_model_defaults_false_when_missing()
+    {
+        let config_dir = tempfile::TempDir::new().unwrap();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        assert!(manager.has_model_defaults() == false);
+    }
+
+    #[test]
+    fn test_list_models_catalog_succeeds() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(config_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.list_models_catalog()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_models_passes_with_matching_source() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(config_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+
+        let source = config_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.verify_models(&source)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_models_detects_stale_local() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let source_dir = tempfile::TempDir::new()?;
+
+        std::fs::write(config_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+        let different =
+            "version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+             default_model: llama4\n";
+        std::fs::write(source_dir.path().join(MODEL_DEFAULTS_FILE), different)?;
+
+        let source = source_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.verify_models(&source);
+        assert!(result.is_err() == true, "verify must fail when local differs from source");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_model_defaults_from_local_path() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let source_dir = tempfile::TempDir::new()?;
+        std::fs::write(source_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+
+        let source = source_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.download_or_copy_model_defaults(&source)?;
+
+        assert!(config_dir.path().join(MODEL_DEFAULTS_FILE).exists() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_fetch_model_defaults_yml_local_path() -> anyhow::Result<()>
+    {
+        let source_dir = tempfile::TempDir::new()?;
+        std::fs::write(source_dir.path().join(MODEL_DEFAULTS_FILE), TEST_MODEL_YAML)?;
+
+        let content = fetch_model_defaults_yml(&source_dir.path().to_string_lossy())?;
+        assert!(content.contains("version: 1") == true);
+        Ok(())
+    }
+}

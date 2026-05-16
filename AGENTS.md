@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.4)
+**Last updated:** 2026-05-16 (v21.1.6)
 
 <!-- {mission} -->
 
@@ -819,6 +819,29 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.6, Phase 2 test coverage with LLM and catalog mocking)
+
+- Added `CHAT_HOOK` thread-local test injection to `llm.rs` mirroring the existing `github.rs` hook pattern; `set_chat_test_hook()` intercepts `chat()` and `chat_stream()` calls with a canned response, enabling LLM-dependent tests without real API calls
+- Added 3 merge tests using LLM hook: diverged file merge via hook, preview mode sidecar writing, truncated response preserving `.partial` file
+- Added 2 `smart_doctor` tests using LLM hook: parsed issues via hook, empty response handling
+- Added 7 `agents.rs` tests: `has_agent_defaults`, `list_agents`, `verify_agents` (pass + stale detection), `download_or_copy` from local path, `fetch_agent_defaults_yml` local path
+- Added 7 `models.rs` tests: mirror of agents.rs test suite for model-defaults.yml
+- Added 5 `config.rs` tests: `models.uri`/`models.fallbackUri` get/set/unset, `merge.model` unset
+- Coverage: 53.25% to 60.22% (+6.97%); smart.rs reached 100%, agents.rs 0%→62.7%, models.rs 0%→62.0%, merge.rs +20.8%
+- Test count: 334 to 358
+- Version bump: 21.1.5 to 21.1.6 (PATCH — test coverage with mocking infrastructure)
+
+### 2026-05-16 (v21.1.5, cross-command integration tests)
+
+- Added 13 integration tests for doctor, status, merge (dry-run), and verify commands exercised after real init/remove operations
+- Doctor tests (5): clean workspace, missing file detection + fix, modified file detection, unmerged marker stripping, clean after removal
+- Status tests (3): after init, after agent removal, empty workspace detection
+- Merge dry-run tests (3): all unchanged, diverged file detection, new files after lang removal
+- Verify tests (2): full round-trip with local source, missing source file detection
+- Coverage improvement: 47.63% to 53.25% (+5.62%); doctor.rs +29.92%, list.rs +34.97%, merge.rs +15.18%, verify.rs +22.35%, template_engine.rs +2.34%
+- Test count: 321 to 334
+- Version bump: 21.1.4 to 21.1.5 (PATCH — test coverage improvement)
 
 ### 2026-05-16 (v21.1.4, init/remove integration tests)
 

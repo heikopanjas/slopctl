@@ -4,6 +4,7 @@
 //! API keys are read from environment variables; Ollama requires no key.
 
 use std::{
+    cell::RefCell,
     env,
     io::{BufRead, BufReader},
     time::Duration
@@ -12,6 +13,39 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, model_defaults};
+
+// ── Test injection hooks ─────────────────────────────────────────────────────
+
+type ChatHook = Box<dyn Fn(&[ChatMessage]) -> Result<ChatResponse>>;
+
+thread_local! {
+    static CHAT_HOOK: RefCell<Option<ChatHook>> = const { RefCell::new(None) };
+}
+
+/// RAII guard that clears the chat test hook when dropped
+pub struct ChatTestHookGuard
+{
+    _private: ()
+}
+
+impl Drop for ChatTestHookGuard
+{
+    fn drop(&mut self)
+    {
+        CHAT_HOOK.with(|h| *h.borrow_mut() = None);
+    }
+}
+
+/// Install a test hook for `LlmClient::chat()` and `LlmClient::chat_stream()`
+///
+/// When set, the hook intercepts all chat calls and returns the hook's result
+/// instead of making real HTTP requests.  The returned guard clears the hook
+/// on drop.
+pub fn set_chat_test_hook(hook: ChatHook) -> ChatTestHookGuard
+{
+    CHAT_HOOK.with(|h| *h.borrow_mut() = Some(hook));
+    ChatTestHookGuard { _private: () }
+}
 
 /// Supported LLM providers
 #[derive(Debug, Clone, PartialEq)]
@@ -226,6 +260,11 @@ impl LlmClient
     /// Convenience wrapper around `chat_stream` with a no-op callback.
     pub fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
     {
+        let hooked = CHAT_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(messages)));
+        if let Some(result) = hooked
+        {
+            return result;
+        }
         self.chat_stream(messages, |_| {})
     }
 
@@ -233,8 +272,17 @@ impl LlmClient
     ///
     /// Returns the accumulated response with full content and usage metadata.
     /// The `on_chunk` callback receives each content fragment as it arrives.
-    pub fn chat_stream(&self, messages: &[ChatMessage], on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
+    pub fn chat_stream(&self, messages: &[ChatMessage], mut on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
     {
+        let hooked = CHAT_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(messages)));
+        if let Some(result) = hooked
+        {
+            if let Ok(ref resp) = result
+            {
+                on_chunk(&resp.content);
+            }
+            return result;
+        }
         match self.provider
         {
             | Provider::Anthropic => self.stream_anthropic(messages, on_chunk),
