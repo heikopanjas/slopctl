@@ -406,13 +406,13 @@ impl TemplateManager
         let mut removed_count = 0;
         for file in &files_to_remove
         {
+            file_tracker.remove_entry(file);
             match remove_file_and_cleanup_parents(file)
             {
                 | Ok(_) =>
                 {
                     println!("{} Removed {}", "✓".green(), file.display());
                     removed_count += 1;
-                    file_tracker.remove_entry(file);
                 }
                 | Err(e) =>
                 {
@@ -1444,18 +1444,8 @@ mod tests
         assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
 
         // Tracker must no longer report any language
-        let cwd = std::env::current_dir()?;
-        let tracker_after = FileTracker::new(&cwd)?;
-        let remaining_lang = tracker_after.get_installed_language();
-        let all_entries = tracker_after.get_entries();
-        let entry_summary: Vec<String> = all_entries.iter().map(|(p, m)| format!("  {} -> lang={} cat={}", p.display(), m.lang, m.category)).collect();
-        assert!(
-            remaining_lang.is_none() == true,
-            "status must report no language after remove --lang; got {:?}; cwd={}; entries:\n{}",
-            remaining_lang,
-            cwd.display(),
-            entry_summary.join("\n")
-        );
+        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
+        assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
         Ok(())
     }
 }
