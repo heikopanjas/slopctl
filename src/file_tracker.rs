@@ -62,37 +62,32 @@ pub struct FileTracker
 
 impl FileTracker
 {
-    /// Converts a file path to a relative path string from the workspace root
+    /// Converts a file path to a relative, forward-slash-normalised key.
     ///
-    /// For absolute paths, strips the workspace prefix. For paths that are
-    /// already relative, normalises separators to forward slashes.
+    /// Tries `Path::strip_prefix` first (works even when the file has been
+    /// deleted).  Falls back to `fs::canonicalize` only when the raw prefix
+    /// strip fails — e.g. when one side is a short 8.3 name and the other is
+    /// long on Windows.  All backslashes are normalised to `/` so tracker keys
+    /// are platform-independent.
     fn to_relative_key(&self, file_path: &Path) -> String
     {
-        let absolute = if let Ok(canonical) = fs::canonicalize(file_path)
+        // Fast path: strip the workspace prefix directly (no I/O, works for deleted files)
+        if let Ok(relative) = file_path.strip_prefix(&self.workspace)
         {
-            canonical
+            return relative.to_string_lossy().replace('\\', "/");
         }
-        else if let Some(parent) = file_path.parent() &&
-            let Ok(parent_abs) = fs::canonicalize(parent) &&
-            let Some(filename) = file_path.file_name()
-        {
-            parent_abs.join(filename)
-        }
-        else
-        {
-            file_path.to_path_buf()
-        };
 
+        // Slow path: canonicalize both sides to resolve symlinks, short names, etc.
+        let absolute = fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf());
         let workspace_canon = fs::canonicalize(&self.workspace).unwrap_or_else(|_| self.workspace.clone());
 
         if let Ok(relative) = absolute.strip_prefix(&workspace_canon)
         {
-            let rel_str = relative.to_string_lossy();
-            return rel_str.replace('\\', "/");
+            return relative.to_string_lossy().replace('\\', "/");
         }
 
-        let lossy = file_path.to_string_lossy();
-        lossy.replace('\\', "/")
+        // Last resort: return the path as-is with normalised separators
+        file_path.to_string_lossy().replace('\\', "/")
     }
 
     /// Create a new FileTracker for a workspace
