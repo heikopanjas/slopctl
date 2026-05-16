@@ -589,7 +589,9 @@ mod tests
     fn test_config_valid_keys()
     {
         let keys = Config::valid_keys();
-        assert_eq!(keys, vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"]);
+        assert_eq!(keys, vec![
+            "templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"
+        ]);
     }
 
     #[test]
