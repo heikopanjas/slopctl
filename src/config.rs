@@ -834,4 +834,52 @@ mod tests
         assert_eq!(format!("{}", ConfigScope::Global), "global");
         assert_eq!(format!("{}", ConfigScope::Workspace), "workspace");
     }
+
+    #[test]
+    fn test_config_get_set_models_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("models.uri", "https://example.com/models")?;
+        assert_eq!(config.get("models.uri").ok_or_else(|| anyhow::anyhow!("models.uri not set"))?, "https://example.com/models");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_get_set_models_fallback_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("models.fallbackUri", "https://fallback.com/models")?;
+        assert_eq!(config.get("models.fallbackUri").ok_or_else(|| anyhow::anyhow!("not set"))?, "https://fallback.com/models");
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_unset_models_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("models.uri", "https://example.com/models")?;
+        config.unset("models.uri")?;
+        assert!(config.get("models.uri").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_unset_models_fallback_uri() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("models.fallbackUri", "https://fallback.com/models")?;
+        config.unset("models.fallbackUri")?;
+        assert!(config.get("models.fallbackUri").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_unset_merge_model() -> anyhow::Result<()>
+    {
+        let mut config = Config::default();
+        config.set("merge.model", "gpt-4o")?;
+        config.unset("merge.model")?;
+        assert!(config.get("merge.model").is_none() == true);
+        Ok(())
+    }
 }
