@@ -620,6 +620,12 @@ impl<'a> TemplateEngine<'a>
         // dir when the agent doesn't read the cross-client path. This ensures Claude and
         // Vibe users don't lose access to skills that were previously installed without
         // an agent specified.
+        //
+        // Load the existing tracker to preserve each skill's original `lang` attribution.
+        // Without this, language skills (e.g. lang: "swift") are stamped LANG_NONE and
+        // `remove --lang swift` can no longer find the adopted copies via tracker sweep.
+        let existing_tracker = FileTracker::new(&workspace).ok();
+
         if native_only_agent == true &&
             let Some(ref native_dir) = agent_skill_dir &&
             cross_client_skill_dir.is_dir() == true &&
@@ -639,7 +645,9 @@ impl<'a> TemplateEngine<'a>
                             let target = native_dir.join(relative);
                             if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
                             {
-                                files_to_copy.push(ResolvedFile { source: src, target, lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() });
+                                let lang =
+                                    existing_tracker.as_ref().and_then(|t| t.get_metadata(&src)).map(|m| m.lang.clone()).unwrap_or_else(|| LANG_NONE.to_string());
+                                files_to_copy.push(ResolvedFile { source: src, target, lang, agent: AGENT_ALL.to_string() });
                             }
                         }
                     }

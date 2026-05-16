@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.1)
+**Last updated:** 2026-05-16 (v21.1.2)
 
 <!-- {mission} -->
 
@@ -819,6 +819,14 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.2, fix adopted skill copies losing lang attribution)
+
+- Fixed `init --agent <native-only-agent>` (Claude, Vibe) silently dropping `lang` attribution when adopting cross-client skills from `.agents/skills/` into the agent's native skill directory; adopted copies were stamped with `lang: LANG_NONE` instead of preserving the original language (e.g. `lang: "swift"`), causing `remove --lang swift` to leave the adopted copies behind
+- Root cause: the cross-client skill adoption block in `resolve_all_files` (`template_engine.rs`) hardcoded `lang: LANG_NONE` for every adopted `ResolvedFile`; now loads the existing `FileTracker` before the adoption loop and carries the original `lang` from each source entry; falls back to `LANG_NONE` when no tracker entry exists
+- Added regression test `test_remove_lang_removes_adopted_native_agent_skill_copies` in `src/template_manager/remove.rs`
+- Test count: 308 → 309
+- Version bump: 21.1.1 → 21.1.2 (PATCH — bug fix)
 
 ### 2026-05-16 (v21.1.1, fix remove bugs and improve test coverage)
 

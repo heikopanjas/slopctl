@@ -1342,6 +1342,55 @@ mod tests
         Ok(())
     }
 
+    // ── Regression: adopted native-agent skill copies inherit lang ───────────
+
+    #[test]
+    fn test_remove_lang_removes_adopted_native_agent_skill_copies() -> anyhow::Result<()>
+    {
+        // Scenario: init --agent codex --lang swift → init --agent claude → remove --lang swift
+        //
+        // After `init --agent claude` the cross-client skills in .agents/skills/ are
+        // adopted to .claude/skills/ (native-only agent). The adoption previously stamped
+        // every copy with lang: LANG_NONE, so `remove --lang swift` could not find them.
+        // After the fix, adopted copies carry the original lang and are properly removed.
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        write_synthetic_agent_defaults(data_dir.path(), &[("fake", false, None)])?;
+
+        // Skill in cross-client dir (tracked with lang: CppScript — installed by a cross-client agent)
+        let cc_skill_dir = workspace.path().join(".agents/skills/cppscript-conventions");
+        fs::create_dir_all(&cc_skill_dir)?;
+        let cc_skill_file = cc_skill_dir.join("SKILL.md");
+        fs::write(&cc_skill_file, "# CppScript Conventions")?;
+
+        // Same skill adopted to native agent dir (tracked with lang: CppScript after fix)
+        let native_skill_dir = workspace.path().join(".fake/skills/cppscript-conventions");
+        fs::create_dir_all(&native_skill_dir)?;
+        let native_skill_file = native_skill_dir.join("SKILL.md");
+        fs::write(&native_skill_file, "# CppScript Conventions")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&cc_skill_file, "sha1".into(), 5, "CppScript".into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&native_skill_file, "sha2".into(), 5, "CppScript".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("CppScript"), true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(cc_skill_file.exists() == false, "cross-client lang skill must be removed");
+        assert!(native_skill_file.exists() == false, "adopted native-agent copy must also be removed");
+
+        let tracker_after = FileTracker::new(workspace.path())?;
+        assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");
+        Ok(())
+    }
+
     // ── Lifecycle tests ──────────────────────────────────────────────────────
 
     #[test]
