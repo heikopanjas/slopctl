@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.0.0)
+**Last updated:** 2026-05-16 (v21.1.0)
 
 <!-- {mission} -->
 
@@ -819,6 +819,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.0, clean up empty agent dirs after remove)
+
+- After `remove --agent <name>`, `remove --all`, and `remove --purge`, slopctl now attempts to delete each agent's marker directory (e.g. `.claude/`, `.cursor/`) if it is empty after the file-deletion pass
+- Marker directories created by `slopctl init --agent` as empty detection dirs are now fully cleaned up on removal; non-empty dirs (containing user files) are silently skipped
+- Dry-run output annotates each candidate marker dir with `(removed if empty)` so users can preview the cleanup
+- Added `list_agent_names_from_catalog` helper in `src/agent_defaults.rs` to enumerate all agent names from a loaded catalog without re-loading
+- Added 2 regression tests: `test_remove_agent_cleans_up_empty_marker_dir` and `test_remove_agent_keeps_nonempty_marker_dir`
+- Version bump: 21.0.0 → 21.1.0 (MINOR — new cleanup behavior, fully backwards compatible)
 
 ### 2026-05-16 (v21.0.0, models catalog subcommand)
 
