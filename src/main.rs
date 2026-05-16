@@ -892,3 +892,116 @@ fn main()
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_resolve_mission_content_inline()
+    {
+        let result = resolve_mission_content("Build a CLI tool").unwrap();
+        assert_eq!(result, "Build a CLI tool");
+    }
+
+    #[test]
+    fn test_resolve_mission_content_from_file()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("mission.md");
+        fs::write(&file, "# My Mission\nBuild great software.\n").unwrap();
+
+        let result = resolve_mission_content(&format!("@{}", file.display())).unwrap();
+        assert!(result.contains("My Mission") == true);
+    }
+
+    #[test]
+    fn test_resolve_mission_content_missing_file()
+    {
+        let result = resolve_mission_content("@/nonexistent/path/mission.md");
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("Failed to read mission file") == true);
+    }
+
+    #[test]
+    fn test_resolve_source_returns_default_when_no_args()
+    {
+        let (source, is_configured, _fallback) = resolve_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_resolve_source_returns_from_arg()
+    {
+        let (source, _is_configured, _) = resolve_source(Some("/tmp/my-templates".to_string()));
+        assert_eq!(source, "/tmp/my-templates");
+    }
+
+    #[test]
+    fn test_resolve_agents_source_returns_default()
+    {
+        let (source, is_configured, _) = resolve_agents_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_resolve_models_source_returns_default()
+    {
+        let (source, is_configured, _) = resolve_models_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_handle_config_list_empty_workspace() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let result = handle_config(None, vec![], true, None, false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_set_and_get() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        handle_config(None, vec!["merge.provider".into(), "ollama".into()], false, None, false)?;
+        let result = handle_config(Some("merge.provider".into()), vec![], false, None, false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_delete() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        handle_config(None, vec!["merge.provider".into(), "ollama".into()], false, None, false)?;
+        let result = handle_config(None, vec![], false, Some("merge.provider".into()), false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_global_list() -> Result<()>
+    {
+        handle_config(None, vec![], true, None, true)?;
+        Ok(())
+    }
+}
