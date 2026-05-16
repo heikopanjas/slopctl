@@ -1444,8 +1444,18 @@ mod tests
         assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
 
         // Tracker must no longer report any language
-        let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
-        assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
+        let cwd = std::env::current_dir()?;
+        let tracker_after = FileTracker::new(&cwd)?;
+        let remaining_lang = tracker_after.get_installed_language();
+        let all_entries = tracker_after.get_entries();
+        let entry_summary: Vec<String> = all_entries.iter().map(|(p, m)| format!("  {} -> lang={} cat={}", p.display(), m.lang, m.category)).collect();
+        assert!(
+            remaining_lang.is_none() == true,
+            "status must report no language after remove --lang; got {:?}; cwd={}; entries:\n{}",
+            remaining_lang,
+            cwd.display(),
+            entry_summary.join("\n")
+        );
         Ok(())
     }
 }
