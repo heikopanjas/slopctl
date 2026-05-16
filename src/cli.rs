@@ -55,7 +55,7 @@ pub enum Commands
         #[arg(short, long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long)]
         agent: Option<String>,
 
@@ -120,11 +120,11 @@ pub enum Commands
     /// Remove installed files from the current workspace
     Remove
     {
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long, conflicts_with = "purge")]
         agent: Option<String>,
 
-        /// Programming language or framework (e.g., rust, c++, swift)
+        /// Programming language or framework from templates.yml
         #[arg(short, long, conflicts_with = "purge")]
         lang: Option<String>,
 
@@ -182,11 +182,11 @@ pub enum Commands
     /// AI-assisted merge of customized files with updated templates
     Merge
     {
-        /// Programming language or framework (e.g., rust, c++, swift)
+        /// Programming language or framework from templates.yml
         #[arg(short, long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long)]
         agent: Option<String>,
 

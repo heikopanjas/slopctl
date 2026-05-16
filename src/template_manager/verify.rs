@@ -600,8 +600,8 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  cursor:\n    instructions:\n      - source: \
-                    cursorrules.md\n        target: '$workspace/.cursorrules'\nlanguages: {}\n";
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus:\n    instructions:\n      - source: \
+                    instructions.md\n        target: '$workspace/.bogus/instructions.md'\nlanguages: {}\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
 
@@ -616,9 +616,9 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
 
         let yaml = concat!(
-            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
-            "      - source: rust-editor-config.ini\n        target: '$workspace/.editorconfig'\n", "  swift:\n", "    files:\n",
-            "      - source: swift-editor-config.ini\n        target: '$workspace/.editorconfig'\n"
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  Rust++:\n", "    files:\n",
+            "      - source: rpp-editor-config.ini\n        target: '$workspace/.editorconfig'\n", "  CppScript:\n", "    files:\n",
+            "      - source: cppscript-editor-config.ini\n        target: '$workspace/.editorconfig'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
@@ -635,16 +635,20 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
 
         let yaml = concat!(
-            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
-            "      - source: rust-editor-config.ini\n        target: '$workspace/.editorconfig'\n",
-            "      - source: rust-editor-config-alt.ini\n        target: '$workspace/.editorconfig'\n"
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  Rust++:\n", "    files:\n",
+            "      - source: rpp-editor-config.ini\n        target: '$workspace/.editorconfig'\n",
+            "      - source: rpp-editor-config-alt.ini\n        target: '$workspace/.editorconfig'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
 
-        assert!(issues.iter().any(|i| i.contains("language rust") && i.contains("Duplicate target")) == true, "expected same-language duplicate issue: {:?}", issues);
+        assert!(
+            issues.iter().any(|i| i.contains("language Rust++") && i.contains("Duplicate target")) == true,
+            "expected same-language duplicate issue: {:?}",
+            issues
+        );
         Ok(())
     }
 
@@ -656,8 +660,8 @@ mod tests
         // Multiple entries targeting $instructions are intentional and must NOT
         // be flagged as duplicates.
         let yaml = concat!(
-            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  rust:\n", "    files:\n",
-            "      - source: rust.md\n        target: '$instructions'\n", "      - source: rust-style.md\n        target: '$instructions'\n"
+            "version: 5\n", "main:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\n", "agents: {}\n", "languages:\n", "  Rust++:\n", "    files:\n",
+            "      - source: rpp.md\n        target: '$instructions'\n", "      - source: rpp-style.md\n        target: '$instructions'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;

@@ -18,7 +18,7 @@ use crate::{
     bom::{self, TemplateConfig},
     file_tracker::{AGENT_ALL, FileStatus, FileTracker, LANG_NONE},
     github,
-    utils::{FileActionResponse, copy_file_with_mkdir, prompt_file_modification}
+    utils::copy_file_with_mkdir
 };
 
 /// Template marker comment used to detect unmerged template files
@@ -96,16 +96,24 @@ pub struct ResolvedContent
     pub agent:   String
 }
 
-/// Result of the file copy operation
-pub enum CopyFilesResult
+struct PreflightPlan
 {
-    /// Completed successfully with a list of skipped files
-    Done
-    {
-        skipped: Vec<PathBuf>
-    },
-    /// User cancelled the operation
-    Cancelled
+    files: Vec<PlannedFileAction>
+}
+
+struct PlannedFileAction
+{
+    index:      usize,
+    source_sha: String,
+    category:   String,
+    kind:       PlannedFileActionKind
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlannedFileActionKind
+{
+    Copy,
+    RefreshTracker
 }
 
 /// Loads template configuration from templates.yml
@@ -160,6 +168,7 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
 /// # Errors
 ///
 /// Returns an error if two entries share the same target path
+#[cfg(test)]
 pub fn validate_no_duplicate_targets(files: &[ResolvedFile]) -> Result<()>
 {
     let mut seen_targets: HashMap<&Path, &Path> = HashMap::new();
@@ -254,13 +263,15 @@ impl<'a> TemplateEngine<'a>
     /// semantically consistent with the `None` case and avoids routing skills to a
     /// native agent dir when the agent also scans the cross-client dir.
     ///
-    /// Bare `"$userprofile"` resolves to the agent's userprofile skill dir (e.g.
-    /// `~/.codex/skills` for Codex, or `~/.agents/skills` as fallback). Use this when
+    /// Bare `"$userprofile"` resolves to the agent's userprofile skill dir, or to
+    /// `~/.agents/skills` as fallback. Use this when
     /// you explicitly want a user-global (not workspace-local) installation.
     ///
     /// Any full path (e.g. `"$workspace/.agents/skills"`) is resolved via
     /// `resolve_placeholder` as-is. `None` also falls back to `default`.
-    fn resolve_skill_target(&self, target: Option<&str>, default: &Path, agent: Option<&str>, workspace: &Path, userprofile: &Path) -> PathBuf
+    fn resolve_skill_target(
+        &self, target: Option<&str>, default: &Path, agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path
+    ) -> PathBuf
     {
         let Some(t) = target
         else
@@ -278,8 +289,10 @@ impl<'a> TemplateEngine<'a>
 
         if t == agent_defaults::PLACEHOLDER_USERPROFILE
         {
-            let raw = agent.map(agent_defaults::get_effective_userprofile_skill_dir).unwrap_or("$userprofile/.agents/skills");
-            return self.resolve_placeholder(raw, workspace, userprofile);
+            let raw = agent
+                .map(|agent_name| agent_defaults::get_effective_userprofile_skill_dir_from_catalog(agent_catalog, agent_name))
+                .unwrap_or("$userprofile/.agents/skills".to_string());
+            return self.resolve_placeholder(&raw, workspace, userprofile);
         }
 
         self.resolve_placeholder(t, workspace, userprofile)
@@ -291,7 +304,8 @@ impl<'a> TemplateEngine<'a>
     /// skills without `target` use `default`. Returns a `Vec` of `(dir, skills)`
     /// pairs in insertion order, preserving the original skill ordering within each group.
     fn group_skills_by_target<'s>(
-        &self, skills: &'s [bom::SkillDefinition], default: &Path, agent: Option<&str>, workspace: &Path, userprofile: &Path
+        &self, skills: &'s [bom::SkillDefinition], default: &Path, agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path,
+        userprofile: &Path
     ) -> Vec<(PathBuf, Vec<&'s bom::SkillDefinition>)>
     {
         let mut order: Vec<PathBuf> = Vec::new();
@@ -299,7 +313,7 @@ impl<'a> TemplateEngine<'a>
 
         for skill in skills
         {
-            let dir = self.resolve_skill_target(skill.target.as_deref(), default, agent, workspace, userprofile);
+            let dir = self.resolve_skill_target(skill.target.as_deref(), default, agent, agent_catalog, workspace, userprofile);
             if map.contains_key(&dir) == false
             {
                 order.push(dir.clone());
@@ -314,6 +328,24 @@ impl<'a> TemplateEngine<'a>
                 (dir, skills)
             })
             .collect()
+    }
+
+    /// Return the default directory for non-agent-specific skills
+    fn default_non_agent_skill_dir(&self, agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path) -> PathBuf
+    {
+        if let Some(agent_name) = agent &&
+            agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, agent_name) == false &&
+            let Some(skill_dir) = agent_defaults::get_skill_dir_from_catalog(agent_catalog, agent_name)
+        {
+            return self.resolve_placeholder(skill_dir, workspace, userprofile);
+        }
+
+        self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile)
+    }
+
+    fn target_already_scheduled(files: &[ResolvedFile], target: &Path) -> bool
+    {
+        files.iter().any(|entry| entry.target == target)
     }
 
     /// Resolves a source string to a local file path
@@ -379,6 +411,7 @@ impl<'a> TemplateEngine<'a>
         );
 
         let config = load_template_config(self.config_dir)?;
+        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(self.config_dir)?;
 
         if let Some(agent_name) = options.agent &&
             config.agents.contains_key(agent_name) == false
@@ -495,7 +528,7 @@ impl<'a> TemplateEngine<'a>
 
         if let Some(agent_name) = options.agent
         {
-            for marker_dir in agent_defaults::get_workspace_marker_dirs(agent_name, &workspace)
+            for marker_dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &workspace)
             {
                 if directories_to_create.contains(&marker_dir) == false
                 {
@@ -541,29 +574,23 @@ impl<'a> TemplateEngine<'a>
             println!("{} {}", "!".yellow(), err.yellow());
         }
 
-        let agent_skill_dir = options.agent.and_then(agent_defaults::get_skill_dir).map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
+        let agent_skill_dir = options
+            .agent
+            .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
+            .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
         let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
 
-        // For agents that don't read .agents/skills/ (Claude, Vibe), all non-agent-specific
-        // skills go directly to the agent's native skill directory. For every other agent
-        // (Cursor, Codex, Copilot, OpenCode) they go to the cross-client dir — that is
-        // where those agents scan, and it avoids duplicating skills in two locations.
-        let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills(a) == false);
-        let non_agent_skill_dir = if native_only_agent == true
-        {
-            agent_skill_dir.as_ref().unwrap_or(&cross_client_skill_dir)
-        }
-        else
-        {
-            &cross_client_skill_dir
-        };
+        // AgentDefaults is the only source of truth for deciding whether non-agent
+        // skills belong in the cross-agent directory or the selected agent's native dir.
+        let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, a) == false);
+        let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
 
         if let Some(agent_name) = options.agent &&
             let Some(agent_config) = config.agents.get(agent_name) &&
             agent_config.skills.is_empty() == false &&
             let Some(ref default_dir) = agent_skill_dir
         {
-            for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &workspace, &userprofile)
+            for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
             {
                 self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, agent_name, &mut files_to_copy)?;
             }
@@ -574,7 +601,7 @@ impl<'a> TemplateEngine<'a>
             let lang_skills = bom::resolve_language_skills(lang, &config)?;
             if lang_skills.is_empty() == false
             {
-                for (dir, group) in self.group_skills_by_target(&lang_skills, non_agent_skill_dir, options.agent, &workspace, &userprofile)
+                for (dir, group) in self.group_skills_by_target(&lang_skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
                 {
                     self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, lang, AGENT_ALL, &mut files_to_copy)?;
                 }
@@ -583,7 +610,7 @@ impl<'a> TemplateEngine<'a>
 
         if config.skills.is_empty() == false
         {
-            for (dir, group) in self.group_skills_by_target(&config.skills, non_agent_skill_dir, options.agent, &workspace, &userprofile)
+            for (dir, group) in self.group_skills_by_target(&config.skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
             {
                 self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
             }
@@ -592,7 +619,7 @@ impl<'a> TemplateEngine<'a>
         // Migrate any skills already in .agents/skills/ into the agent's native skill
         // dir when the agent doesn't read the cross-client path. This ensures Claude and
         // Vibe users don't lose access to skills that were previously installed without
-        // an agent specified (e.g. via `slopctl init --lang rust`).
+        // an agent specified.
         if native_only_agent == true &&
             let Some(ref native_dir) = agent_skill_dir &&
             cross_client_skill_dir.is_dir() == true &&
@@ -606,12 +633,11 @@ impl<'a> TemplateEngine<'a>
                     crate::utils::collect_files_recursive(&entry.path(), &mut skill_files)?;
                     for src in skill_files
                     {
-                        // Preserve the full relative path under the skill name:
-                        // .agents/skills/foo/SKILL.md → .claude/skills/foo/SKILL.md
+                        // Preserve the full relative path under the skill name.
                         if let Ok(relative) = src.strip_prefix(&cross_client_skill_dir)
                         {
                             let target = native_dir.join(relative);
-                            if target.exists() == false
+                            if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
                             {
                                 files_to_copy.push(ResolvedFile { source: src, target, lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() });
                             }
@@ -620,8 +646,6 @@ impl<'a> TemplateEngine<'a>
                 }
             }
         }
-
-        validate_no_duplicate_targets(&files_to_copy)?;
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
 
@@ -709,6 +733,169 @@ impl<'a> TemplateEngine<'a>
         Ok(content)
     }
 
+    fn planned_category(entry: &ResolvedFile, options: &UpdateOptions) -> String
+    {
+        let target_str = entry.target.to_string_lossy();
+        if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
+        {
+            "skill".to_string()
+        }
+        else if target_str.contains(".git")
+        {
+            "integration".to_string()
+        }
+        else if let Some(name) = options.agent
+        {
+            if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
+            {
+                "agent".to_string()
+            }
+            else
+            {
+                "language".to_string()
+            }
+        }
+        else
+        {
+            "language".to_string()
+        }
+    }
+
+    fn is_top_level_cross_client_skill(entry: &ResolvedFile, cross_client_skill_dir: &Path) -> bool
+    {
+        entry.lang == LANG_NONE && entry.agent == AGENT_ALL && entry.target.starts_with(cross_client_skill_dir)
+    }
+
+    fn push_parent_conflict(conflicts: &mut Vec<String>, path: &Path)
+    {
+        if let Some(parent) = path.parent() &&
+            parent.exists() == true &&
+            parent.is_dir() == false
+        {
+            conflicts.push(format!("parent path '{}' is not a directory", parent.display()));
+        }
+    }
+
+    fn preflight_installation(
+        &self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[ResolvedFile], directories: &[PathBuf],
+        file_tracker: &FileTracker
+    ) -> Result<PreflightPlan>
+    {
+        let workspace = std::env::current_dir()?;
+        let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
+        let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+        let mut conflicts = Vec::new();
+        let mut planned_files = Vec::new();
+        let mut seen_targets: HashMap<PathBuf, &Path> = HashMap::new();
+
+        if skip_agents_md == false
+        {
+            if ctx.target.exists() == true && ctx.target.is_dir() == true
+            {
+                conflicts.push(format!("target '{}' is a directory", ctx.target.display()));
+            }
+            Self::push_parent_conflict(&mut conflicts, &ctx.target);
+        }
+
+        for dir in directories
+        {
+            if dir.exists() == true && dir.is_dir() == false
+            {
+                conflicts.push(format!("directory target '{}' exists as a file", dir.display()));
+            }
+            Self::push_parent_conflict(&mut conflicts, dir);
+        }
+
+        for (index, entry) in files_to_copy.iter().enumerate()
+        {
+            if let Some(previous_source) = seen_targets.insert(entry.target.clone(), entry.source.as_path())
+            {
+                conflicts.push(format!(
+                    "duplicate target '{}': '{}' and '{}' both write to the same file",
+                    entry.target.display(),
+                    previous_source.display(),
+                    entry.source.display()
+                ));
+                continue;
+            }
+
+            let source_sha = FileTracker::calculate_sha256(&entry.source)?;
+            let category = Self::planned_category(entry, options);
+            Self::push_parent_conflict(&mut conflicts, &entry.target);
+
+            if entry.target.exists() == true && entry.target.is_dir() == true
+            {
+                conflicts.push(format!("target '{}' exists as a directory", entry.target.display()));
+            }
+            else if Self::is_top_level_cross_client_skill(entry, &cross_client_skill_dir) == true && entry.target.exists() == true
+            {
+                match file_tracker.check_modification(&entry.target)?
+                {
+                    | FileStatus::Unmodified =>
+                    {
+                        if let Some(metadata) = file_tracker.get_metadata(&entry.target)
+                        {
+                            if metadata.original_sha == source_sha
+                            {
+                                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                            }
+                            else
+                            {
+                                conflicts.push(format!("shared skill '{}' differs from the tracked template", entry.target.display()));
+                            }
+                        }
+                        else
+                        {
+                            conflicts.push(format!("shared skill '{}' is missing tracker metadata", entry.target.display()));
+                        }
+                    }
+                    | FileStatus::NotTracked =>
+                    {
+                        conflicts.push(format!("shared skill '{}' already exists but is not tracked", entry.target.display()));
+                    }
+                    | FileStatus::Modified =>
+                    {
+                        conflicts.push(format!("shared skill '{}' has local modifications", entry.target.display()));
+                    }
+                    | FileStatus::Deleted =>
+                    {
+                        planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+                    }
+                }
+            }
+            else if entry.target.exists() == false || options.force == true
+            {
+                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+            }
+            else
+            {
+                match file_tracker.check_modification(&entry.target)?
+                {
+                    | FileStatus::Unmodified | FileStatus::Deleted =>
+                    {
+                        planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+                    }
+                    | FileStatus::NotTracked =>
+                    {
+                        conflicts.push(format!("target '{}' already exists but is not tracked", entry.target.display()));
+                    }
+                    | FileStatus::Modified =>
+                    {
+                        conflicts.push(format!("target '{}' has local modifications", entry.target.display()));
+                    }
+                }
+            }
+        }
+
+        if conflicts.is_empty() == false
+        {
+            let details = conflicts.iter().map(|conflict| format!("- {}", conflict)).collect::<Vec<_>>().join("\n");
+            return Err(anyhow::anyhow!("Installation preflight failed:\n{}", details));
+        }
+
+        Ok(PreflightPlan { files: planned_files })
+    }
+
     /// Updates local templates from global storage
     ///
     /// This method:
@@ -718,7 +905,7 @@ impl<'a> TemplateEngine<'a>
     /// 4. Installs skills from templates.yml and CLI args
     ///
     /// Single AGENTS.md works for all agents. Agent-specific instruction files
-    /// (e.g. CLAUDE.md) and prompts are copied if agent is specified.
+    /// and prompts are copied if agent is specified.
     ///
     /// # Arguments
     ///
@@ -739,6 +926,7 @@ impl<'a> TemplateEngine<'a>
         let mut file_tracker = FileTracker::new(&workspace)?;
 
         let skip_agents_md = ctx.target.exists() && is_file_customized(&ctx.target)?;
+        let preflight = self.preflight_installation(ctx, skip_agents_md, options, &resolved.files, &resolved.directories, &file_tracker)?;
 
         if skip_agents_md && options.force == false
         {
@@ -752,7 +940,7 @@ impl<'a> TemplateEngine<'a>
 
         if options.dry_run == true
         {
-            self.show_dry_run_files(ctx, skip_agents_md, options, &resolved.files, &resolved.directories);
+            self.show_dry_run_files(ctx, skip_agents_md, options, &resolved.files, &resolved.directories, &preflight);
             return Ok(());
         }
 
@@ -764,19 +952,7 @@ impl<'a> TemplateEngine<'a>
             println!("  {} {} (directory)", "✓".green(), dir_path.display().to_string().yellow());
         }
 
-        let copy_result = self.copy_files_with_tracking(&resolved.files, &mut file_tracker, ctx.template_version, options)?;
-
-        match copy_result
-        {
-            | CopyFilesResult::Done { skipped } =>
-            {
-                self.show_skipped_files_summary(&skipped);
-            }
-            | CopyFilesResult::Cancelled =>
-            {
-                return Ok(());
-            }
-        }
+        self.copy_files_with_tracking(&resolved.files, &preflight, &mut file_tracker, ctx.template_version)?;
 
         file_tracker.save()?;
 
@@ -833,7 +1009,10 @@ impl<'a> TemplateEngine<'a>
     /// * `options` - Update options containing force and dry_run settings
     /// * `files_to_copy` - List of (source, target) file tuples
     /// * `directories` - List of directory paths
-    fn show_dry_run_files(&self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[ResolvedFile], directories: &[PathBuf])
+    fn show_dry_run_files(
+        &self, ctx: &TemplateContext, skip_agents_md: bool, options: &UpdateOptions, files_to_copy: &[ResolvedFile], directories: &[PathBuf],
+        preflight: &PreflightPlan
+    )
     {
         println!("\n{} Files that would be created/modified:", "→".blue());
 
@@ -850,9 +1029,14 @@ impl<'a> TemplateEngine<'a>
             println!("  {} {} (would be created)", "●".green(), ctx.target.display());
         }
 
-        for entry in files_to_copy
+        for planned in &preflight.files
         {
-            if entry.target.exists()
+            let entry = &files_to_copy[planned.index];
+            if planned.kind == PlannedFileActionKind::RefreshTracker
+            {
+                println!("  {} {} (already installed, tracker would be refreshed)", "○".yellow(), entry.target.display());
+            }
+            else if entry.target.exists()
             {
                 println!("  {} {} (would be overwritten)", "●".yellow(), entry.target.display());
             }
@@ -933,151 +1117,45 @@ impl<'a> TemplateEngine<'a>
         Ok(())
     }
 
-    /// Copies template files to targets with modification checking
+    /// Copies preflighted template files to targets
     ///
-    /// Iterates over source/target file pairs, checking each target for user
-    /// modifications before copying. Prompts the user when modifications are
-    /// detected (unless force mode is enabled). Records each installation
-    /// in the file tracker.
+    /// Preflight validates all targets before this method is called, so execution
+    /// can copy files and refresh tracker metadata without interactive prompts.
     ///
     /// # Arguments
     ///
-    /// * `files_to_copy` - List of (source, target) file pairs
-    /// * `file_tracker` - File tracker for checking modifications and recording installations
+    /// * `files_to_copy` - Resolved file entries
+    /// * `preflight` - Validated file actions to execute
+    /// * `file_tracker` - File tracker for recording installations
     /// * `template_version` - Template version for file tracking (0 for standalone skill installs)
-    /// * `options` - Update options containing lang, agent, and force settings
-    ///
-    /// # Returns
-    ///
-    /// Returns `CopyFilesResult::Done` with skipped files, or `CopyFilesResult::Cancelled` if user quits
-    ///
     /// # Errors
     ///
     /// Returns an error if file operations fail
-    fn copy_files_with_tracking(
-        &self, files_to_copy: &[ResolvedFile], file_tracker: &mut FileTracker, template_version: u32, options: &UpdateOptions
-    ) -> Result<CopyFilesResult>
+    fn copy_files_with_tracking(&self, files_to_copy: &[ResolvedFile], preflight: &PreflightPlan, file_tracker: &mut FileTracker, template_version: u32)
+    -> Result<()>
     {
         println!("{} Copying templates to target directories", "→".blue());
 
-        let mut skipped_files = Vec::new();
-
-        for entry in files_to_copy
+        for planned in &preflight.files
         {
+            let entry = &files_to_copy[planned.index];
             let source = &entry.source;
             let target = &entry.target;
-            let new_template_sha = FileTracker::calculate_sha256(source)?;
 
-            let should_copy = if target.exists() == false || options.force == true
-            {
-                true
-            }
-            else
-            {
-                match file_tracker.check_modification(target)?
-                {
-                    | FileStatus::NotTracked =>
-                    {
-                        let response = prompt_file_modification(target, "<not tracked>", "<current file>", source)?;
-                        match response
-                        {
-                            | FileActionResponse::Overwrite => true,
-                            | FileActionResponse::Skip =>
-                            {
-                                skipped_files.push(target.clone());
-                                false
-                            }
-                            | FileActionResponse::Quit =>
-                            {
-                                println!("\n{} Operation cancelled by user", "!".yellow());
-                                return Ok(CopyFilesResult::Cancelled);
-                            }
-                        }
-                    }
-                    | FileStatus::Unmodified => true,
-                    | FileStatus::Modified =>
-                    {
-                        if let Some(metadata) = file_tracker.get_metadata(target)
-                        {
-                            let current_sha = FileTracker::calculate_sha256(target)?;
-                            let response = prompt_file_modification(target, &metadata.original_sha, &current_sha, source)?;
-                            match response
-                            {
-                                | FileActionResponse::Overwrite => true,
-                                | FileActionResponse::Skip =>
-                                {
-                                    skipped_files.push(target.clone());
-                                    false
-                                }
-                                | FileActionResponse::Quit =>
-                                {
-                                    println!("\n{} Operation cancelled by user", "!".yellow());
-                                    return Ok(CopyFilesResult::Cancelled);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            true
-                        }
-                    }
-                    | FileStatus::Deleted => true
-                }
-            };
-
-            if should_copy == true
+            if planned.kind == PlannedFileActionKind::Copy
             {
                 copy_file_with_mkdir(source, target)?;
                 println!("  {} {}", "✓".green(), target.display().to_string().yellow());
-
-                let target_str = target.to_string_lossy();
-                let category = if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
-                {
-                    "skill"
-                }
-                else if target_str.contains(".git")
-                {
-                    "integration"
-                }
-                else if let Some(name) = options.agent
-                {
-                    if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
-                    {
-                        "agent"
-                    }
-                    else
-                    {
-                        "language"
-                    }
-                }
-                else
-                {
-                    "language"
-                };
-
-                file_tracker.record_installation(target, new_template_sha, template_version, entry.lang.clone(), entry.agent.clone(), category.to_string());
             }
-        }
-
-        Ok(CopyFilesResult::Done { skipped: skipped_files })
-    }
-
-    /// Shows summary of skipped files after a copy operation
-    ///
-    /// # Arguments
-    ///
-    /// * `skipped_files` - List of file paths that were skipped
-    fn show_skipped_files_summary(&self, skipped_files: &[PathBuf])
-    {
-        if skipped_files.is_empty() == false
-        {
-            println!("\n{} Skipped {} modified file(s):", "!".yellow(), skipped_files.len());
-            for file in skipped_files
+            else
             {
-                println!("  {} {}", "○".yellow(), file.display());
+                println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
             }
-            println!("{} Use --force to overwrite modified files", "→".blue());
+
+            file_tracker.record_installation(target, planned.source_sha.clone(), template_version, entry.lang.clone(), entry.agent.clone(), planned.category.clone());
         }
+
+        Ok(())
     }
 
     /// Install skills into the given skill directory
@@ -1091,7 +1169,7 @@ impl<'a> TemplateEngine<'a>
     /// # Arguments
     ///
     /// * `skills` - Iterator of (name, source) pairs
-    /// * `skill_base_dir` - Resolved target directory for skills (e.g. `.cursor/skills` or `.agents/skills`)
+    /// * `skill_base_dir` - Resolved target directory for skills
     /// * `temp_dir` - Temporary directory for GitHub downloads
     /// * `files_to_copy` - Accumulator for (source, target) file pairs
     fn install_skills<'b, I>(&self, skills: I, skill_base_dir: &Path, temp_dir: &Path, lang: &str, agent: &str, files_to_copy: &mut Vec<ResolvedFile>) -> Result<()>
@@ -1313,8 +1391,8 @@ mod tests
         let workspace = PathBuf::from("/projects/myapp");
         let userprofile = PathBuf::from("/home/user");
 
-        let result = engine.resolve_placeholder("$userprofile/.codex/prompts/init.md", &workspace, &userprofile);
-        assert_eq!(result, PathBuf::from("/home/user/.codex/prompts/init.md"));
+        let result = engine.resolve_placeholder("$userprofile/.bogus/prompts/init.md", &workspace, &userprofile);
+        assert_eq!(result, PathBuf::from("/home/user/.bogus/prompts/init.md"));
     }
 
     #[test]
@@ -1362,16 +1440,16 @@ mod tests
         let dir = tempfile::TempDir::new()?;
         let source = write_template(dir.path(), TEMPLATE_BASE)?;
         let target = dir.path().join("output/AGENTS.md");
-        let frag = write_fragment(dir.path(), "rust.md", "## Rust Conventions\n\nUse cargo.")?;
+        let frag = write_fragment(dir.path(), "rpp.md", "## Rust++ Conventions\n\nUse the configured build tool.")?;
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 5 };
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
         let output = fs::read_to_string(&target)?;
-        assert!(output.contains("## Rust Conventions") == true);
+        assert!(output.contains("## Rust++ Conventions") == true);
         assert!(output.contains("<!-- {languages} -->") == true);
         Ok(())
     }
@@ -1385,7 +1463,7 @@ mod tests
 
         let mission_frag = write_fragment(dir.path(), "mission.md", "## Mission\n\nBuild great software.")?;
         let principles_frag = write_fragment(dir.path(), "principles.md", "## Principles\n\nKeep it simple.")?;
-        let lang_frag = write_fragment(dir.path(), "lang.md", "## Rust\n\nUse clippy.")?;
+        let lang_frag = write_fragment(dir.path(), "lang.md", "## Rust++\n\nUse the configured linter.")?;
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext {
@@ -1394,14 +1472,14 @@ mod tests
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
             template_version: 5
         };
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: false };
 
         engine.merge_fragments(&ctx, &options)?;
 
         let output = fs::read_to_string(&target)?;
         assert!(output.contains("Build great software") == true);
         assert!(output.contains("Keep it simple") == true);
-        assert!(output.contains("Use clippy") == true);
+        assert!(output.contains("Use the configured linter") == true);
         Ok(())
     }
 
@@ -1510,15 +1588,28 @@ mod tests
     }
 
     #[test]
-    fn test_skill_base_dir_with_agent_uses_agent_specific()
+    fn test_skill_base_dir_with_agent_uses_agent_specific() -> anyhow::Result<()>
     {
         let engine = TemplateEngine::new(Path::new("/config"));
         let workspace = PathBuf::from("/projects/myapp");
         let userprofile = PathBuf::from("/home/user");
 
-        let dir_template = crate::agent_defaults::get_skill_dir("cursor").expect("cursor should have skill dir");
+        let catalog = crate::agent_defaults::parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
+        let dir_template = crate::agent_defaults::get_skill_dir_from_catalog(&catalog, "bogus").expect("bogus should have skill dir");
         let result = engine.resolve_placeholder(dir_template, &workspace, &userprofile);
-        assert_eq!(result, PathBuf::from("/projects/myapp/.cursor/skills"));
+        assert_eq!(result, PathBuf::from("/projects/myapp/.bogus/skills"));
+        Ok(())
     }
 
     #[test]
@@ -1599,7 +1690,7 @@ mod tests
         Ok(())
     }
 
-    /// Write a minimal templates.yml with known agents and languages
+    /// Write a minimal templates.yml with synthetic agents and languages
     fn write_minimal_templates_yml(dir: &std::path::Path) -> anyhow::Result<()>
     {
         let yml = r#"version: 5
@@ -1607,23 +1698,23 @@ main:
   source: AGENTS.md
   target: '$workspace/AGENTS.md'
 agents:
-  cursor:
+  bogus:
     instructions:
-      - source: cursor/cursorrules
-        target: '$workspace/.cursorrules'
-  claude:
+      - source: bogus/instructions.md
+        target: '$workspace/.bogus/instructions.md'
+  fake:
     instructions:
-      - source: claude/CLAUDE.md
-        target: '$workspace/CLAUDE.md'
+      - source: fake/instructions.md
+        target: '$workspace/.fake/instructions.md'
 languages:
-  rust:
+  Rust++:
     files:
-      - source: rust-format.toml
-        target: '$workspace/.rustfmt.toml'
-  swift:
+      - source: rpp-format.toml
+        target: '$workspace/.rpp.toml'
+  CppScript:
     files:
-      - source: swift-format.json
-        target: '$workspace/.swift-format'
+      - source: cppscript-format.json
+        target: '$workspace/.cppscript-format'
 "#;
         fs::write(dir.join("templates.yml"), yml)?;
         fs::write(dir.join("AGENTS.md"), TEMPLATE_BASE)?;
@@ -1644,8 +1735,8 @@ languages:
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found in templates.yml") == true);
         assert!(err.contains("nonexistent") == true);
-        assert!(err.contains("cursor") == true);
-        assert!(err.contains("claude") == true);
+        assert!(err.contains("bogus") == true);
+        assert!(err.contains("fake") == true);
         Ok(())
     }
 
@@ -1663,8 +1754,8 @@ languages:
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found in templates.yml") == true);
         assert!(err.contains("nonexistent") == true);
-        assert!(err.contains("rust") == true);
-        assert!(err.contains("swift") == true);
+        assert!(err.contains("Rust++") == true);
+        assert!(err.contains("CppScript") == true);
         Ok(())
     }
 
@@ -1674,11 +1765,11 @@ languages:
         let config_dir = tempfile::TempDir::new()?;
         write_minimal_templates_yml(config_dir.path())?;
 
-        fs::create_dir_all(config_dir.path().join("cursor"))?;
-        fs::write(config_dir.path().join("cursor/cursorrules"), "test")?;
+        fs::create_dir_all(config_dir.path().join("bogus"))?;
+        fs::write(config_dir.path().join("bogus/instructions.md"), "test")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("cursor"), mission: None, force: false, dry_run: true };
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: true };
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
@@ -1694,33 +1785,39 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  opencode: {}\nlanguages: {}\nintegration: {}\n";
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus: {}\nlanguages: {}\nintegration: {}\n";
         fs::write(config_dir.path().join("templates.yml"), yaml)?;
         fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("opencode"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
 
-        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new(".opencode"))) == true);
-        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new("opencode.json"))) == false);
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new(".bogus"))) == true);
+        assert!(resolved.directories.iter().any(|path| path.ends_with(std::path::Path::new("bogus.json"))) == false);
         Ok(())
     }
 
     #[test]
     fn test_update_accepts_known_language() -> anyhow::Result<()>
     {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
         let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
         write_minimal_templates_yml(config_dir.path())?;
 
-        fs::write(config_dir.path().join("rust-format.toml"), "max_width = 100")?;
+        fs::write(config_dir.path().join("rpp-format.toml"), "max_width = 100")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("rust"), agent: None, mission: None, force: false, dry_run: true };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: true };
 
         let result = engine.update(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
         assert!(result.is_ok() == true);
         Ok(())
     }
@@ -1732,7 +1829,7 @@ languages:
         use std::fs;
         let agents_yaml = agents.iter().map(|a| format!("  {}: {{}}", a)).collect::<Vec<_>>().join("\n");
         let yaml = format!(
-            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages:\n  rust:\n    skills:\n      - source: \
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n{}\nlanguages:\n  Rust++:\n    skills:\n      - source: \
              'skills/{}'\nintegration: {{}}\n",
             agents_yaml, skill_source_name
         );
@@ -1745,7 +1842,7 @@ languages:
     }
 
     #[test]
-    fn test_lang_skills_route_to_native_dir_for_claude() -> anyhow::Result<()>
+    fn test_lang_skills_route_to_native_dir_for_bogus() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1753,10 +1850,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["claude"])?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("rust"), agent: Some("claude"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1764,19 +1862,18 @@ languages:
         let skill_targets: Vec<String> =
             resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
 
-        // Lang skills for claude must go to .claude/skills/, never to .agents/skills/
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
         for t in &skill_targets
         {
-            assert!(t.contains(".claude/skills"), "skill target should be in .claude/skills/, got: {}", t);
-            assert!(t.contains(".agents/skills") == false, "skill must not go to .agents/skills/ for claude, got: {}", t);
+            assert!(t.contains(".bogus/skills"), "skill target should be in .bogus/skills/, got: {}", t);
+            assert!(t.contains(".agents/skills") == false, "skill must not go to .agents/skills/ for bogus, got: {}", t);
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_lang_skills_route_to_cross_client_for_cursor() -> anyhow::Result<()>
+    fn test_lang_skills_route_to_cross_client_for_bogus() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1784,10 +1881,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_skill_routing_config(config_dir.path(), "rust-coding-conventions", &["cursor"])?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("rust"), agent: Some("cursor"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1795,11 +1893,10 @@ languages:
         let skill_targets: Vec<String> =
             resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
 
-        // Cursor reads .agents/skills/ so lang skills should go there
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
         for t in &skill_targets
         {
-            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for cursor, got: {}", t);
+            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for bogus, got: {}", t);
         }
 
         Ok(())
@@ -1824,8 +1921,24 @@ languages:
         Ok(())
     }
 
+    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool)]) -> anyhow::Result<()>
+    {
+        let entries = agents
+            .iter()
+            .map(|(name, reads_cross_client_skills)| {
+                format!(
+                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: '$workspace/.{name}/skills'\n    \
+                     reads_cross_client_skills: {reads_cross_client_skills}\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        fs::write(config_dir.join(agent_defaults::AGENT_DEFAULTS_FILE), format!("version: 1\nagents:\n{entries}"))?;
+        Ok(())
+    }
+
     #[test]
-    fn test_toplevel_skills_route_to_cross_client_for_codex() -> anyhow::Result<()>
+    fn test_toplevel_skills_route_to_cross_client_for_bogus_from_defaults() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1833,10 +1946,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["codex"])?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("codex"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1844,19 +1958,18 @@ languages:
         let skill_targets: Vec<String> =
             resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
 
-        // Top-level skills for codex must go to .agents/skills/, never to ~/.codex/skills/
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
-        for t in &skill_targets
+        for target in &skill_targets
         {
-            assert!(t.contains(".agents/skills"), "skill target should be in .agents/skills/ for codex, got: {}", t);
-            assert!(t.contains(".codex") == false, "skill must not go to .codex/ for codex, got: {}", t);
+            assert!(target.contains(".agents/skills"), "skill target should be in .agents/skills/ for cross-client bogus, got: {}", target);
+            assert!(target.contains(".bogus/skills") == false, "cross-client bogus must not route top-level skills to native dir, got: {}", target);
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_toplevel_skills_route_to_native_dir_for_claude() -> anyhow::Result<()>
+    fn test_toplevel_skills_route_to_native_dir_for_bogus_from_defaults() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1864,10 +1977,11 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["claude"])?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1875,19 +1989,216 @@ languages:
         let skill_targets: Vec<String> =
             resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
 
-        // Top-level skills for claude must go to .claude/skills/, never to .agents/skills/
         assert!(skill_targets.is_empty() == false, "expected at least one skill file");
-        for t in &skill_targets
+        for target in &skill_targets
         {
-            assert!(t.contains(".claude/skills"), "skill target should be in .claude/skills/ for claude, got: {}", t);
-            assert!(t.contains(".agents/skills") == false, "skill must not go to .agents/skills/ for claude, got: {}", t);
+            assert!(target.contains(".bogus/skills"), "skill target should use bogus native skill dir, got: {}", target);
+            assert!(target.contains(".agents/skills") == false, "native-only bogus must not route top-level skills to .agents/skills/, got: {}", target);
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_adopt_cross_client_skills_to_claude() -> anyhow::Result<()>
+    fn test_toplevel_skills_for_native_agent_ignore_existing_cross_client_dir() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let cross_skill = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&cross_skill)?;
+        fs::write(cross_skill.join("SKILL.md"), "# Existing Cross Skill")?;
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let native_target = std::path::Path::new(".bogus/skills/git-workflow/SKILL.md");
+        let native_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.ends_with(native_target)).collect();
+        assert_eq!(native_targets.len(), 1);
+
+        let cross_rel = std::path::Path::new(".agents/skills");
+        let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.ancestors().any(|a| a.ends_with(cross_rel))).collect();
+        assert!(cross_targets.is_empty() == true, "top-level skills must not target .agents/skills for agents that do not read it");
+
+        Ok(())
+    }
+
+    fn preflight_toplevel_cross_client_skill(
+        existing_content: &str, tracked_sha: Option<String>, source_content: &str
+    ) -> anyhow::Result<(PreflightPlan, Vec<ResolvedFile>)>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        fs::write(config_dir.path().join("skills/git-workflow/SKILL.md"), source_content)?;
+
+        let target = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
+        fs::create_dir_all(target.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&target, existing_content)?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        if let Some(sha) = tracked_sha
+        {
+            tracker.record_installation(&target, sha, 5, LANG_NONE.into(), AGENT_ALL.into(), "skill".into());
+        }
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let resolved = engine.resolve_all_files(&options)?;
+        let plan = engine.preflight_installation(&resolved.context, false, &options, &resolved.files, &resolved.directories, &tracker);
+        let _ = std::env::set_current_dir(&original_cwd);
+        Ok((plan?, resolved.files))
+    }
+
+    #[test]
+    fn test_preflight_cross_client_skill_same_tracked_file_refreshes_tracker() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let content = "# Skill";
+        let existing = tempfile::NamedTempFile::new()?;
+        fs::write(existing.path(), content)?;
+        let sha = FileTracker::calculate_sha256(existing.path())?;
+
+        let (plan, files) = preflight_toplevel_cross_client_skill(content, Some(sha), content)?;
+        let shared_actions: Vec<&PlannedFileAction> =
+            plan.files.iter().filter(|planned| files[planned.index].target.ends_with(std::path::Path::new(".agents/skills/git-workflow/SKILL.md"))).collect();
+
+        assert_eq!(shared_actions.len(), 1);
+        assert_eq!(shared_actions[0].kind, PlannedFileActionKind::RefreshTracker);
+        Ok(())
+    }
+
+    #[test]
+    fn test_execute_refresh_tracker_skips_copy() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let target = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
+        fs::create_dir_all(target.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&target, "# Skill")?;
+
+        let source = config_dir.path().join("SKILL.md");
+        fs::write(&source, "# Skill")?;
+        let source_sha = FileTracker::calculate_sha256(&source)?;
+
+        let files = vec![ResolvedFile { source, target: target.clone(), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }];
+        let plan = PreflightPlan {
+            files: vec![PlannedFileAction {
+                index:      0,
+                source_sha: source_sha.clone(),
+                category:   "skill".to_string(),
+                kind:       PlannedFileActionKind::RefreshTracker
+            }]
+        };
+        let mut tracker = FileTracker::new(workspace.path())?;
+        let engine = TemplateEngine::new(config_dir.path());
+
+        engine.copy_files_with_tracking(&files, &plan, &mut tracker, 5)?;
+
+        assert_eq!(fs::read_to_string(&target)?, "# Skill");
+        let metadata = tracker.get_metadata(&target).ok_or_else(|| anyhow::anyhow!("expected tracker metadata"))?;
+        assert_eq!(metadata.original_sha, source_sha);
+        assert_eq!(metadata.template_version, 5);
+        Ok(())
+    }
+
+    #[test]
+    fn test_preflight_cross_client_skill_different_tracked_file_errors() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let existing = tempfile::NamedTempFile::new()?;
+        fs::write(existing.path(), "# Existing")?;
+        let sha = FileTracker::calculate_sha256(existing.path())?;
+
+        let result = preflight_toplevel_cross_client_skill("# Existing", Some(sha), "# Skill");
+
+        assert!(result.is_err() == true);
+        let Err(err) = result
+        else
+        {
+            panic!("expected preflight error");
+        };
+        assert!(err.to_string().contains("Installation preflight failed") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_preflight_cross_client_skill_modified_tracked_file_errors() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let original = tempfile::NamedTempFile::new()?;
+        fs::write(original.path(), "# Original")?;
+        let sha = FileTracker::calculate_sha256(original.path())?;
+
+        let result = preflight_toplevel_cross_client_skill("# Modified", Some(sha), "# Skill");
+
+        assert!(result.is_err() == true);
+        let Err(err) = result
+        else
+        {
+            panic!("expected preflight error");
+        };
+        assert!(err.to_string().contains("local modifications") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_preflight_cross_client_skill_untracked_file_errors() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let result = preflight_toplevel_cross_client_skill("# Existing", None, "# Skill");
+
+        assert!(result.is_err() == true);
+        let Err(err) = result
+        else
+        {
+            panic!("expected preflight error");
+        };
+        assert!(err.to_string().contains("not tracked") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_preflight_conflict_writes_nothing() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_toplevel_skill_routing_config(config_dir.path(), "git-workflow", &["bogus"])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true)])?;
+        let target = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
+        fs::create_dir_all(target.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&target, "# Untracked")?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let result = engine.update(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+
+        assert!(result.is_err() == true);
+        assert!(workspace.path().join("AGENTS.md").exists() == false);
+        assert!(workspace.path().join(".bogus").exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_adopt_cross_client_skills_to_bogus() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -1901,12 +2212,13 @@ languages:
         std::fs::write(cross_skill.join("SKILL.md"), "# Git Workflow")?;
 
         // Minimal config with no language skills so we can isolate the adoption behaviour
-        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  claude: {}\nlanguages: {}\nintegration: {}\n";
+        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus: {}\nlanguages: {}\nintegration: {}\n";
         std::fs::write(config_dir.path().join("templates.yml"), yaml)?;
         std::fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("claude"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1914,11 +2226,11 @@ languages:
         // Use Path::ends_with with relative components to avoid symlink / path-separator
         // mismatches between workspace.path() (raw TempDir) and the canonicalized cwd
         // that resolve_all_files uses internally (macOS /var vs /private/var, Windows \).
-        let native_rel = std::path::Path::new(".claude/skills/git-workflow");
+        let native_rel = std::path::Path::new(".bogus/skills/git-workflow");
         let adopted: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.parent().is_some_and(|p| p.ends_with(native_rel))).collect();
 
-        assert!(adopted.is_empty() == false, "expected cross-client skill to be adopted into .claude/skills/");
-        assert!(adopted[0].target.ends_with(std::path::Path::new(".claude/skills/git-workflow/SKILL.md")) == true);
+        assert!(adopted.is_empty() == false, "expected cross-client skill to be adopted into .bogus/skills/");
+        assert!(adopted[0].target.ends_with(std::path::Path::new(".bogus/skills/git-workflow/SKILL.md")) == true);
         // The .agents/skills/ path must not appear in copy targets
         let cross_rel = std::path::Path::new(".agents/skills");
         let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.ancestors().any(|a| a.ends_with(cross_rel))).collect();

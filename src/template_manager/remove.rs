@@ -55,6 +55,7 @@ impl TemplateManager
         if has_agent_target == true || remove_all == true
         {
             let file_tracker = FileTracker::new(&current_dir)?;
+            let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
 
             let bom = if config_file.exists() == true
             {
@@ -96,10 +97,10 @@ impl TemplateManager
 
                 // Collect skill files under this agent's skill dir via filesystem scan
                 // (catches untracked/manually placed skills that FileTracker misses).
-                // Skip userprofile-based dirs (e.g. codex ~/.codex/skills) — those are
-                // user-global and may contain agent-internal files or other workspaces' skills.
+                // Skip userprofile-based dirs because those are user-global and may
+                // contain agent-internal files or other workspaces' skills.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir(agent_name) &&
+                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent_name) &&
                     raw_skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
                 {
                     let skill_dir = resolve_placeholder_path(raw_skill_dir, &current_dir, &userprofile);
@@ -141,11 +142,11 @@ impl TemplateManager
                 // contents for deletion so orphaned skills don't accumulate.
                 // If another cross-client agent is still installed, preserve the directory
                 // and print an informational note so the user knows why it was skipped.
-                if agent_defaults::reads_cross_client_skills(agent_name) == true
+                if agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, agent_name) == true
                 {
-                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents(&current_dir)
+                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents_from_catalog(&agent_catalog, &current_dir)
                         .into_iter()
-                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills(other) == true)
+                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, other) == true)
                         .collect();
 
                     let cross_client_dir = resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, &current_dir, &userprofile);
@@ -209,10 +210,10 @@ impl TemplateManager
                 }
 
                 // Scan workspace-scoped agent skill directories on filesystem to catch
-                // untracked/manually placed skills. Userprofile-based dirs (e.g. codex)
-                // are excluded — those are covered by the FileTracker sweep below.
+                // untracked/manually placed skills. Userprofile-based dirs are excluded;
+                // those are covered by the FileTracker sweep below.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
+                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
                 for dir in &skill_search_dirs
                 {
                     if dir.exists() == true &&
@@ -279,7 +280,8 @@ impl TemplateManager
                 if let Ok(lang_skills) = bom::resolve_language_skills(lang_name, &config)
                 {
                     let userprofile = dirs::home_dir().unwrap_or_default();
-                    let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
+                    let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+                    let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
                     for skill in lang_skills
                     {
                         let skill_name = skill.derive_name();
@@ -545,9 +547,10 @@ impl TemplateManager
         }
 
         // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
-        // placed skills. Userprofile-based dirs (e.g. codex ~/.codex/skills) are excluded.
+        // placed skills. Userprofile-based dirs are excluded.
         let userprofile = dirs::home_dir().unwrap_or_default();
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(current_dir, &userprofile);
+        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, current_dir, &userprofile);
         for dir in &skill_search_dirs
         {
             if dir.exists() == true &&
@@ -598,8 +601,7 @@ impl TemplateManager
 
     /// Check if a file path belongs to a specific agent's directory tree
     ///
-    /// Matches paths containing the agent name in a directory component
-    /// (e.g. `.cursor/skills/`, `.claude/skills/`).
+    /// Matches paths containing the agent name in a directory component.
     fn path_belongs_to_agent(path: &std::path::Path, agent_name: &str) -> bool
     {
         let agent_dir_patterns = [format!(".{}/", agent_name), format!(".{}\\", agent_name), format!("/{}/", agent_name), format!("\\{}\\", agent_name)];
@@ -616,58 +618,76 @@ mod tests
 
     use super::TemplateManager;
     use crate::{
+        agent_defaults::AGENT_DEFAULTS_FILE,
         bom::BillOfMaterials,
         file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
         template_manager::cwd_test_guard
     };
 
-    #[test]
-    fn test_path_belongs_to_cursor()
+    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool, Option<&str>)]) -> anyhow::Result<()>
     {
-        let path = PathBuf::from("/home/user/project/.cursor/skills/my-skill/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "cursor") == true);
+        let entries = agents
+            .iter()
+            .map(|(name, reads_cross_client_skills, userprofile_skill_dir)| {
+                let userprofile = userprofile_skill_dir.map(|dir| format!("    userprofile_skill_dir: '{dir}'\n")).unwrap_or_default();
+                format!(
+                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: \
+                     '$workspace/.{name}/skills'\n{userprofile}    reads_cross_client_skills: {reads_cross_client_skills}\n"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        fs::write(config_dir.join(AGENT_DEFAULTS_FILE), format!("version: 1\nagents:\n{entries}"))?;
+        Ok(())
     }
 
     #[test]
-    fn test_path_belongs_to_claude()
+    fn test_path_belongs_to_bogus()
     {
-        let path = PathBuf::from("/home/user/project/.claude/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "claude") == true);
+        let path = PathBuf::from("/home/user/project/.bogus/skills/my-skill/SKILL.md");
+        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == true);
+    }
+
+    #[test]
+    fn test_path_belongs_to_fake()
+    {
+        let path = PathBuf::from("/home/user/project/.fake/skills/foo/SKILL.md");
+        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == true);
     }
 
     #[test]
     fn test_path_does_not_belong_to_wrong_agent()
     {
-        let path = PathBuf::from("/home/user/project/.cursor/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "claude") == false);
+        let path = PathBuf::from("/home/user/project/.bogus/skills/foo/SKILL.md");
+        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == false);
     }
 
     #[test]
     fn test_path_no_agent_directory()
     {
         let path = PathBuf::from("/home/user/project/AGENTS.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "cursor") == false);
+        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == false);
     }
 
     #[test]
     fn test_resolve_workspace_path_skips_instructions()
     {
         assert!(BillOfMaterials::resolve_workspace_path("$instructions").is_none() == true);
-        assert!(BillOfMaterials::resolve_workspace_path("$instructions/rust.md").is_none() == true);
+        assert!(BillOfMaterials::resolve_workspace_path("$instructions/rpp.md").is_none() == true);
     }
 
     #[test]
     fn test_resolve_workspace_path_skips_userprofile()
     {
-        assert!(BillOfMaterials::resolve_workspace_path("$userprofile/.codex/init.md").is_none() == true);
+        assert!(BillOfMaterials::resolve_workspace_path("$userprofile/.bogus/init.md").is_none() == true);
     }
 
     #[test]
     fn test_resolve_workspace_path_resolves_workspace()
     {
-        let result = BillOfMaterials::resolve_workspace_path("$workspace/.rustfmt.toml");
+        let result = BillOfMaterials::resolve_workspace_path("$workspace/.rpp.toml");
         assert!(result.is_some() == true);
-        assert_eq!(result.unwrap(), PathBuf::from("./.rustfmt.toml"));
+        assert_eq!(result.unwrap(), PathBuf::from("./.rpp.toml"));
     }
 
     #[test]
@@ -677,7 +697,7 @@ mod tests
 
         let dir = tempfile::TempDir::new()?;
         let config_path = dir.path().join("templates.yml");
-        let yaml = "languages:\n  rust:\n    files: []\n";
+        let yaml = "languages:\n  Rust++:\n    files: []\n";
         fs::write(&config_path, yaml)?;
 
         let manager = TemplateManager { config_dir: dir.path().to_path_buf() };
@@ -692,21 +712,23 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  claude:\n    instructions: []\n";
+        let yaml = "version: 5\nagents:\n  fake:\n    instructions: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
 
-        let agent_file = workspace.path().join(".cursorrules");
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agent_file, "test")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("cursor"), None, false, true);
+        let result = manager.remove(Some("bogus"), None, false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -718,21 +740,21 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nlanguages:\n  swift:\n    files: []\n";
+        let yaml = "version: 5\nlanguages:\n  CppScript:\n    files: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
 
-        let lang_file = workspace.path().join(".rustfmt.toml");
+        let lang_file = workspace.path().join(".rpp.toml");
         fs::write(&lang_file, "max_width = 100")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("rust"), false, true);
+        let result = manager.remove(None, Some("Rust++"), false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -744,9 +766,9 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let lang_file = workspace.path().join(".rustfmt.toml");
+        let lang_file = workspace.path().join(".rpp.toml");
         let main_file = workspace.path().join("AGENTS.md");
-        let skill_dir = workspace.path().join(".cursor/skills/rust-conventions");
+        let skill_dir = workspace.path().join(".bogus/skills/rpp-conventions");
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&lang_file, "max_width = 100")?;
@@ -754,16 +776,16 @@ mod tests
         fs::write(&skill_file, "# Skill")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&lang_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "language".into());
-        tracker.record_installation(&main_file, "sha2".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
-        tracker.record_installation(&skill_file, "sha3".into(), 5, "rust".into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&main_file, "sha2".into(), 5, "Rust++".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&skill_file, "sha3".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("rust"), true, false);
+        let result = manager.remove(None, Some("Rust++"), true, false);
 
         assert!(result.is_ok() == true);
         assert!(lang_file.exists() == false);
@@ -778,19 +800,19 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nlanguages:\n  rust:\n    skills:\n      - source: skills/rust-coding-conventions\n";
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: skills/rpp-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
 
-        let skill_dir = workspace.path().join(".agents/skills/rust-coding-conventions");
+        let skill_dir = workspace.path().join(".agents/skills/rpp-skill");
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
-        fs::write(&skill_file, "# Rust Coding Conventions")?;
+        fs::write(&skill_file, "# Rust++ Coding Conventions")?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, Some("rust"), true, false);
+        let result = manager.remove(None, Some("Rust++"), true, false);
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -803,14 +825,16 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  cursor:\n    instructions:\n      - source: cursorrules.md\n        target: $workspace/.cursorrules\n";
+        let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
 
-        let agent_file = workspace.path().join(".cursorrules");
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agent_file, "test")?;
 
         // Place a skill directory on disk without any FileTracker entry
-        let skill_dir = workspace.path().join(".cursor/skills/my-skill");
+        let skill_dir = workspace.path().join(".bogus/skills/my-skill");
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
@@ -819,7 +843,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("cursor"), None, true, false);
+        let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
@@ -871,14 +895,16 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  cursor:\n    instructions:\n      - source: cursorrules.md\n        target: $workspace/.cursorrules\n";
+        let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
 
-        let agent_file = workspace.path().join(".cursorrules");
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agent_file, "test")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
@@ -920,12 +946,13 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Track a codex-agent file; purge should delete it without scanning ~/.codex/skills
-        let codex_file = workspace.path().join("CODEX.md");
-        fs::write(&codex_file, "Read AGENTS.md")?;
+        // Track an agent file; purge should delete it without scanning userprofile skills.
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&agent_file, "Read AGENTS.md")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
@@ -935,7 +962,7 @@ mod tests
         let result = manager.remove_purge(true, false);
 
         assert!(result.is_ok() == true);
-        assert!(codex_file.exists() == false);
+        assert!(agent_file.exists() == false);
         Ok(())
     }
 
@@ -972,18 +999,21 @@ mod tests
     }
 
     #[test]
-    fn test_remove_agent_codex_skips_userprofile_skill_scan() -> anyhow::Result<()>
+    fn test_remove_agent_skips_userprofile_skill_scan() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Track a codex agent file so remove --agent codex has something to find
-        let codex_file = workspace.path().join("CODEX.md");
-        fs::write(&codex_file, "Read AGENTS.md")?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, Some("$userprofile/.bogus/skills"))])?;
 
-        // Track the codex instruction file so remove has something to find
+        // Track an agent file so remove --agent has something to find.
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&agent_file, "Read AGENTS.md")?;
+
+        // Track the instruction file so remove has something to find.
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&codex_file, "sha1".into(), 5, LANG_NONE.into(), "codex".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
         tracker.save()?;
 
         let _g = cwd_test_guard();
@@ -991,10 +1021,9 @@ mod tests
 
         // Use dry-run to inspect what would be removed without side effects.
         // The key assertion is that this succeeds without attempting to scan
-        // the userprofile-based ~/.codex/skills directory (which would pick up
-        // .system and other workspaces' skills).
+        // the userprofile-based skill directory.
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("codex"), None, false, true);
+        let result = manager.remove(Some("bogus"), None, false, true);
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -1006,9 +1035,9 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Create detection markers for two cross-client agents (cursor and codex)
-        fs::create_dir_all(workspace.path().join(".cursor"))?;
-        fs::create_dir_all(workspace.path().join(".codex"))?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
+        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        fs::create_dir_all(workspace.path().join(".fake"))?;
 
         // Place a cross-client skill
         let skill_dir = workspace.path().join(".agents/skills/git-workflow");
@@ -1020,11 +1049,10 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        // Remove cursor in dry-run mode; codex is still installed so the guard fires
-        let result = manager.remove(Some("cursor"), None, false, true);
+        let result = manager.remove(Some("bogus"), None, false, true);
 
         assert!(result.is_ok() == true);
-        // The cross-client skill must be preserved because codex still needs it
+        // The cross-client skill must be preserved because another agent still needs it.
         assert!(skill_file.exists() == true);
         Ok(())
     }
@@ -1035,8 +1063,8 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // Create a detection marker for cursor only (the last cross-client agent)
-        fs::create_dir_all(workspace.path().join(".cursor"))?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
+        fs::create_dir_all(workspace.path().join(".bogus"))?;
 
         // Place a cross-client skill
         let skill_dir = workspace.path().join(".agents/skills/git-workflow");
@@ -1048,11 +1076,10 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        // Remove cursor with force; no other cross-client agents so .agents/skills/ is cleaned
-        let result = manager.remove(Some("cursor"), None, true, false);
+        let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
-        // The cross-client skill must be deleted because cursor was the last cross-client agent
+        // The cross-client skill must be deleted because this was the last cross-client agent.
         assert!(skill_file.exists() == false);
         Ok(())
     }

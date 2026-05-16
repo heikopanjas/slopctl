@@ -266,6 +266,15 @@ impl FileTracker
     {
         use crate::agent_defaults;
 
+        let catalog = agent_defaults::load_embedded_agent_catalog()?;
+        self.adopt_untracked_files_from_catalog(workspace, &catalog)
+    }
+
+    /// Adopt existing slopctl-managed files using a specific agent catalog
+    pub fn adopt_untracked_files_from_catalog(&mut self, workspace: &Path, catalog: &crate::agent_defaults::AgentCatalog) -> anyhow::Result<usize>
+    {
+        use crate::agent_defaults;
+
         let mut adopted = 0usize;
         let userprofile = dirs::home_dir().unwrap_or_default();
 
@@ -279,31 +288,24 @@ impl FileTracker
         // Adopt agent instruction files (category "agent") for all known agents.
         // Agent markers are directories used for detection, not managed files, so they
         // are skipped here and skills/prompts are adopted by the directory scans below.
-        for agent_name in agent_defaults::known_agents()
+        for agent in &catalog.agents
         {
-            if let Some(defaults) = agent_defaults::get_defaults(agent_name)
+            for marker in &agent.markers
             {
-                for marker in defaults.workspace_markers
+                let path = workspace.join(marker);
+                if path.is_file() == true
                 {
-                    if marker.placeholder == agent_defaults::PLACEHOLDER_WORKSPACE
-                    {
-                        let path = workspace.join(marker.path);
-                        if path.is_file() == true
-                        {
-                            adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "agent")?;
-                        }
-                    }
+                    adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "agent")?;
                 }
             }
         }
 
         // Adopt skills (category "skill") from all workspace-scoped skill directories
-        for agent_name in agent_defaults::known_agents()
+        for agent in &catalog.agents
         {
-            if let Some(defaults) = agent_defaults::get_defaults(agent_name) &&
-                defaults.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+            if agent.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
             {
-                let skill_dir = agent_defaults::resolve_placeholder_path(defaults.skill_dir, workspace, &userprofile);
+                let skill_dir = agent_defaults::resolve_placeholder_path(&agent.skill_dir, workspace, &userprofile);
                 if skill_dir.exists() == true &&
                     let Ok(entries) = fs::read_dir(&skill_dir)
                 {
@@ -343,12 +345,11 @@ impl FileTracker
         }
 
         // Adopt commands/prompts from all workspace-scoped prompt directories
-        for agent_name in agent_defaults::known_agents()
+        for agent in &catalog.agents
         {
-            if let Some(defaults) = agent_defaults::get_defaults(agent_name) &&
-                defaults.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+            if agent.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
             {
-                let prompt_dir = agent_defaults::resolve_placeholder_path(defaults.prompt_dir, workspace, &userprofile);
+                let prompt_dir = agent_defaults::resolve_placeholder_path(&agent.prompt_dir, workspace, &userprofile);
                 if prompt_dir.exists() == true &&
                     let Ok(entries) = fs::read_dir(&prompt_dir)
                 {
@@ -521,6 +522,29 @@ mod tests
 
     use super::*;
 
+    fn synthetic_catalog() -> crate::agent_defaults::AgentCatalog
+    {
+        crate::agent_defaults::parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/commands'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+  - name: fake
+    markers:
+      - .fake
+    prompt_dir: '$workspace/.fake/commands'
+    skill_dir: '$workspace/.fake/skills'
+    reads_cross_client_skills: true
+"#
+        )
+        .expect("synthetic catalog should parse")
+    }
+
     #[test]
     fn test_calculate_sha256() -> anyhow::Result<()>
     {
@@ -547,7 +571,7 @@ mod tests
 
         let original_sha = FileTracker::calculate_sha256(&test_file)?;
 
-        tracker.record_installation(&test_file, original_sha.clone(), 1, "rust".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&test_file, original_sha.clone(), 1, "Rust++".into(), AGENT_ALL.into(), "language".into());
 
         let status = tracker.check_modification(&test_file)?;
         assert_eq!(status, FileStatus::Unmodified);
@@ -573,9 +597,9 @@ mod tests
         let project_file = workspace.join("AGENTS.md");
         fs::write(&project_file, b"test")?;
 
-        tracker.record_installation(&project_file, "sha123".into(), 1, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&project_file, "sha123".into(), 1, "Rust++".into(), AGENT_ALL.into(), "main".into());
         let lang = tracker.get_installed_language();
-        assert_eq!(lang, Some("rust".to_string()));
+        assert_eq!(lang, Some("Rust++".to_string()));
 
         Ok(())
     }
@@ -608,21 +632,22 @@ mod tests
     {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
-        fs::create_dir_all(workspace.join(".cursor/skills/my-skill"))?;
+        fs::create_dir_all(workspace.join(".bogus/skills/my-skill"))?;
 
         let mut tracker = FileTracker::new(workspace)?;
 
-        let agent_file = workspace.join(".cursorrules");
+        let agent_file = workspace.join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "cursor".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "bogus".into(), "agent".into());
 
-        let skill_file = workspace.join(".cursor/skills/my-skill/SKILL.md");
+        let skill_file = workspace.join(".bogus/skills/my-skill/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "cursor".into(), "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "bogus".into(), "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&lang_file, "sha3".into(), 3, "Rust++".into(), AGENT_ALL.into(), "main".into());
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 3);
@@ -635,21 +660,22 @@ mod tests
     {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
-        fs::create_dir_all(workspace.join(".cursor/skills/foo"))?;
+        fs::create_dir_all(workspace.join(".bogus/skills/foo"))?;
 
         let mut tracker = FileTracker::new(workspace)?;
 
-        let agent_file = workspace.join(".cursorrules");
+        let agent_file = workspace.join(".bogus/instructions.md");
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agent_file, b"agent")?;
-        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "cursor".into(), "agent".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 3, LANG_NONE.into(), "bogus".into(), "agent".into());
 
-        let skill_file = workspace.join(".cursor/skills/foo/SKILL.md");
+        let skill_file = workspace.join(".bogus/skills/foo/SKILL.md");
         fs::write(&skill_file, b"skill")?;
-        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "cursor".into(), "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 3, LANG_NONE.into(), "bogus".into(), "skill".into());
 
         let lang_file = workspace.join("AGENTS.md");
         fs::write(&lang_file, b"main")?;
-        tracker.record_installation(&lang_file, "sha3".into(), 3, "rust".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&lang_file, "sha3".into(), 3, "Rust++".into(), AGENT_ALL.into(), "language".into());
 
         let skills = tracker.get_entries_by_category("skill");
         assert_eq!(skills.len(), 1);
@@ -689,17 +715,17 @@ mod tests
     {
         let temp_dir = TempDir::new()?;
         let workspace = temp_dir.path();
-        fs::create_dir_all(workspace.join(".cursor/skills/my-skill"))?;
+        fs::create_dir_all(workspace.join(".bogus/skills/my-skill"))?;
 
         let mut tracker = FileTracker::new(workspace)?;
 
-        let file = workspace.join(".cursor/skills/my-skill/SKILL.md");
+        let file = workspace.join(".bogus/skills/my-skill/SKILL.md");
         fs::write(&file, b"skill")?;
-        tracker.record_installation(&file, "sha1".into(), 5, LANG_NONE.into(), "cursor".into(), "skill".into());
+        tracker.record_installation(&file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "skill".into());
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].0, PathBuf::from(".cursor/skills/my-skill/SKILL.md"));
+        assert_eq!(entries[0].0, PathBuf::from(".bogus/skills/my-skill/SKILL.md"));
 
         Ok(())
     }
@@ -730,7 +756,7 @@ mod tests
                 "original_sha": "sha_a",
                 "template_version": 5,
                 "installed_date": "2026-01-01T00:00:00+00:00",
-                "lang": "rust",
+                "lang": "Rust++",
                 "category": "main",
                 "workspace": workspace_a_canon.to_string_lossy().to_string()
             },
@@ -738,7 +764,7 @@ mod tests
                 "original_sha": "sha_b",
                 "template_version": 5,
                 "installed_date": "2026-01-01T00:00:00+00:00",
-                "lang": "rust",
+                "lang": "Rust++",
                 "category": "main",
                 "workspace": workspace_b_canon.to_string_lossy().to_string()
             }
@@ -818,18 +844,16 @@ mod tests
 
         // AGENTS.md → "main"
         fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-        // .opencode is the workspace marker for OpenCode.
-        fs::create_dir_all(workspace.join(".opencode"))?;
-        // Claude skill and command (adopted via skill/command dir scans, not marker)
-        fs::create_dir_all(workspace.join(".claude/skills/git-workflow"))?;
-        fs::write(workspace.join(".claude/skills/git-workflow/SKILL.md"), b"# Skill")?;
-        fs::create_dir_all(workspace.join(".claude/commands"))?;
-        fs::write(workspace.join(".claude/commands/init-session.md"), b"# Command")?;
+        fs::create_dir_all(workspace.join(".bogus"))?;
+        fs::create_dir_all(workspace.join(".bogus/skills/git-workflow"))?;
+        fs::write(workspace.join(".bogus/skills/git-workflow/SKILL.md"), b"# Skill")?;
+        fs::create_dir_all(workspace.join(".bogus/commands"))?;
+        fs::write(workspace.join(".bogus/commands/init-session.md"), b"# Command")?;
 
         let mut tracker = FileTracker::new(workspace)?;
         assert_eq!(tracker.get_entries().len(), 0);
 
-        let adopted = tracker.adopt_untracked_files(workspace)?;
+        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
         assert_eq!(adopted, 3);
 
         let entries = tracker.get_entries();
@@ -855,7 +879,7 @@ mod tests
         tracker.record_installation(&workspace.join("AGENTS.md"), "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
         assert_eq!(tracker.get_entries().len(), 1);
 
-        let adopted = tracker.adopt_untracked_files(workspace)?;
+        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
         assert_eq!(adopted, 0);
         assert_eq!(tracker.get_entries().len(), 1);
 
@@ -871,7 +895,7 @@ mod tests
         fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
 
         let mut tracker = FileTracker::new(workspace)?;
-        tracker.adopt_untracked_files(workspace)?;
+        tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
 
         let entries = tracker.get_entries();
         assert_eq!(entries.len(), 1);

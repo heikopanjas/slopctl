@@ -108,8 +108,7 @@ impl SkillDefinition
 {
     /// Derives the skill name from the last path component of `source`.
     ///
-    /// For local paths (e.g. `"skills/rust-coding-conventions"`) returns
-    /// `"rust-coding-conventions"`. For GitHub URLs the last component is
+    /// For local paths returns the final path component. For GitHub URLs the last component is
     /// typically the repo name, but `discover_skills()` overrides this with
     /// the actual in-repo directory name (which matches the SKILL.md `name`
     /// frontmatter per the agentskills.io spec).
@@ -380,7 +379,7 @@ impl BillOfMaterials
     ///
     /// # Arguments
     ///
-    /// * `agent_name` - Name of the agent (e.g., "claude", "copilot")
+    /// * `agent_name` - Name of the agent
     ///
     /// # Returns
     ///
@@ -524,12 +523,12 @@ mod tests
         let mut config = minimal_config();
         config
             .languages
-            .insert("rust".to_string(), make_lang(vec![], vec![make_mapping("rust.md", "$instructions"), make_mapping("rust.toml", "$workspace/.rustfmt.toml")]));
+            .insert("Rust++".to_string(), make_lang(vec![], vec![make_mapping("rpp.md", "$instructions"), make_mapping("rpp.toml", "$workspace/.rpp.toml")]));
 
-        let files = resolve_language_files("rust", &config)?;
+        let files = resolve_language_files("Rust++", &config)?;
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].source, "rust.md");
-        assert_eq!(files[1].source, "rust.toml");
+        assert_eq!(files[0].source, "rpp.md");
+        assert_eq!(files[1].source, "rpp.toml");
         Ok(())
     }
 
@@ -548,17 +547,19 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared
-            .insert("cmake".to_string(), make_shared(vec![make_mapping("cmake-build.md", "$instructions"), make_mapping("cmake.gitignore", "$workspace/.gitignore")]));
+        shared.insert(
+            "shared-build".to_string(),
+            make_shared(vec![make_mapping("shared-build.md", "$instructions"), make_mapping("shared.gitignore", "$workspace/.gitignore")])
+        );
         config.shared = shared;
 
-        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["shared-build".to_string()], vec![make_mapping("rpp.md", "$instructions")]));
 
-        let files = resolve_language_files("c", &config)?;
+        let files = resolve_language_files("Rust++", &config)?;
         assert_eq!(files.len(), 3);
-        assert_eq!(files[0].source, "cmake-build.md");
-        assert_eq!(files[1].source, "cmake.gitignore");
-        assert_eq!(files[2].source, "c.md");
+        assert_eq!(files[0].source, "shared-build.md");
+        assert_eq!(files[1].source, "shared.gitignore");
+        assert_eq!(files[2].source, "rpp.md");
         Ok(())
     }
 
@@ -570,14 +571,14 @@ mod tests
         let mut config = minimal_config();
         config
             .languages
-            .insert("swift".to_string(), make_lang(vec![], vec![make_mapping("swift.md", "$instructions"), make_mapping("swift.ini", "$workspace/.editorconfig")]));
-        config.languages.insert("swiftui".to_string(), make_lang(vec!["swift".to_string()], vec![make_mapping("swiftui.md", "$instructions")]));
+            .insert("Rust++".to_string(), make_lang(vec![], vec![make_mapping("rpp.md", "$instructions"), make_mapping("rpp.ini", "$workspace/.editorconfig")]));
+        config.languages.insert("CppScript".to_string(), make_lang(vec!["Rust++".to_string()], vec![make_mapping("cppscript.md", "$instructions")]));
 
-        let files = resolve_language_files("swiftui", &config)?;
+        let files = resolve_language_files("CppScript", &config)?;
         assert_eq!(files.len(), 3);
-        assert_eq!(files[0].source, "swift.md");
-        assert_eq!(files[1].source, "swift.ini");
-        assert_eq!(files[2].source, "swiftui.md");
+        assert_eq!(files[0].source, "rpp.md");
+        assert_eq!(files[1].source, "rpp.ini");
+        assert_eq!(files[2].source, "cppscript.md");
         Ok(())
     }
 
@@ -609,17 +610,19 @@ mod tests
     {
         let mut config = minimal_config();
         let mut shared = HashMap::new();
-        shared.insert("cmake".to_string(), make_shared(vec![make_mapping("cmake.md", "$instructions")]));
+        shared.insert("shared-build".to_string(), make_shared(vec![make_mapping("shared-build.md", "$instructions")]));
         config.shared = shared;
 
-        config.languages.insert("c".to_string(), make_lang(vec![], vec![make_mapping("c.md", "$instructions")]));
-        config.languages.insert("c-ext".to_string(), make_lang(vec!["cmake".to_string(), "c".to_string()], vec![make_mapping("ext.md", "$instructions")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec![], vec![make_mapping("rpp.md", "$instructions")]));
+        config
+            .languages
+            .insert("CppScript".to_string(), make_lang(vec!["shared-build".to_string(), "Rust++".to_string()], vec![make_mapping("extension.md", "$instructions")]));
 
-        let files = resolve_language_files("c-ext", &config)?;
+        let files = resolve_language_files("CppScript", &config)?;
         assert_eq!(files.len(), 3);
-        assert_eq!(files[0].source, "cmake.md");
-        assert_eq!(files[1].source, "c.md");
-        assert_eq!(files[2].source, "ext.md");
+        assert_eq!(files[0].source, "shared-build.md");
+        assert_eq!(files[1].source, "rpp.md");
+        assert_eq!(files[2].source, "extension.md");
         Ok(())
     }
 
@@ -629,12 +632,12 @@ mod tests
     fn test_resolve_include_only_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("base".to_string(), make_lang(vec![], vec![make_mapping("base.md", "$instructions")]));
-        config.languages.insert("alias".to_string(), make_lang(vec!["base".to_string()], vec![]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec![], vec![make_mapping("rpp.md", "$instructions")]));
+        config.languages.insert("CppScript".to_string(), make_lang(vec!["Rust++".to_string()], vec![]));
 
-        let files = resolve_language_files("alias", &config)?;
+        let files = resolve_language_files("CppScript", &config)?;
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].source, "base.md");
+        assert_eq!(files[0].source, "rpp.md");
         Ok(())
     }
 
@@ -644,10 +647,10 @@ mod tests
     fn test_resolve_circular_include()
     {
         let mut config = minimal_config();
-        config.languages.insert("a".to_string(), make_lang(vec!["b".to_string()], vec![]));
-        config.languages.insert("b".to_string(), make_lang(vec!["a".to_string()], vec![]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["CppScript".to_string()], vec![]));
+        config.languages.insert("CppScript".to_string(), make_lang(vec!["Rust++".to_string()], vec![]));
 
-        let err = resolve_language_files("a", &config).unwrap_err();
+        let err = resolve_language_files("Rust++", &config).unwrap_err();
         assert!(err.to_string().contains("Circular include") == true);
     }
 
@@ -655,9 +658,9 @@ mod tests
     fn test_resolve_include_not_found()
     {
         let mut config = minimal_config();
-        config.languages.insert("lang".to_string(), make_lang(vec!["nonexistent".to_string()], vec![]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["nonexistent".to_string()], vec![]));
 
-        let err = resolve_language_files("lang", &config).unwrap_err();
+        let err = resolve_language_files("Rust++", &config).unwrap_err();
         assert!(err.to_string().contains("not found in shared or languages") == true);
     }
 
@@ -666,9 +669,9 @@ mod tests
     {
         let mut config = minimal_config();
         config.shared = HashMap::new();
-        config.languages.insert("lang".to_string(), make_lang(vec!["missing".to_string()], vec![]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["missing".to_string()], vec![]));
 
-        let err = resolve_language_files("lang", &config).unwrap_err();
+        let err = resolve_language_files("Rust++", &config).unwrap_err();
         assert!(err.to_string().contains("not found in shared or languages") == true);
     }
 
@@ -682,9 +685,9 @@ mod tests
         shared.insert("group".to_string(), make_shared(vec![make_mapping("a.ini", "$workspace/.editorconfig")]));
         config.shared = shared;
 
-        config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("b.ini", "$workspace/.editorconfig")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("b.ini", "$workspace/.editorconfig")]));
 
-        let err = resolve_language_files("lang", &config).unwrap_err();
+        let err = resolve_language_files("Rust++", &config).unwrap_err();
         assert!(err.to_string().contains("Duplicate target") == true);
         assert!(err.to_string().contains(".editorconfig") == true);
     }
@@ -694,11 +697,11 @@ mod tests
     {
         let mut config = minimal_config();
         config.languages.insert(
-            "rust".to_string(),
+            "Rust++".to_string(),
             make_lang(vec![], vec![make_mapping("coding.md", "$instructions"), make_mapping("build.md", "$instructions"), make_mapping("extra.md", "$instructions")])
         );
 
-        let files = resolve_language_files("rust", &config)?;
+        let files = resolve_language_files("Rust++", &config)?;
         assert_eq!(files.len(), 3);
         Ok(())
     }
@@ -711,9 +714,9 @@ mod tests
         shared.insert("group".to_string(), make_shared(vec![make_mapping("shared.md", "$instructions")]));
         config.shared = shared;
 
-        config.languages.insert("lang".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("own.md", "$instructions")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("own.md", "$instructions")]));
 
-        let files = resolve_language_files("lang", &config)?;
+        let files = resolve_language_files("Rust++", &config)?;
         assert_eq!(files.len(), 2);
         Ok(())
     }
@@ -738,20 +741,20 @@ mod tests
     fn test_bom_has_agent()
     {
         let mut bom = BillOfMaterials::new();
-        bom.agent_files.insert("claude".to_string(), vec![PathBuf::from("./CLAUDE.md")]);
+        bom.agent_files.insert("bogus".to_string(), vec![PathBuf::from("./.bogus/instructions.md")]);
 
-        assert!(bom.has_agent("claude") == true);
-        assert!(bom.has_agent("copilot") == false);
+        assert!(bom.has_agent("bogus") == true);
+        assert!(bom.has_agent("fake") == false);
     }
 
     #[test]
     fn test_bom_get_agent_files() -> anyhow::Result<()>
     {
         let mut bom = BillOfMaterials::new();
-        bom.agent_files.insert("cursor".to_string(), vec![PathBuf::from("./.cursorrules")]);
+        bom.agent_files.insert("bogus".to_string(), vec![PathBuf::from("./.bogus/instructions.md")]);
 
-        assert!(bom.get_agent_files("cursor").is_some() == true);
-        assert_eq!(bom.get_agent_files("cursor").ok_or_else(|| anyhow::anyhow!("missing cursor agent files"))?.len(), 1);
+        assert!(bom.get_agent_files("bogus").is_some() == true);
+        assert_eq!(bom.get_agent_files("bogus").ok_or_else(|| anyhow::anyhow!("missing bogus agent files"))?.len(), 1);
         assert!(bom.get_agent_files("unknown").is_none() == true);
         Ok(())
     }
@@ -773,7 +776,7 @@ mod tests
     #[test]
     fn test_resolve_workspace_path_userprofile()
     {
-        assert!(BillOfMaterials::resolve_workspace_path("$userprofile/.codex/prompts/init.md").is_none() == true);
+        assert!(BillOfMaterials::resolve_workspace_path("$userprofile/.bogus/prompts/init.md").is_none() == true);
     }
 
     #[test]
@@ -785,8 +788,8 @@ mod tests
     #[test]
     fn test_resolve_workspace_path_workspace() -> anyhow::Result<()>
     {
-        let result = BillOfMaterials::resolve_workspace_path("$workspace/CLAUDE.md");
-        assert_eq!(result.ok_or_else(|| anyhow::anyhow!("expected workspace path"))?, PathBuf::from("./CLAUDE.md"));
+        let result = BillOfMaterials::resolve_workspace_path("$workspace/.bogus/instructions.md");
+        assert_eq!(result.ok_or_else(|| anyhow::anyhow!("expected workspace path"))?, PathBuf::from("./.bogus/instructions.md"));
         Ok(())
     }
 
@@ -809,25 +812,25 @@ mod tests
         let yaml = r#"
 languages: {}
 agents:
-  claude:
+  bogus:
     instructions:
-      - source: claude/CLAUDE.md
-        target: '$workspace/CLAUDE.md'
+      - source: bogus/instructions.md
+        target: '$workspace/.bogus/instructions.md'
     prompts:
-      - source: claude/commands/init.md
-        target: '$workspace/.claude/commands/init.md'
-  codex:
+      - source: bogus/commands/init.md
+        target: '$workspace/.bogus/commands/init.md'
+  fake:
     prompts:
-      - source: codex/init.md
-        target: '$userprofile/.codex/prompts/init.md'
+      - source: fake/init.md
+        target: '$userprofile/.fake/prompts/init.md'
 "#;
         fs::write(&config_path, yaml)?;
 
         let bom = BillOfMaterials::from_config(&config_path)?;
-        assert!(bom.has_agent("claude") == true);
-        assert_eq!(bom.get_agent_files("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent files"))?.len(), 2);
-        // codex has only $userprofile paths, so all are skipped -> no entry
-        assert!(bom.has_agent("codex") == false);
+        assert!(bom.has_agent("bogus") == true);
+        assert_eq!(bom.get_agent_files("bogus").ok_or_else(|| anyhow::anyhow!("missing bogus agent files"))?.len(), 2);
+        // fake has only $userprofile paths, so all are skipped -> no entry
+        assert!(bom.has_agent("fake") == false);
         Ok(())
     }
 
@@ -854,20 +857,20 @@ agents:
         let yaml = r#"
 languages: {}
 agents:
-  cursor:
+  bogus:
     instructions:
-      - source: cursor/cursorrules
-        target: '$workspace/.cursorrules'
+      - source: bogus/instructions.md
+        target: '$workspace/.bogus/instructions.md'
     skills:
       - name: create-rule
-        source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+        source: 'https://github.com/user/bogus-skills/tree/main/create-rule'
 "#;
         fs::write(&config_path, yaml)?;
 
         let bom = BillOfMaterials::from_config(&config_path)?;
-        assert!(bom.has_agent("cursor") == true);
+        assert!(bom.has_agent("bogus") == true);
         // Skills are SkillDefinition (no target), so only instructions contribute to BoM
-        assert_eq!(bom.get_agent_files("cursor").ok_or_else(|| anyhow::anyhow!("missing cursor agent files"))?.len(), 1);
+        assert_eq!(bom.get_agent_files("bogus").ok_or_else(|| anyhow::anyhow!("missing bogus agent files"))?.len(), 1);
         Ok(())
     }
 
@@ -889,33 +892,33 @@ main:
   source: AGENTS.md
   target: '$workspace/AGENTS.md'
 agents:
-  claude:
+  bogus:
     instructions:
-      - source: claude/CLAUDE.md
-        target: '$workspace/CLAUDE.md'
+      - source: bogus/instructions.md
+        target: '$workspace/.bogus/instructions.md'
     skills:
-      - source: 'https://github.com/user/claude-skills/tree/main/skill-a'
+      - source: 'https://github.com/user/bogus-skills/tree/main/skill-a'
     directories:
-      - target: '$workspace/.claude/plans'
+      - target: '$workspace/.bogus/plans'
 shared:
-  cmake:
+  shared-build:
     files:
-      - source: cmake-build.md
+      - source: shared-build.md
         target: '$instructions'
     skills:
-      - source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+      - source: 'https://github.com/user/shared-skills/tree/main/shared-skill'
 languages:
-  c:
-    includes: [cmake]
+  CppScript:
+    includes: [shared-build]
     files:
-      - source: c.md
+      - source: cppscript.md
         target: '$instructions'
-  rust:
+  Rust++:
     files:
-      - source: rust.md
+      - source: rpp.md
         target: '$instructions'
     skills:
-      - source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
+      - source: 'https://github.com/user/rpp-skills/tree/main/rpp-analyzer'
 integration:
   git:
     files:
@@ -935,19 +938,19 @@ skills:
         assert!(config.main.is_some() == true);
         assert_eq!(config.main.as_ref().ok_or_else(|| anyhow::anyhow!("missing main config"))?.source, "AGENTS.md");
         assert!(config.agents.is_empty() == false);
-        let claude_agent = config.agents.get("claude").ok_or_else(|| anyhow::anyhow!("missing claude agent"))?;
-        assert_eq!(claude_agent.skills.len(), 1);
-        assert_eq!(claude_agent.directories.len(), 1);
+        let bogus_config = config.agents.get("bogus").ok_or_else(|| anyhow::anyhow!("missing bogus config"))?;
+        assert_eq!(bogus_config.skills.len(), 1);
+        assert_eq!(bogus_config.directories.len(), 1);
         assert!(config.shared.is_empty() == false);
-        let cmake_shared = config.shared.get("cmake").ok_or_else(|| anyhow::anyhow!("missing cmake group"))?;
-        assert_eq!(cmake_shared.files.len(), 1);
-        assert_eq!(cmake_shared.skills.len(), 1);
-        assert_eq!(cmake_shared.skills[0].derive_name(), "cmake-skill");
+        let shared_build = config.shared.get("shared-build").ok_or_else(|| anyhow::anyhow!("missing shared group"))?;
+        assert_eq!(shared_build.files.len(), 1);
+        assert_eq!(shared_build.skills.len(), 1);
+        assert_eq!(shared_build.skills[0].derive_name(), "shared-skill");
         assert_eq!(config.languages.len(), 2);
-        assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.includes.is_empty() == false);
-        assert!(config.languages.get("c").ok_or_else(|| anyhow::anyhow!("missing c language"))?.skills.is_empty() == true);
-        assert!(config.languages.get("rust").ok_or_else(|| anyhow::anyhow!("missing rust language"))?.includes.is_empty() == true);
-        assert_eq!(config.languages.get("rust").ok_or_else(|| anyhow::anyhow!("missing rust language"))?.skills.len(), 1);
+        assert!(config.languages.get("CppScript").ok_or_else(|| anyhow::anyhow!("missing CppScript language"))?.includes.is_empty() == false);
+        assert!(config.languages.get("CppScript").ok_or_else(|| anyhow::anyhow!("missing CppScript language"))?.skills.is_empty() == true);
+        assert!(config.languages.get("Rust++").ok_or_else(|| anyhow::anyhow!("missing Rust++ language"))?.includes.is_empty() == true);
+        assert_eq!(config.languages.get("Rust++").ok_or_else(|| anyhow::anyhow!("missing Rust++ language"))?.skills.len(), 1);
         assert!(config.integration.is_empty() == false);
         assert!(config.principles.is_empty() == false);
         assert!(config.mission.is_empty() == false);
@@ -972,14 +975,14 @@ skills:
     {
         let yaml = r#"
 files:
-  - source: rust.md
+  - source: rpp.md
     target: '$instructions'
 skills:
-  - source: 'https://github.com/user/rust-skills/tree/main/rust-analyzer'
+  - source: 'https://github.com/user/rpp-skills/tree/main/rpp-analyzer'
 "#;
         let config: LanguageConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.skills.len(), 1);
-        assert_eq!(config.skills[0].derive_name(), "rust-analyzer");
+        assert_eq!(config.skills[0].derive_name(), "rpp-analyzer");
         Ok(())
     }
 
@@ -990,10 +993,10 @@ skills:
     {
         let yaml = r#"
 instructions:
-  - source: cursor/cursorrules
-    target: '$workspace/.cursorrules'
+  - source: bogus/instructions.md
+    target: '$workspace/.bogus/instructions.md'
 skills:
-  - source: 'https://github.com/user/cursor-skills/tree/main/create-rule'
+  - source: 'https://github.com/user/bogus-skills/tree/main/create-rule'
 "#;
         let config: AgentConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.skills.len(), 1);
@@ -1007,9 +1010,9 @@ skills:
     #[test]
     fn test_directory_entry_basic() -> anyhow::Result<()>
     {
-        let yaml = "target: '$workspace/.cursor/plans'";
+        let yaml = "target: '$workspace/.bogus/plans'";
         let entry: DirectoryEntry = serde_yaml::from_str(yaml)?;
-        assert_eq!(entry.target, "$workspace/.cursor/plans");
+        assert_eq!(entry.target, "$workspace/.bogus/plans");
         Ok(())
     }
 
@@ -1018,7 +1021,7 @@ skills:
     #[test]
     fn test_agent_config_directories_defaults_empty() -> anyhow::Result<()>
     {
-        let yaml = "instructions:\n  - source: cursor/cursorrules\n    target: '$workspace/.cursorrules'";
+        let yaml = "instructions:\n  - source: bogus/instructions.md\n    target: '$workspace/.bogus/instructions.md'";
         let config: AgentConfig = serde_yaml::from_str(yaml)?;
         assert!(config.directories.is_empty() == true);
         Ok(())
@@ -1029,14 +1032,14 @@ skills:
     {
         let yaml = r#"
 instructions:
-  - source: cursor/cursorrules
-    target: '$workspace/.cursorrules'
+  - source: bogus/instructions.md
+    target: '$workspace/.bogus/instructions.md'
 directories:
-  - target: '$workspace/.cursor/plans'
+  - target: '$workspace/.bogus/plans'
 "#;
         let config: AgentConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.directories.len(), 1);
-        assert_eq!(config.directories[0].target, "$workspace/.cursor/plans");
+        assert_eq!(config.directories[0].target, "$workspace/.bogus/plans");
         Ok(())
     }
 
@@ -1047,7 +1050,7 @@ directories:
     {
         let yaml = r#"
 files:
-  - source: cmake-build.md
+  - source: shared-build.md
     target: '$instructions'
 "#;
         let config: SharedConfig = serde_yaml::from_str(yaml)?;
@@ -1061,15 +1064,15 @@ files:
     {
         let yaml = r#"
 files:
-  - source: cmake-build.md
+  - source: shared-build.md
     target: '$instructions'
 skills:
-  - source: 'https://github.com/user/cmake-skills/tree/main/cmake-skill'
+  - source: 'https://github.com/user/shared-skills/tree/main/shared-skill'
 "#;
         let config: SharedConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.files.len(), 1);
         assert_eq!(config.skills.len(), 1);
-        assert_eq!(config.skills[0].derive_name(), "cmake-skill");
+        assert_eq!(config.skills[0].derive_name(), "shared-skill");
         Ok(())
     }
 
@@ -1094,15 +1097,15 @@ skills:
     fn test_resolve_language_skills_own_only() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("rust".to_string(), LanguageConfig {
+        config.languages.insert("Rust++".to_string(), LanguageConfig {
             includes: vec![],
-            files:    vec![make_mapping("rust.md", "$instructions")],
-            skills:   vec![SkillDefinition { source: "https://example.com/rust-analyzer".to_string(), target: None }]
+            files:    vec![make_mapping("rpp.md", "$instructions")],
+            skills:   vec![SkillDefinition { source: "https://example.com/rpp-skill".to_string(), target: None }]
         });
 
-        let skills = resolve_language_skills("rust", &config)?;
+        let skills = resolve_language_skills("Rust++", &config)?;
         assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].derive_name(), "rust-analyzer");
+        assert_eq!(skills[0].derive_name(), "rpp-skill");
         Ok(())
     }
 
@@ -1110,15 +1113,15 @@ skills:
     fn test_resolve_language_skills_from_shared() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.shared.insert("cmake".to_string(), SharedConfig {
-            files:  vec![make_mapping("cmake.md", "$instructions")],
-            skills: vec![SkillDefinition { source: "https://example.com/cmake-skill".to_string(), target: None }]
+        config.shared.insert("shared-build".to_string(), SharedConfig {
+            files:  vec![make_mapping("shared-build.md", "$instructions")],
+            skills: vec![SkillDefinition { source: "https://example.com/shared-skill".to_string(), target: None }]
         });
-        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["shared-build".to_string()], vec![make_mapping("rpp.md", "$instructions")]));
 
-        let skills = resolve_language_skills("c", &config)?;
+        let skills = resolve_language_skills("Rust++", &config)?;
         assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].derive_name(), "cmake-skill");
+        assert_eq!(skills[0].derive_name(), "shared-skill");
         Ok(())
     }
 
@@ -1126,20 +1129,20 @@ skills:
     fn test_resolve_language_skills_shared_plus_own() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.shared.insert("cmake".to_string(), SharedConfig {
-            files:  vec![make_mapping("cmake.md", "$instructions")],
-            skills: vec![SkillDefinition { source: "https://example.com/cmake-skill".to_string(), target: None }]
+        config.shared.insert("shared-build".to_string(), SharedConfig {
+            files:  vec![make_mapping("shared-build.md", "$instructions")],
+            skills: vec![SkillDefinition { source: "https://example.com/shared-skill".to_string(), target: None }]
         });
-        config.languages.insert("c".to_string(), LanguageConfig {
-            includes: vec!["cmake".to_string()],
-            files:    vec![make_mapping("c.md", "$instructions")],
-            skills:   vec![SkillDefinition { source: "https://example.com/c-skill".to_string(), target: None }]
+        config.languages.insert("Rust++".to_string(), LanguageConfig {
+            includes: vec!["shared-build".to_string()],
+            files:    vec![make_mapping("rpp.md", "$instructions")],
+            skills:   vec![SkillDefinition { source: "https://example.com/rpp-skill".to_string(), target: None }]
         });
 
-        let skills = resolve_language_skills("c", &config)?;
+        let skills = resolve_language_skills("Rust++", &config)?;
         assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].derive_name(), "cmake-skill");
-        assert_eq!(skills[1].derive_name(), "c-skill");
+        assert_eq!(skills[0].derive_name(), "shared-skill");
+        assert_eq!(skills[1].derive_name(), "rpp-skill");
         Ok(())
     }
 
@@ -1147,49 +1150,43 @@ skills:
     fn test_resolve_language_skills_inherit_from_language() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("swift".to_string(), LanguageConfig {
+        config.languages.insert("Rust++".to_string(), LanguageConfig {
             includes: vec![],
-            files:    vec![make_mapping("swift.md", "$instructions")],
-            skills:   vec![SkillDefinition { source: "https://example.com/swift-skill".to_string(), target: None }]
+            files:    vec![make_mapping("rpp.md", "$instructions")],
+            skills:   vec![SkillDefinition { source: "https://example.com/rpp-skill".to_string(), target: None }]
         });
-        config.languages.insert("swiftui".to_string(), LanguageConfig {
-            includes: vec!["swift".to_string()],
-            files:    vec![make_mapping("swiftui.md", "$instructions")],
-            skills:   vec![SkillDefinition { source: "https://example.com/swiftui-skill".to_string(), target: None }]
+        config.languages.insert("CppScript".to_string(), LanguageConfig {
+            includes: vec!["Rust++".to_string()],
+            files:    vec![make_mapping("cppscript.md", "$instructions")],
+            skills:   vec![SkillDefinition { source: "https://example.com/cppscript-skill".to_string(), target: None }]
         });
 
-        let skills = resolve_language_skills("swiftui", &config)?;
+        let skills = resolve_language_skills("CppScript", &config)?;
         assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].derive_name(), "swift-skill");
-        assert_eq!(skills[1].derive_name(), "swiftui-skill");
+        assert_eq!(skills[0].derive_name(), "rpp-skill");
+        assert_eq!(skills[1].derive_name(), "cppscript-skill");
         Ok(())
     }
 
     #[test]
-    fn test_resolve_language_skills_multilevel_language_inherit() -> anyhow::Result<()>
+    fn test_resolve_language_skills_language_inherit_preserves_order() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.languages.insert("base".to_string(), LanguageConfig {
+        config.languages.insert("Rust++".to_string(), LanguageConfig {
             includes: vec![],
             files:    vec![],
-            skills:   vec![SkillDefinition { source: "https://example.com/base-skill".to_string(), target: None }]
+            skills:   vec![SkillDefinition { source: "https://example.com/rpp-skill".to_string(), target: None }]
         });
-        config.languages.insert("mid".to_string(), LanguageConfig {
-            includes: vec!["base".to_string()],
+        config.languages.insert("CppScript".to_string(), LanguageConfig {
+            includes: vec!["Rust++".to_string()],
             files:    vec![],
-            skills:   vec![SkillDefinition { source: "https://example.com/mid-skill".to_string(), target: None }]
-        });
-        config.languages.insert("top".to_string(), LanguageConfig {
-            includes: vec!["mid".to_string()],
-            files:    vec![],
-            skills:   vec![SkillDefinition { source: "https://example.com/top-skill".to_string(), target: None }]
+            skills:   vec![SkillDefinition { source: "https://example.com/cppscript-skill".to_string(), target: None }]
         });
 
-        let skills = resolve_language_skills("top", &config)?;
-        assert_eq!(skills.len(), 3);
-        assert_eq!(skills[0].derive_name(), "base-skill");
-        assert_eq!(skills[1].derive_name(), "mid-skill");
-        assert_eq!(skills[2].derive_name(), "top-skill");
+        let skills = resolve_language_skills("CppScript", &config)?;
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].derive_name(), "rpp-skill");
+        assert_eq!(skills[1].derive_name(), "cppscript-skill");
         Ok(())
     }
 
@@ -1197,10 +1194,10 @@ skills:
     fn test_resolve_language_skills_cycle_detection()
     {
         let mut config = minimal_config();
-        config.languages.insert("a".to_string(), LanguageConfig { includes: vec!["b".to_string()], files: vec![], skills: vec![] });
-        config.languages.insert("b".to_string(), LanguageConfig { includes: vec!["a".to_string()], files: vec![], skills: vec![] });
+        config.languages.insert("Rust++".to_string(), LanguageConfig { includes: vec!["CppScript".to_string()], files: vec![], skills: vec![] });
+        config.languages.insert("CppScript".to_string(), LanguageConfig { includes: vec!["Rust++".to_string()], files: vec![], skills: vec![] });
 
-        let err = resolve_language_skills("a", &config).unwrap_err();
+        let err = resolve_language_skills("Rust++", &config).unwrap_err();
         assert!(err.to_string().contains("Circular include detected in skills") == true);
     }
 
@@ -1208,10 +1205,10 @@ skills:
     fn test_resolve_language_skills_shared_no_skills() -> anyhow::Result<()>
     {
         let mut config = minimal_config();
-        config.shared.insert("cmake".to_string(), make_shared(vec![make_mapping("cmake.md", "$instructions")]));
-        config.languages.insert("c".to_string(), make_lang(vec!["cmake".to_string()], vec![make_mapping("c.md", "$instructions")]));
+        config.shared.insert("shared-build".to_string(), make_shared(vec![make_mapping("shared-build.md", "$instructions")]));
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["shared-build".to_string()], vec![make_mapping("rpp.md", "$instructions")]));
 
-        let skills = resolve_language_skills("c", &config)?;
+        let skills = resolve_language_skills("Rust++", &config)?;
         assert!(skills.is_empty() == true);
         Ok(())
     }

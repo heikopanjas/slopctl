@@ -42,17 +42,17 @@ pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 #[derive(Debug, Clone)]
 pub struct WorkspaceMarker
 {
-    /// Relative directory path within the workspace root (e.g. `.claude`)
+    /// Relative directory path within the workspace root
     pub path:        &'static str,
     /// Root placeholder, always `$workspace` for catalog markers
     pub placeholder: &'static str
 }
 
-/// Default filesystem conventions for a known AI coding agent
+/// Default filesystem conventions for a configured AI coding agent
 #[derive(Debug, Clone)]
 pub struct AgentDefaults
 {
-    /// Agent identifier (e.g. "cursor", "claude")
+    /// Agent identifier from `agent-defaults.yml`
     pub name:                      &'static str,
     /// Files or directories whose presence indicates this agent is active
     pub workspace_markers:         &'static [WorkspaceMarker],
@@ -210,6 +210,53 @@ pub fn validate_agent_catalog(catalog: &AgentCatalog) -> Result<()>
     Ok(())
 }
 
+fn get_catalog_entry<'a>(catalog: &'a AgentCatalog, agent: &str) -> Option<&'a AgentDefaultsEntry>
+{
+    catalog.agents.iter().find(|entry| entry.name == agent)
+}
+
+/// Get the skill installation directory for an agent from a specific catalog
+pub fn get_skill_dir_from_catalog<'a>(catalog: &'a AgentCatalog, agent: &str) -> Option<&'a str>
+{
+    get_catalog_entry(catalog, agent).map(|entry| entry.skill_dir.as_str())
+}
+
+/// Return whether an agent scans `.agents/skills/` according to a specific catalog
+pub fn reads_cross_client_skills_from_catalog(catalog: &AgentCatalog, agent: &str) -> bool
+{
+    get_catalog_entry(catalog, agent).is_none_or(|entry| entry.reads_cross_client_skills)
+}
+
+/// Return the userprofile-scoped skill directory for an agent from a specific catalog
+pub fn get_effective_userprofile_skill_dir_from_catalog(catalog: &AgentCatalog, agent: &str) -> String
+{
+    get_catalog_entry(catalog, agent).and_then(|entry| entry.userprofile_skill_dir.clone()).unwrap_or_else(|| "$userprofile/.agents/skills".to_string())
+}
+
+/// Return workspace marker directories for an agent from a specific catalog
+pub fn get_workspace_marker_dirs_from_catalog(catalog: &AgentCatalog, agent: &str, workspace: &Path) -> Vec<PathBuf>
+{
+    get_catalog_entry(catalog, agent).map(|entry| entry.markers.iter().map(|marker| workspace.join(marker)).collect()).unwrap_or_default()
+}
+
+/// Detect all agents installed in a workspace using a specific catalog
+pub fn detect_all_installed_agents_from_catalog(catalog: &AgentCatalog, workspace: &Path) -> Vec<String>
+{
+    let mut found = Vec::new();
+    for agent in &catalog.agents
+    {
+        for marker in &agent.markers
+        {
+            if workspace.join(marker).exists() == true
+            {
+                found.push(agent.name.clone());
+                break;
+            }
+        }
+    }
+    found
+}
+
 fn validate_placeholder_path(path: &str, field: &str) -> Result<()>
 {
     require!(path.trim().is_empty() == false, Err(anyhow::anyhow!("{} cannot be empty", field)));
@@ -296,7 +343,7 @@ pub fn get_defaults(agent: &str) -> Option<&'static AgentDefaults>
 
 /// Get the skill installation directory for an agent
 ///
-/// Returns the raw placeholder path (e.g. `$workspace/.cursor/skills`).
+/// Returns the raw placeholder path from `agent-defaults.yml`.
 /// Caller must resolve the placeholder to an actual path.
 pub fn get_skill_dir(agent: &str) -> Option<&'static str>
 {
@@ -316,7 +363,7 @@ pub fn reads_cross_client_skills(agent: &str) -> bool
 
 /// Return the userprofile-scoped skill directory for an agent
 ///
-/// Returns the raw placeholder path (e.g. `$userprofile/.codex/skills`).
+/// Returns the raw placeholder path from `agent-defaults.yml`.
 /// Unknown agents fall back to `$userprofile/.agents/skills`. Caller must resolve
 /// the placeholder to an actual path.
 pub fn get_effective_userprofile_skill_dir(agent: &str) -> &'static str
@@ -324,7 +371,7 @@ pub fn get_effective_userprofile_skill_dir(agent: &str) -> &'static str
     get_defaults(agent).map(|d| d.userprofile_skill_dir.unwrap_or("$userprofile/.agents/skills")).unwrap_or("$userprofile/.agents/skills")
 }
 
-/// List all known agent names
+/// List all configured agent names
 pub fn known_agents() -> Vec<&'static str>
 {
     default_agent_defaults().iter().map(|a| a.name).collect()
@@ -355,7 +402,7 @@ pub fn get_workspace_marker_dirs(agent: &str, workspace: &Path) -> Vec<PathBuf>
 ///
 /// # Arguments
 ///
-/// * `raw` - Placeholder path (e.g. `$workspace/.cursor/skills`)
+/// * `raw` - Placeholder path with a supported root placeholder
 /// * `workspace` - Absolute path to the project workspace root
 /// * `userprofile` - Absolute path to the user home directory
 pub fn resolve_placeholder_path(raw: &str, workspace: &Path, userprofile: &Path) -> PathBuf
@@ -385,9 +432,29 @@ pub fn resolve_placeholder_path(raw: &str, workspace: &Path, userprofile: &Path)
 /// * `userprofile` - Absolute path to the user home directory
 pub fn get_all_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<PathBuf>
 {
-    let mut dirs: Vec<PathBuf> = detect_all_installed_agents(workspace)
+    let catalog = AgentCatalog {
+        version: default_catalog_version(),
+        agents:  default_agent_defaults()
+            .iter()
+            .map(|agent| AgentDefaultsEntry {
+                name:                      agent.name.to_string(),
+                markers:                   agent.workspace_markers.iter().map(|marker| marker.path.to_string()).collect(),
+                prompt_dir:                agent.prompt_dir.to_string(),
+                skill_dir:                 agent.skill_dir.to_string(),
+                userprofile_skill_dir:     agent.userprofile_skill_dir.map(str::to_string),
+                reads_cross_client_skills: agent.reads_cross_client_skills
+            })
+            .collect()
+    };
+    get_all_skill_search_dirs_from_catalog(&catalog, workspace, userprofile)
+}
+
+/// Return all skill directories to search using a specific agent catalog
+pub fn get_all_skill_search_dirs_from_catalog(catalog: &AgentCatalog, workspace: &Path, userprofile: &Path) -> Vec<PathBuf>
+{
+    let mut dirs: Vec<PathBuf> = detect_all_installed_agents_from_catalog(catalog, workspace)
         .iter()
-        .filter_map(|agent| get_skill_dir(agent).map(|raw| resolve_placeholder_path(raw, workspace, userprofile)))
+        .filter_map(|agent| get_skill_dir_from_catalog(catalog, agent).map(|raw| resolve_placeholder_path(raw, workspace, userprofile)))
         .collect();
 
     let cross_client = resolve_placeholder_path(CROSS_CLIENT_SKILL_DIR, workspace, userprofile);
@@ -411,10 +478,30 @@ pub fn get_all_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<Pa
 /// * `userprofile` - Absolute path to the user home directory
 pub fn get_workspace_skill_search_dirs(workspace: &Path, userprofile: &Path) -> Vec<PathBuf>
 {
-    let mut dirs: Vec<PathBuf> = detect_all_installed_agents(workspace)
+    let catalog = AgentCatalog {
+        version: default_catalog_version(),
+        agents:  default_agent_defaults()
+            .iter()
+            .map(|agent| AgentDefaultsEntry {
+                name:                      agent.name.to_string(),
+                markers:                   agent.workspace_markers.iter().map(|marker| marker.path.to_string()).collect(),
+                prompt_dir:                agent.prompt_dir.to_string(),
+                skill_dir:                 agent.skill_dir.to_string(),
+                userprofile_skill_dir:     agent.userprofile_skill_dir.map(str::to_string),
+                reads_cross_client_skills: agent.reads_cross_client_skills
+            })
+            .collect()
+    };
+    get_workspace_skill_search_dirs_from_catalog(&catalog, workspace, userprofile)
+}
+
+/// Return workspace-scoped skill directories using a specific agent catalog
+pub fn get_workspace_skill_search_dirs_from_catalog(catalog: &AgentCatalog, workspace: &Path, userprofile: &Path) -> Vec<PathBuf>
+{
+    let mut dirs: Vec<PathBuf> = detect_all_installed_agents_from_catalog(catalog, workspace)
         .iter()
         .filter_map(|agent| {
-            let raw = get_skill_dir(agent)?;
+            let raw = get_skill_dir_from_catalog(catalog, agent)?;
             if raw.starts_with(PLACEHOLDER_WORKSPACE) == true
             {
                 Some(resolve_placeholder_path(raw, workspace, userprofile))
@@ -499,12 +586,13 @@ mod tests
     #[test]
     fn test_get_defaults_known_agent() -> anyhow::Result<()>
     {
-        let defaults = get_defaults("cursor");
+        let configured_name = known_agents().first().copied().ok_or_else(|| anyhow::anyhow!("expected configured agent"))?;
+        let defaults = get_defaults(configured_name);
         assert!(defaults.is_some());
         let defaults = defaults.ok_or_else(|| anyhow::anyhow!("expected defaults"))?;
-        assert_eq!(defaults.name, "cursor");
-        assert_eq!(defaults.skill_dir, "$workspace/.cursor/skills");
-        assert_eq!(defaults.prompt_dir, "$workspace/.cursor/commands");
+        assert_eq!(defaults.name, configured_name);
+        assert!(defaults.skill_dir.starts_with(PLACEHOLDER_WORKSPACE) == true || defaults.skill_dir.starts_with(PLACEHOLDER_USERPROFILE) == true);
+        assert!(defaults.prompt_dir.starts_with(PLACEHOLDER_WORKSPACE) == true || defaults.prompt_dir.starts_with(PLACEHOLDER_USERPROFILE) == true);
         Ok(())
     }
 
@@ -523,18 +611,18 @@ mod tests
             r#"
 version: 1
 agents:
-  - name: test-agent
+  - name: bogus
     markers:
-      - .test-agent
-    prompt_dir: '$workspace/.test-agent/prompts'
-    skill_dir: '$workspace/.test-agent/skills'
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
     reads_cross_client_skills: true
 "#
         )?;
 
         let catalog = load_agent_catalog_from_dir(temp_dir.path())?;
         assert_eq!(catalog.agents.len(), 1);
-        assert_eq!(catalog.agents[0].name, "test-agent");
+        assert_eq!(catalog.agents[0].name, "bogus");
         Ok(())
     }
 
@@ -543,8 +631,8 @@ agents:
     {
         let temp_dir = tempfile::TempDir::new()?;
         let catalog = load_agent_catalog_from_dir(temp_dir.path())?;
-        assert!(catalog.agents.iter().any(|agent| agent.name == "cursor") == true);
-        assert!(catalog.agents.iter().any(|agent| agent.name == "claude") == true);
+        assert!(catalog.agents.is_empty() == false);
+        assert!(catalog.agents.iter().all(|agent| agent.name.trim().is_empty() == false) == true);
         Ok(())
     }
 
@@ -645,7 +733,7 @@ version: 1
 agents:
   - name: invalid
     markers:
-      - opencode.json
+      - bogus.json
     prompt_dir: '$workspace/.invalid/prompts'
     skill_dir: '$workspace/.invalid/skills'
     reads_cross_client_skills: true
@@ -658,113 +746,68 @@ agents:
     #[test]
     fn test_get_skill_dir()
     {
-        assert_eq!(get_skill_dir("claude"), Some("$workspace/.claude/skills"));
-        assert_eq!(get_skill_dir("codex"), Some("$workspace/.codex/skills"));
-        assert_eq!(get_skill_dir("vibe"), Some("$workspace/.vibe/skills"));
-        assert_eq!(get_skill_dir("opencode"), Some("$workspace/.opencode/skills"));
+        let configured_name = known_agents().first().copied().expect("expected configured agent");
+        assert!(get_skill_dir(configured_name).is_some() == true);
         assert_eq!(get_skill_dir("nonexistent"), None);
     }
 
     #[test]
-    fn test_codex_defaults_use_workspace_dirs()
+    fn test_configured_defaults_have_workspace_dirs()
     {
-        let defaults = get_defaults("codex").expect("codex defaults should exist");
-        assert_eq!(defaults.prompt_dir, "$workspace/.codex/prompts");
-        assert_eq!(defaults.skill_dir, "$workspace/.codex/skills");
-        assert_eq!(defaults.userprofile_skill_dir, Some("$userprofile/.codex/skills"));
-    }
-
-    #[test]
-    fn test_opencode_prompt_dir_uses_commands()
-    {
-        let defaults = get_defaults("opencode").expect("opencode defaults should exist");
-        assert_eq!(defaults.prompt_dir, "$workspace/.opencode/commands");
+        let configured_name = known_agents().first().copied().expect("expected configured agent");
+        let defaults = get_defaults(configured_name).expect("configured defaults should exist");
+        assert!(defaults.prompt_dir.starts_with(PLACEHOLDER_WORKSPACE) == true || defaults.prompt_dir.starts_with(PLACEHOLDER_USERPROFILE) == true);
+        assert!(defaults.skill_dir.starts_with(PLACEHOLDER_WORKSPACE) == true || defaults.skill_dir.starts_with(PLACEHOLDER_USERPROFILE) == true);
     }
 
     #[test]
     fn test_known_agents_contains_all()
     {
         let agents = known_agents();
-        assert!(agents.contains(&"cursor"));
-        assert!(agents.contains(&"claude"));
-        assert!(agents.contains(&"codex"));
-        assert!(agents.contains(&"copilot"));
-        assert!(agents.contains(&"vibe"));
-        assert!(agents.contains(&"opencode"));
-        assert_eq!(agents.len(), 6);
+        assert!(agents.is_empty() == false);
+        assert!(agents.iter().all(|agent| agent.trim().is_empty() == false) == true);
     }
 
     #[test]
     fn test_reads_cross_client_skills_per_agent()
     {
-        // Agents that DO scan .agents/skills/
-        assert!(reads_cross_client_skills("cursor") == true);
-        assert!(reads_cross_client_skills("codex") == true);
-        assert!(reads_cross_client_skills("copilot") == true);
-        assert!(reads_cross_client_skills("opencode") == true);
-        // Agents that do NOT scan .agents/skills/
-        assert!(reads_cross_client_skills("claude") == false);
-        assert!(reads_cross_client_skills("vibe") == false);
-        // Unknown agent defaults to true (assume compliant)
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+  - name: fake
+    markers:
+      - .fake
+    prompt_dir: '$workspace/.fake/prompts'
+    skill_dir: '$workspace/.fake/skills'
+    reads_cross_client_skills: false
+"#
+        )
+        .expect("synthetic catalog should parse");
+
+        assert!(reads_cross_client_skills_from_catalog(&catalog, "bogus") == true);
+        assert!(reads_cross_client_skills_from_catalog(&catalog, "fake") == false);
         assert!(reads_cross_client_skills("unknown-agent") == true);
     }
 
     #[test]
-    fn test_detect_installed_agent_cursor() -> anyhow::Result<()>
+    fn test_detect_installed_agent_first_configured() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
+        let configured = default_agent_defaults().first().ok_or_else(|| anyhow::anyhow!("expected configured agent"))?;
 
         // No agent markers -> None
         assert!(detect_installed_agent(workspace).is_none());
 
-        // Create .cursor/ directory -> detects cursor
-        std::fs::create_dir(workspace.join(".cursor"))?;
-        assert_eq!(detect_installed_agent(workspace), Some("cursor".to_string()));
-        Ok(())
-    }
-
-    #[test]
-    fn test_detect_installed_agent_claude() -> anyhow::Result<()>
-    {
-        let temp_dir = tempfile::TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        std::fs::create_dir(workspace.join(".claude"))?;
-        assert_eq!(detect_installed_agent(workspace), Some("claude".to_string()));
-        Ok(())
-    }
-
-    #[test]
-    fn test_detect_installed_agent_codex() -> anyhow::Result<()>
-    {
-        let temp_dir = tempfile::TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        std::fs::create_dir(workspace.join(".codex"))?;
-        assert_eq!(detect_installed_agent(workspace), Some("codex".to_string()));
-        Ok(())
-    }
-
-    #[test]
-    fn test_detect_installed_agent_vibe() -> anyhow::Result<()>
-    {
-        let temp_dir = tempfile::TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        std::fs::create_dir(workspace.join(".vibe"))?;
-        assert_eq!(detect_installed_agent(workspace), Some("vibe".to_string()));
-        Ok(())
-    }
-
-    #[test]
-    fn test_detect_installed_agent_opencode() -> anyhow::Result<()>
-    {
-        let temp_dir = tempfile::TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        std::fs::create_dir(workspace.join(".opencode"))?;
-        assert_eq!(detect_installed_agent(workspace), Some("opencode".to_string()));
+        std::fs::create_dir(workspace.join(configured.workspace_markers[0].path))?;
+        assert_eq!(detect_installed_agent(workspace), Some(configured.name.to_string()));
         Ok(())
     }
 
@@ -772,8 +815,20 @@ agents:
     fn test_get_workspace_marker_dirs_resolves_marker_directories() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
-        let dirs = get_workspace_marker_dirs("opencode", temp_dir.path());
-        assert_eq!(dirs, vec![temp_dir.path().join(".opencode")]);
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
+        let dirs = get_workspace_marker_dirs_from_catalog(&catalog, "bogus", temp_dir.path());
+        assert_eq!(dirs, vec![temp_dir.path().join(".bogus")]);
         Ok(())
     }
 
@@ -789,8 +844,8 @@ agents:
     {
         let workspace = std::path::PathBuf::from("/proj");
         let home = std::path::PathBuf::from("/home/user");
-        let result = resolve_placeholder_path("$workspace/.cursor/skills", &workspace, &home);
-        assert_eq!(result, workspace.join(".cursor/skills"));
+        let result = resolve_placeholder_path("$workspace/.bogus/skills", &workspace, &home);
+        assert_eq!(result, workspace.join(".bogus/skills"));
         Ok(())
     }
 
@@ -799,8 +854,8 @@ agents:
     {
         let workspace = std::path::PathBuf::from("/proj");
         let home = std::path::PathBuf::from("/home/user");
-        let result = resolve_placeholder_path("$userprofile/.codex/skills", &workspace, &home);
-        assert_eq!(result, home.join(".codex/skills"));
+        let result = resolve_placeholder_path("$userprofile/.bogus/skills", &workspace, &home);
+        assert_eq!(result, home.join(".bogus/skills"));
         Ok(())
     }
 
@@ -820,8 +875,20 @@ agents:
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
         let home = std::path::PathBuf::from("/home/user");
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        let dirs = get_all_skill_search_dirs(workspace, &home);
+        let dirs = get_all_skill_search_dirs_from_catalog(&catalog, workspace, &home);
         // Only cross-client dir when no agents installed
         assert_eq!(dirs.len(), 1);
         assert_eq!(dirs[0], workspace.join(".agents/skills"));
@@ -834,36 +901,65 @@ agents:
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
         let home = std::path::PathBuf::from("/home/user");
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        std::fs::create_dir(workspace.join(".cursor"))?;
-        let dirs = get_all_skill_search_dirs(workspace, &home);
-        // cursor skill dir + cross-client dir
+        std::fs::create_dir(workspace.join(".bogus"))?;
+        let dirs = get_all_skill_search_dirs_from_catalog(&catalog, workspace, &home);
+        // agent skill dir + cross-client dir
         assert_eq!(dirs.len(), 2);
-        assert!(dirs.contains(&workspace.join(".cursor/skills")) == true);
+        assert!(dirs.contains(&workspace.join(".bogus/skills")) == true);
         assert!(dirs.contains(&workspace.join(".agents/skills")) == true);
         Ok(())
     }
 
     #[test]
-    fn test_get_workspace_skill_search_dirs_includes_codex_workspace_dir() -> anyhow::Result<()>
+    fn test_get_workspace_skill_search_dirs_includes_workspace_dir() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
         let home = std::path::PathBuf::from("/home/user");
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    userprofile_skill_dir: '$userprofile/.bogus/skills'
+    reads_cross_client_skills: true
+  - name: fake
+    markers:
+      - .fake
+    prompt_dir: '$workspace/.fake/prompts'
+    skill_dir: '$workspace/.fake/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        std::fs::create_dir(workspace.join(".cursor"))?;
-        std::fs::create_dir(workspace.join(".codex"))?;
+        std::fs::create_dir(workspace.join(".bogus"))?;
+        std::fs::create_dir(workspace.join(".fake"))?;
 
-        let all_dirs = get_all_skill_search_dirs(workspace, &home);
-        let ws_dirs = get_workspace_skill_search_dirs(workspace, &home);
+        let all_dirs = get_all_skill_search_dirs_from_catalog(&catalog, workspace, &home);
+        let ws_dirs = get_workspace_skill_search_dirs_from_catalog(&catalog, workspace, &home);
 
-        // all_dirs includes codex's workspace-local skill dir
-        assert!(all_dirs.contains(&workspace.join(".codex/skills")) == true);
-        // workspace-only dirs include codex because its native dir is project-scoped
-        assert!(ws_dirs.contains(&workspace.join(".codex/skills")) == true);
-        assert!(ws_dirs.contains(&home.join(".codex/skills")) == false);
+        assert!(all_dirs.contains(&workspace.join(".bogus/skills")) == true);
+        assert!(ws_dirs.contains(&workspace.join(".bogus/skills")) == true);
+        assert!(ws_dirs.contains(&home.join(".bogus/skills")) == false);
         // workspace-scoped dirs are still present
-        assert!(ws_dirs.contains(&workspace.join(".cursor/skills")) == true);
+        assert!(ws_dirs.contains(&workspace.join(".fake/skills")) == true);
         assert!(ws_dirs.contains(&workspace.join(".agents/skills")) == true);
         Ok(())
     }
@@ -873,8 +969,20 @@ agents:
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        assert!(detect_all_installed_agents(workspace).is_empty() == true);
+        assert!(detect_all_installed_agents_from_catalog(&catalog, workspace).is_empty() == true);
         Ok(())
     }
 
@@ -883,10 +991,22 @@ agents:
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        std::fs::create_dir(workspace.join(".claude"))?;
-        let agents = detect_all_installed_agents(workspace);
-        assert_eq!(agents, vec!["claude".to_string()]);
+        std::fs::create_dir(workspace.join(".bogus"))?;
+        let agents = detect_all_installed_agents_from_catalog(&catalog, workspace);
+        assert_eq!(agents, vec!["bogus".to_string()]);
         Ok(())
     }
 
@@ -895,13 +1015,31 @@ agents:
     {
         let temp_dir = tempfile::TempDir::new()?;
         let workspace = temp_dir.path();
+        let catalog = parse_agent_catalog(
+            r#"
+version: 1
+agents:
+  - name: bogus
+    markers:
+      - .bogus
+    prompt_dir: '$workspace/.bogus/prompts'
+    skill_dir: '$workspace/.bogus/skills'
+    reads_cross_client_skills: true
+  - name: fake
+    markers:
+      - .fake
+    prompt_dir: '$workspace/.fake/prompts'
+    skill_dir: '$workspace/.fake/skills'
+    reads_cross_client_skills: true
+"#
+        )?;
 
-        std::fs::create_dir(workspace.join(".cursor"))?;
-        std::fs::create_dir(workspace.join(".claude"))?;
+        std::fs::create_dir(workspace.join(".bogus"))?;
+        std::fs::create_dir(workspace.join(".fake"))?;
 
-        let agents = detect_all_installed_agents(workspace);
-        assert!(agents.contains(&"cursor".to_string()) == true);
-        assert!(agents.contains(&"claude".to_string()) == true);
+        let agents = detect_all_installed_agents_from_catalog(&catalog, workspace);
+        assert!(agents.contains(&"bogus".to_string()) == true);
+        assert!(agents.contains(&"fake".to_string()) == true);
         assert_eq!(agents.len(), 2);
         Ok(())
     }

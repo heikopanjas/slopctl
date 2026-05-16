@@ -109,16 +109,16 @@ mod tests
         fs::write(&tracked_file, "# instructions")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&tracked_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "main".into());
         tracker.save()?;
 
-        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("swift"));
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("CppScript"));
 
         assert!(result.is_err() == true);
         let message = result.unwrap_err().to_string();
-        assert!(message.contains("rust") == true);
-        assert!(message.contains("slopctl merge --lang swift") == true);
-        assert!(message.contains("slopctl remove --lang rust") == true);
+        assert!(message.contains("Rust++") == true);
+        assert!(message.contains("slopctl merge --lang CppScript") == true);
+        assert!(message.contains("slopctl remove --lang Rust++") == true);
         Ok(())
     }
 
@@ -130,10 +130,10 @@ mod tests
         fs::write(&tracked_file, "# instructions")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&tracked_file, "sha1".into(), 5, "rust".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "main".into());
         tracker.save()?;
 
-        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("rust"));
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("Rust++"));
 
         assert!(result.is_ok() == true);
         Ok(())
@@ -143,14 +143,15 @@ mod tests
     fn test_ensure_language_init_allowed_ignores_language_none() -> anyhow::Result<()>
     {
         let workspace = tempfile::TempDir::new()?;
-        let tracked_file = workspace.path().join("CLAUDE.md");
+        let tracked_file = workspace.path().join(".bogus/instructions.md");
+        fs::create_dir_all(tracked_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&tracked_file, "Read AGENTS.md")?;
 
         let mut tracker = FileTracker::new(workspace.path())?;
-        tracker.record_installation(&tracked_file, "sha1".into(), 5, LANG_NONE.into(), "claude".into(), "agent".into());
+        tracker.record_installation(&tracked_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
         tracker.save()?;
 
-        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("rust"));
+        let result = TemplateManager::ensure_language_init_allowed(workspace.path(), Some("Rust++"));
 
         assert!(result.is_ok() == true);
         Ok(())

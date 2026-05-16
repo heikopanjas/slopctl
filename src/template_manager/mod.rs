@@ -147,7 +147,8 @@ impl TemplateManager
             }
         }
 
-        let adopted = tracker.adopt_untracked_files(workspace)?;
+        let agent_catalog = crate::agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &agent_catalog)?;
         if adopted > 0
         {
             println!("{} Adopted {} existing file(s) into .slopctl/", "→".blue(), adopted);
@@ -231,37 +232,37 @@ mod tests
     use super::*;
 
     #[test]
-    fn test_extract_skill_name_from_cursor_path()
+    fn test_extract_skill_name_from_bogus_path()
     {
-        let path = PathBuf::from("/home/user/project/.cursor/skills/my-skill/SKILL.md");
+        let path = PathBuf::from("/home/user/project/.bogus/skills/my-skill/SKILL.md");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("my-skill".to_string()));
     }
 
     #[test]
-    fn test_extract_skill_name_from_claude_path()
+    fn test_extract_skill_name_from_fake_path()
     {
-        let path = PathBuf::from("/home/user/project/.claude/skills/code-review/SKILL.md");
+        let path = PathBuf::from("/home/user/project/.fake/skills/code-review/SKILL.md");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("code-review".to_string()));
     }
 
     #[test]
     fn test_extract_skill_name_nested_file()
     {
-        let path = PathBuf::from("/project/.cursor/skills/my-skill/scripts/setup.sh");
+        let path = PathBuf::from("/project/.bogus/skills/my-skill/scripts/setup.sh");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), Some("my-skill".to_string()));
     }
 
     #[test]
     fn test_extract_skill_name_no_skills_segment()
     {
-        let path = PathBuf::from("/project/.cursor/commands/my-prompt.md");
+        let path = PathBuf::from("/project/.bogus/commands/my-prompt.md");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
     }
 
     #[test]
     fn test_extract_skill_name_skills_as_last_component()
     {
-        let path = PathBuf::from("/project/.cursor/skills");
+        let path = PathBuf::from("/project/.bogus/skills");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
     }
 }

@@ -14,6 +14,12 @@ use crate::{
 
 impl TemplateManager
 {
+    fn installed_agent_names(&self, workspace: &std::path::Path) -> Result<Vec<String>>
+    {
+        let catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        Ok(agent_defaults::detect_all_installed_agents_from_catalog(&catalog, workspace))
+    }
+
     /// Show workspace status
     ///
     /// Displays the current state of slopctl in the project:
@@ -99,22 +105,10 @@ impl TemplateManager
 
         let file_tracker = FileTracker::new(&current_dir)?;
 
-        // Detect installed agents via BoM
-        let mut installed_agents: Vec<String> = Vec::new();
-
+        // Detect installed agents via AgentDefaults markers. Some agents install
+        // only marker directories and skills, so BoM file checks are insufficient.
+        let installed_agents = self.installed_agent_names(&current_dir)?;
         let config_file = self.config_dir.join("templates.yml");
-        if config_file.exists() == true &&
-            let Ok(bom) = BillOfMaterials::from_config(&config_file)
-        {
-            for agent_name in bom.get_agent_names()
-            {
-                if let Some(files) = bom.get_agent_files(&agent_name) &&
-                    files.iter().any(|f| f.exists()) == true
-                {
-                    installed_agents.push(agent_name.clone());
-                }
-            }
-        }
 
         if installed_agents.is_empty() == false
         {
@@ -137,10 +131,11 @@ impl TemplateManager
 
         // Detect installed skills by scanning workspace-scoped agent skill directories on disk,
         // then merge in FileTracker entries for skills outside standard directories.
-        // Userprofile-based dirs (e.g. codex) are excluded from scanning; FileTracker below
-        // still picks up any userprofile skills that slopctl installed.
+        // Userprofile-based dirs are excluded from scanning; FileTracker below still
+        // picks up any userprofile skills that slopctl installed.
         let userprofile = dirs::home_dir().unwrap_or_default();
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs(&current_dir, &userprofile);
+        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
 
         let mut skill_names: BTreeSet<String> = BTreeSet::new();
 
@@ -263,9 +258,6 @@ impl TemplateManager
 
         let config = template_engine::load_template_config(&self.config_dir)?;
 
-        let config_path = self.config_dir.join("templates.yml");
-        let bom = BillOfMaterials::from_config(&config_path)?;
-
         println!("{}", "Available Agents:".bold());
         if config.agents.is_empty() == true
         {
@@ -276,10 +268,11 @@ impl TemplateManager
         {
             let mut agents: Vec<&String> = config.agents.keys().collect();
             agents.sort();
+            let installed_agents: BTreeSet<String> = self.installed_agent_names(&std::env::current_dir()?)?.into_iter().collect();
 
             for agent_name in agents
             {
-                let is_installed = bom.get_agent_files(agent_name).is_some_and(|files| files.iter().any(|f| f.exists()));
+                let is_installed = installed_agents.contains(agent_name.as_str());
 
                 let skill_count = config.agents.get(agent_name).map_or(0, |c| c.skills.len());
 
@@ -409,6 +402,50 @@ impl TemplateManager
         println!();
         println!("{} Use 'slopctl init --lang <lang> --agent <agent>' to install", "→".blue());
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::TemplateManager;
+
+    #[test]
+    fn test_installed_agent_names_detects_marker_only_agent() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::create_dir(workspace.path().join(".bogus"))?;
+        std::fs::write(
+            config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
+            "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: true\n"
+        )?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let agents = manager.installed_agent_names(workspace.path())?;
+
+        assert_eq!(agents, vec!["bogus".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_installed_agent_names_detects_bogus_from_defaults() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::create_dir(workspace.path().join(".bogus"))?;
+        std::fs::write(
+            config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
+            "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
+        )?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let agents = manager.installed_agent_names(workspace.path())?;
+
+        assert_eq!(agents, vec!["bogus".to_string()]);
         Ok(())
     }
 }
