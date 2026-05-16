@@ -13,7 +13,7 @@ use crate::{
     agent_defaults::resolve_placeholder_path,
     bom,
     bom::BillOfMaterials,
-    file_tracker::FileTracker,
+    file_tracker::{FileTracker, LANG_NONE},
     template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
@@ -165,7 +165,14 @@ impl TemplateManager
                                     let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                     for f in skill_files
                                     {
-                                        if files_to_remove.contains(&f) == false
+                                        // Skip skills that belong to a language installation — those
+                                        // must survive agent removal. Only agent-specific and
+                                        // top-level skills (lang == LANG_NONE) are orphaned when
+                                        // the last cross-client agent leaves.
+                                        // Untracked files (no metadata) are treated as agent-owned.
+                                        let is_lang_skill = file_tracker.get_metadata(&f).map(|meta| meta.lang != LANG_NONE).unwrap_or(false);
+
+                                        if is_lang_skill == false && files_to_remove.contains(&f) == false
                                         {
                                             files_to_remove.push(f);
                                         }
@@ -412,6 +419,15 @@ impl TemplateManager
                     eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
                 }
             }
+        }
+
+        // When a language is removed, AGENTS.md stays on disk but its tracker entry
+        // still carries `lang: "<lang>"`. Reset it to LANG_NONE so that
+        // `get_installed_language()` and `status` no longer report the language.
+        if has_lang_target == true
+        {
+            let lang_name = lang.unwrap();
+            file_tracker.clear_lang_for_category(lang_name, "main");
         }
 
         file_tracker.save()?;
@@ -791,6 +807,7 @@ mod tests
         let result = manager.remove(None, Some("Rust++"), false, true);
 
         assert!(result.is_ok() == true);
+        // Tracker must not report Rust++ after removal (dry-run, so tracker is unchanged — no invariant check here)
         Ok(())
     }
 
@@ -825,6 +842,9 @@ mod tests
         assert!(lang_file.exists() == false);
         assert!(skill_file.exists() == false);
         assert!(main_file.exists() == true);
+        // Tracker consistency invariant: language must no longer be reported as installed
+        let tracker_after = FileTracker::new(workspace.path())?;
+        assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");
         Ok(())
     }
 
@@ -880,7 +900,11 @@ mod tests
         let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
+        // Positive: untracked skill under the agent's skill dir must be deleted
         assert!(skill_file.exists() == false);
+        // Negative: the agent file itself is also removed (it was in the skill dir's parent scope)
+        // and the workspace root must not have been disturbed
+        assert!(workspace.path().exists() == true, "workspace root must not be deleted");
         Ok(())
     }
 
@@ -896,6 +920,10 @@ mod tests
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# My Skill")?;
 
+        // An unrelated file outside the skill dir must not be touched
+        let other_file = workspace.path().join("README.md");
+        fs::write(&other_file, "# Project")?;
+
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
@@ -903,7 +931,10 @@ mod tests
         let result = manager.remove(None, None, true, false);
 
         assert!(result.is_ok() == true);
+        // Positive: untracked skill must be deleted
         assert!(skill_file.exists() == false);
+        // Negative: unrelated file must be untouched
+        assert!(other_file.exists() == true, "files outside slopctl dirs must not be deleted");
         Ok(())
     }
 
@@ -1100,11 +1131,22 @@ mod tests
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
         fs::create_dir_all(workspace.path().join(".bogus"))?;
 
-        // Place a cross-client skill
+        // Agent/top-level skill (lang: none → must be deleted when last agent removed)
         let skill_dir = workspace.path().join(".agents/skills/git-workflow");
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# Git Workflow")?;
+
+        // Language skill (lang: CppScript → must survive even when last agent is removed)
+        let lang_skill_dir = workspace.path().join(".agents/skills/cpp-conventions");
+        fs::create_dir_all(&lang_skill_dir)?;
+        let lang_skill_file = lang_skill_dir.join("SKILL.md");
+        fs::write(&lang_skill_file, "# CppScript Conventions")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&skill_file, "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_skill_file, "sha2".into(), 5, "CppScript".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1113,8 +1155,10 @@ mod tests
         let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
-        // The cross-client skill must be deleted because this was the last cross-client agent.
-        assert!(skill_file.exists() == false);
+        // Agent/top-level skill must be deleted — it has no language owner
+        assert!(skill_file.exists() == false, "agent-owned skill must be deleted when last cross-client agent is removed");
+        // Language skill must survive — it belongs to CppScript, not to the agent
+        assert!(lang_skill_file.exists() == true, "language skill must not be deleted when removing an agent");
         Ok(())
     }
 
@@ -1174,6 +1218,184 @@ mod tests
         assert!(agent_file.exists() == false);
         assert!(workspace.path().join(".bogus").exists() == true, ".bogus/ should be kept when non-empty");
         assert!(user_file.exists() == true, "user file in .bogus/ must not be deleted");
+        Ok(())
+    }
+
+    // ── Lifecycle fixture ────────────────────────────────────────────────────
+
+    /// Builds a workspace that mirrors what `slopctl init --agent bogus --lang CppScript` produces.
+    ///
+    /// Returns `(data_dir, workspace, agent_file, lang_file, agent_skill_file, lang_skill_file, agents_md)`.
+    /// All returned TempDir values must be kept alive for the duration of the test.
+    fn setup_workspace_with_agent_and_lang()
+    -> anyhow::Result<(tempfile::TempDir, tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
+
+        let agents_md = workspace.path().join("AGENTS.md");
+        let agent_file = workspace.path().join(".bogus/instructions.md");
+        let lang_file = workspace.path().join(".editorconfig");
+        let agent_skill_file = workspace.path().join(".agents/skills/git-workflow/SKILL.md");
+        let lang_skill_file = workspace.path().join(".agents/skills/cpp-conventions/SKILL.md");
+
+        fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?)?;
+        fs::create_dir_all(agent_skill_file.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?)?;
+        fs::create_dir_all(lang_skill_file.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?)?;
+
+        fs::write(&agents_md, "# Agents\n<!-- SLOPCTL-TEMPLATE -->\n")?;
+        fs::write(&agent_file, "Read AGENTS.md")?;
+        fs::write(&lang_file, "root = true")?;
+        fs::write(&agent_skill_file, "# Git Workflow")?;
+        fs::write(&lang_skill_file, "# CppScript Conventions")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha0".into(), 5, "CppScript".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+        tracker.record_installation(&lang_file, "sha2".into(), 5, "CppScript".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&agent_skill_file, "sha3".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_skill_file, "sha4".into(), 5, "CppScript".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
+
+        Ok((data_dir, workspace, agent_file, lang_file, agent_skill_file, lang_skill_file, agents_md))
+    }
+
+    // ── Regression: bug 1 ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_remove_agent_preserves_language_skills_in_cross_client_dir() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // bogus is the only cross-client agent installed
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
+        fs::create_dir_all(workspace.path().join(".bogus"))?;
+
+        // Agent-specific top-level skill (lang: none → should be deleted)
+        let agent_skill_dir = workspace.path().join(".agents/skills/git-workflow");
+        fs::create_dir_all(&agent_skill_dir)?;
+        let agent_skill_file = agent_skill_dir.join("SKILL.md");
+        fs::write(&agent_skill_file, "# Git Workflow")?;
+
+        // Language skill (lang: CppScript → must survive agent removal)
+        let lang_skill_dir = workspace.path().join(".agents/skills/cpp-conventions");
+        fs::create_dir_all(&lang_skill_dir)?;
+        let lang_skill_file = lang_skill_dir.join("SKILL.md");
+        fs::write(&lang_skill_file, "# CppScript Conventions")?;
+
+        // Record both skills in tracker with the correct lang field
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agent_skill_file, "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_skill_file, "sha2".into(), 5, "CppScript".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("bogus"), None, true, false);
+
+        assert!(result.is_ok() == true);
+        // Agent/top-level skill must be gone — it belongs to no language
+        assert!(agent_skill_file.exists() == false, "agent-owned skill must be deleted");
+        // Language skill must survive — it belongs to CppScript, not to the agent
+        assert!(lang_skill_file.exists() == true, "language skill must not be deleted by remove --agent");
+        Ok(())
+    }
+
+    // ── Regression: bug 2 ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_remove_lang_clears_installed_language_from_tracker() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // AGENTS.md stays on disk but carries lang: "CppScript" in the tracker
+        let agents_md = workspace.path().join("AGENTS.md");
+        let lang_file = workspace.path().join(".editorconfig");
+        fs::write(&agents_md, "# Agents\n<!-- SLOPCTL-TEMPLATE -->\n")?;
+        fs::write(&lang_file, "root = true\n")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha1".into(), 5, "CppScript".into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&lang_file, "sha2".into(), 5, "CppScript".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        // remove --lang CppScript: lang_file must be deleted, AGENTS.md must remain
+        let result = manager.remove(None, Some("CppScript"), true, false);
+
+        assert!(result.is_ok() == true);
+        assert!(lang_file.exists() == false, "language file must be deleted");
+        assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
+
+        // The critical invariant: status must no longer report CppScript
+        let tracker_after = FileTracker::new(workspace.path())?;
+        assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
+        Ok(())
+    }
+
+    // ── Lifecycle tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_remove_agent_does_not_disturb_lang_artifacts() -> anyhow::Result<()>
+    {
+        let (data_dir, workspace, agent_file, lang_file, agent_skill_file, lang_skill_file, agents_md) = setup_workspace_with_agent_and_lang()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("bogus"), None, true, false);
+
+        assert!(result.is_ok() == true);
+
+        // Agent artifacts must be gone
+        assert!(agent_file.exists() == false, "agent instruction file must be deleted");
+        assert!(agent_skill_file.exists() == false, "agent/top-level skill must be deleted");
+
+        // Language artifacts must survive
+        assert!(lang_file.exists() == true, "language file must not be deleted by remove --agent");
+        assert!(lang_skill_file.exists() == true, "language skill must not be deleted by remove --agent");
+        assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --agent");
+
+        // Tracker must still report CppScript as installed
+        let tracker_after = FileTracker::new(workspace.path())?;
+        assert_eq!(tracker_after.get_installed_language(), Some("CppScript".to_string()), "tracker must still report language after agent removal");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_then_status_reports_no_lang() -> anyhow::Result<()>
+    {
+        let (data_dir, workspace, agent_file, lang_file, _agent_skill_file, lang_skill_file, agents_md) = setup_workspace_with_agent_and_lang()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(None, Some("CppScript"), true, false);
+
+        assert!(result.is_ok() == true);
+
+        // Language artifacts must be gone
+        assert!(lang_file.exists() == false, "language file must be deleted");
+        assert!(lang_skill_file.exists() == false, "language skill must be deleted");
+
+        // Agent and shared artifacts must survive
+        assert!(agent_file.exists() == true, "agent file must not be deleted by remove --lang");
+        assert!(agents_md.exists() == true, "AGENTS.md must not be deleted by remove --lang");
+
+        // Tracker must no longer report any language
+        let tracker_after = FileTracker::new(workspace.path())?;
+        assert!(tracker_after.get_installed_language().is_none() == true, "status must report no language after remove --lang");
         Ok(())
     }
 }

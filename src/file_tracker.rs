@@ -251,6 +251,27 @@ impl FileTracker
         self.metadata.iter().filter(|(_path_str, meta)| meta.category == category).map(|(path_str, meta)| (PathBuf::from(path_str), meta)).collect()
     }
 
+    /// Reset the `lang` field to `LANG_NONE` for all entries whose `lang` and `category` match
+    ///
+    /// Used after `remove --lang` to clear the language attribution from files that are
+    /// intentionally kept on disk (e.g. AGENTS.md, `category: "main"`), so that
+    /// `get_installed_language()` no longer reports the language as installed.
+    ///
+    /// # Arguments
+    ///
+    /// * `lang` - Language name to clear
+    /// * `category` - Only entries with this category are updated
+    pub fn clear_lang_for_category(&mut self, lang: &str, category: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            if meta.lang == lang && meta.category == category
+            {
+                meta.lang = LANG_NONE.to_string();
+            }
+        }
+    }
+
     /// Adopt existing slopctl-managed files that are not yet tracked
     ///
     /// Scans the workspace for agent instruction files, skills, and commands

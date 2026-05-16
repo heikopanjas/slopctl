@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.0)
+**Last updated:** 2026-05-16 (v21.1.1)
 
 <!-- {mission} -->
 
@@ -819,6 +819,16 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.1, fix remove bugs and improve test coverage)
+
+- Fixed `remove --agent` deleting language skills from `.agents/skills/` when the removed agent was the last cross-client agent; language skills (tracker `lang != LANG_NONE`) are now preserved; only agent-specific and top-level skills (`lang == LANG_NONE`) are removed
+- Fixed `remove --lang` leaving a stale `lang` field on the AGENTS.md tracker entry, causing `status` to report the language as still installed after removal; the `main`-category entry is now reset to `LANG_NONE` before saving the tracker
+- Added `clear_lang_for_category(lang, category)` to `FileTracker` in `src/file_tracker.rs`
+- Added `setup_workspace_with_agent_and_lang()` lifecycle test fixture
+- Added 4 new regression and lifecycle tests; enhanced 2 existing tests with negative assertions and tracker-consistency invariants
+- Test count: 304 → 308
+- Version bump: 21.1.0 → 21.1.1 (PATCH — bug fixes)
 
 ### 2026-05-16 (v21.1.0, clean up empty agent dirs after remove)
 
