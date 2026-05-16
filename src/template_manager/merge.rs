@@ -1070,7 +1070,7 @@ mod tests
     fn test_categorize_path_skill()
     {
         let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.cursor/skills/my-skill/SKILL.md"), &options), "skill");
+        assert_eq!(categorize_path(Path::new("/project/.bogus/skills/my-skill/SKILL.md"), &options), "skill");
     }
 
     #[test]
@@ -1083,15 +1083,15 @@ mod tests
     #[test]
     fn test_categorize_path_agent()
     {
-        let options = MergeOptions { lang: None, agent: Some("cursor"), mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.cursorrules"), &options), "agent");
+        let options = MergeOptions { lang: None, agent: Some("bogus"), mission: None };
+        assert_eq!(categorize_path(Path::new("/project/.bogus/instructions.md"), &options), "agent");
     }
 
     #[test]
     fn test_categorize_path_language()
     {
-        let options = MergeOptions { lang: Some("rust"), agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.rustfmt.toml"), &options), "language");
+        let options = MergeOptions { lang: Some("Rust++"), agent: None, mission: None };
+        assert_eq!(categorize_path(Path::new("/project/.rpp.toml"), &options), "language");
     }
 
     #[test]
@@ -1192,7 +1192,7 @@ mod tests
     fn test_collect_skills_extracts_parent_dir_name()
     {
         let mut map = HashMap::new();
-        map.insert(PathBuf::from("/ws/.cursor/skills/my-skill/SKILL.md"), rc("body"));
+        map.insert(PathBuf::from("/ws/.bogus/skills/my-skill/SKILL.md"), rc("body"));
         let skills = collect_skills(&map);
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].0, "my-skill");
@@ -1238,13 +1238,14 @@ mod tests
         let workspace = dir.path();
 
         let agents = workspace.join("AGENTS.md");
-        let other = workspace.join("CLAUDE.md");
+        let other = workspace.join(".bogus/instructions.md");
+        fs::create_dir_all(other.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
         fs::write(&agents, "user agents")?;
-        fs::write(&other, "user claude")?;
+        fs::write(&other, "user instructions")?;
 
         let mut map = HashMap::new();
         map.insert(normalize_path(&agents), rc("template agents"));
-        map.insert(normalize_path(&other), rc("template claude"));
+        map.insert(normalize_path(&other), rc("template instructions"));
 
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 2);
@@ -1261,7 +1262,7 @@ mod tests
                     assert!(*is_main == true);
                     saw_main = true;
                 }
-                else if name == "CLAUDE.md"
+                else if name == "instructions.md"
                 {
                     assert!(*is_main == false);
                     saw_non_main = true;

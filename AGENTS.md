@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.2.2)
+**Last updated:** 2026-05-16 (v20.2.7)
 
 <!-- {mission} -->
 
@@ -106,6 +106,7 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
 - CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
 - Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
+- Rust source tests must not use real-world coding-agent or programming-language fixture names. Use artificial agents `bogus` and `fake`; use artificial languages `Rust++` and `CppScript`. Real supported names belong only in shipped template/catalog data, not source fixtures.
 
 ### Documentation
 
@@ -456,19 +457,13 @@ Load the `rust-build-commands` skill when building or running the project.
 **Linting Configuration:**
 
 - Allow specific clippy lints when project style differs from defaults
-- Configure in `Cargo.toml`:
-
-  ```toml
-  [lints.clippy]
-  bool_comparison = "allow"
-  ```
-
-- Can also use module-level attributes:
+- Prefer crate-level attributes when project style intentionally differs from clippy defaults:
 
   ```rust
   #![allow(clippy::bool_comparison)]
   ```
 
+- Avoid package-level `[lints.clippy]` in `Cargo.toml` for now because the editor TOML schema flags it even though Cargo accepts it
 - Document reasoning for lint exceptions
 
 **File Organization:**
@@ -824,6 +819,45 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v20.2.7, synthetic source fixtures)
+
+- Removed real-world coding-agent and programming-language fixture names from Rust source and tests
+- Replaced source/test agent fixtures with `bogus` and `fake`, and language fixtures with `Rust++` and `CppScript`
+- Added catalog-driven adoption and removal paths so `TemplateManager` and `FileTracker` can use the active `agent-defaults.yml` instead of relying on embedded agent names
+- Updated CLI/help comments to use generic `<agent>` and `<language>` placeholders instead of real catalog entries
+- Version bump: 20.2.6 → 20.2.7 (PATCH — test fixture sanitization and catalog-driven lookup cleanup)
+
+### 2026-05-16 (v20.2.6, clippy lint schema fix)
+
+- Moved the project-level `clippy::bool_comparison` allowance from `Cargo.toml` package lints to crate-level attributes in `src/lib.rs`, `src/main.rs`, and `build.rs`
+- Rationale: Cargo accepts package lint configuration, but the editor TOML schema flags `[lints.clippy]`; crate-level attributes preserve clippy behavior without schema warnings
+- Version bump: 20.2.5 → 20.2.6 (PATCH — metadata schema warning fix)
+
+### 2026-05-16 (v20.2.5, catalog-driven bogus agent tests)
+
+- Added regression tests with an imaginary `bogus_agent` to prove skill routing and status detection come from `agent-defaults.yml`, not hardcoded known-agent names
+- `TemplateEngine` now loads the active `agent-defaults.yml` from its template cache for marker creation, skill directory selection, cross-client support, and userprofile skill routing
+- `slopctl status` now detects installed agents from the active agent-defaults catalog, so custom catalog agents are visible when their marker directories exist
+- Version bump: 20.2.4 → 20.2.5 (PATCH — data-driven agent defaults coverage and lookup fix)
+
+### 2026-05-16 (v20.2.4, marker-based status detection)
+
+- Fixed `slopctl status` reporting no installed agents when an agent only had marker directories and skills installed
+- Status now detects installed agents through `AgentDefaults` workspace markers instead of BoM-managed agent files
+- This makes Codex, Vibe, OpenCode, and other marker-only agent installs visible in workspace status
+- Added regression coverage for detecting a marker-only Codex install
+- Version bump: 20.2.3 → 20.2.4 (PATCH — workspace status detection bug fix)
+
+### 2026-05-16 (v20.2.3, transactional skill installation)
+
+- Made `init` preflight resolved install targets before writing files or creating directories
+- Skill install targets are derived from `AgentDefaults` and skill scope, not from previously installed agents or existing workspace directories
+- Top-level skills for agents that do not read `.agents/skills/` continue to route to the selected agent's native `skill_dir`
+- Existing `.agents/skills/` files are treated as shared targets: identical tracked files refresh tracker metadata without copying, while untracked, modified, or different tracked files stop the install before any writes
+- Cross-client skill adoption now skips native targets already scheduled from the current template set, preventing duplicate target errors
+- Added regression coverage for AgentDefaults-based routing, shared skill conflicts, and atomic preflight failure behavior
+- Version bump: 20.2.2 → 20.2.3 (PATCH — skill routing and install transaction bug fix)
 
 ### 2026-05-14 (v20.2.2, commit body bullet guidance)
 

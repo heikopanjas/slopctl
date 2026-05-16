@@ -244,7 +244,7 @@ impl DownloadManager
     /// # Arguments
     ///
     /// * `parsed` - Parsed GitHub URL of the template repository
-    /// * `source` - Relative path to the skill directory within the repo (e.g. `skills/rust-coding-conventions`)
+    /// * `source` - Relative path to the skill directory within the repo
     fn download_skill_directory(&self, parsed: &github::GitHubUrl, source: &str) -> Result<()>
     {
         let skill_url = if parsed.path.is_empty() == true
@@ -400,7 +400,7 @@ mod tests
         config.skills = vec![make_skill("git-workflow", "skills/git-workflow")];
         config
             .agents
-            .insert("cursor".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("git-workflow-agent", "skills/git-workflow")], ..Default::default() });
+            .insert("bogus".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("git-workflow-agent", "skills/git-workflow")], ..Default::default() });
 
         let sources = DownloadManager::collect_local_skill_sources(&config);
         assert_eq!(sources, vec!["skills/git-workflow"]);
@@ -411,9 +411,9 @@ mod tests
     {
         let mut config = empty_config();
         config.skills = vec![make_skill("top", "skills/top-skill")];
-        config.agents.insert("cursor".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("agent", "skills/agent-skill")], ..Default::default() });
-        config.languages.insert("rust".to_string(), crate::bom::LanguageConfig { skills: vec![make_skill("lang", "skills/lang-skill")], ..Default::default() });
-        config.shared.insert("cmake".to_string(), crate::bom::SharedConfig { skills: vec![make_skill("shared", "skills/shared-skill")], ..Default::default() });
+        config.agents.insert("bogus".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("agent", "skills/agent-skill")], ..Default::default() });
+        config.languages.insert("Rust++".to_string(), crate::bom::LanguageConfig { skills: vec![make_skill("lang", "skills/lang-skill")], ..Default::default() });
+        config.shared.insert("CppScript".to_string(), crate::bom::SharedConfig { skills: vec![make_skill("shared", "skills/shared-skill")], ..Default::default() });
 
         let sources = DownloadManager::collect_local_skill_sources(&config);
         assert_eq!(sources.len(), 4);

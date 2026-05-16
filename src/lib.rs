@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 //! slopctl - A manager for coding agent instruction files
 //!
 //! This library provides functionality to manage, organize, and maintain

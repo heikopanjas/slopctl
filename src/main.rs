@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use std::{fs, io};
 
 use clap::Parser;
@@ -401,9 +403,9 @@ fn main()
             if lang.is_none() == true && agent.is_none() == true
             {
                 eprintln!("{} Must specify at least one of --lang or --agent", "✗".red());
-                eprintln!("{} Examples: slopctl init --lang rust", "→".blue());
-                eprintln!("{}          slopctl init --agent cursor", "→".blue());
-                eprintln!("{}          slopctl init --lang rust --agent cursor", "→".blue());
+                eprintln!("{} Examples: slopctl init --lang <language>", "→".blue());
+                eprintln!("{}          slopctl init --agent <agent>", "→".blue());
+                eprintln!("{}          slopctl init --lang <language> --agent <agent>", "→".blue());
                 std::process::exit(1);
             }
 

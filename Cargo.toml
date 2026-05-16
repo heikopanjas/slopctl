@@ -1,6 +1,6 @@
 [package]
 name = "slopctl"
-version = "20.2.2"
+version = "20.2.7"
 edition = "2024"
 
 [dependencies]
@@ -23,6 +23,3 @@ anyhow = "1.0.102"
 clap = { version = "4.5.20", features = ["derive"] }
 clap_complete = "4.5"
 clap_mangen = "0.2"
-
-[lints.clippy]
-bool_comparison = "allow"
