@@ -560,7 +560,8 @@ fn test_doctor_detects_missing_file_after_deletion() -> anyhow::Result<()>
 
     fixture.init(Some("fake"), Some("Rust++"))?;
 
-    let rpp_file = workspace.path().join(".rpp.toml");
+    let cwd = std::env::current_dir()?;
+    let rpp_file = cwd.join(".rpp.toml");
     assert!(rpp_file.exists() == true);
     fs::remove_file(&rpp_file)?;
 
@@ -568,13 +569,13 @@ fn test_doctor_detects_missing_file_after_deletion() -> anyhow::Result<()>
     fixture.doctor(false, false)?;
 
     // The tracker still has the entry (fix was not requested)
-    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let tracker = FileTracker::new(&cwd)?;
     assert!(tracker.get_metadata(&rpp_file).is_some() == true, "tracker must still have the stale entry before fix");
 
     // Doctor with fix: prunes the stale tracker entry
     fixture.doctor(true, false)?;
 
-    let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
+    let tracker_after = FileTracker::new(&cwd)?;
     assert!(tracker_after.get_metadata(&rpp_file).is_none() == true, "tracker must prune missing file after doctor --fix");
 
     Ok(())
