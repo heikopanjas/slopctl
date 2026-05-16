@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.6)
+**Last updated:** 2026-05-16 (v21.1.7)
 
 <!-- {mission} -->
 
@@ -819,6 +819,14 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
+
+- Added 3 `download_manager.rs` tests using GitHub hooks: agent defaults download, model defaults download, skill entries download
+- Added 11 `main.rs` tests: `resolve_mission_content` (inline, file, missing), `resolve_source`/`resolve_agents_source`/`resolve_models_source` defaults and overrides, `handle_config` list/set/get/delete for both workspace and global scopes
+- Coverage: 60.22% to 64.01% (+3.79%); main.rs 0%→18.1%, download_manager.rs 8.2%→41.1%, github.rs 33.6%→45.4%
+- Test count: 358 to 372 (361 lib + 11 main)
+- Version bump: 21.1.6 to 21.1.7 (PATCH — test coverage expansion)
 
 ### 2026-05-16 (v21.1.6, Phase 2 test coverage with LLM and catalog mocking)
 

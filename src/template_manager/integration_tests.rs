@@ -856,7 +856,7 @@ fn test_merge_preview_writes_sidecar() -> anyhow::Result<()>
     fixture.init(Some("fake"), Some("Rust++"))?;
 
     let agents_md = workspace.path().join("AGENTS.md");
-    let original = fs::read_to_string(&agents_md)?;
+    let _original = fs::read_to_string(&agents_md)?;
     fs::write(&agents_md, "# Diverged content\n")?;
 
     let slopctl_dir = workspace.path().join(".slopctl");
@@ -897,7 +897,7 @@ fn test_merge_truncated_response_keeps_partial() -> anyhow::Result<()>
     fixture.init(Some("fake"), Some("Rust++"))?;
 
     let agents_md = workspace.path().join("AGENTS.md");
-    let original = fs::read_to_string(&agents_md)?;
+    let _original = fs::read_to_string(&agents_md)?;
     fs::write(&agents_md, "# Diverged for truncation test\n")?;
 
     let slopctl_dir = workspace.path().join(".slopctl");

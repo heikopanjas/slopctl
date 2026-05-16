@@ -476,4 +476,60 @@ mod tests
         assert!(sources.contains(&"skills/lang-skill".to_string()) == true);
         assert!(sources.contains(&"skills/shared-skill".to_string()) == true);
     }
+
+    #[test]
+    fn test_download_agent_defaults_from_url_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let agent_yaml = b"version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                           '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n";
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(move |_url| Ok(agent_yaml.to_vec())));
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_agent_defaults_from_url("https://github.com/test/repo/tree/main/templates/v5")?;
+
+        assert!(config_dir.path().join(AGENT_DEFAULTS_FILE).exists() == true, "agent-defaults.yml must be written to config dir");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_model_defaults_from_url_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let model_yaml =
+            b"version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+              default_model: llama3.2\n";
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(move |_url| Ok(model_yaml.to_vec())));
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_model_defaults_from_url("https://github.com/test/repo/tree/main/templates/v5")?;
+
+        assert!(config_dir.path().join(MODEL_DEFAULTS_FILE).exists() == true, "model-defaults.yml must be written to config dir");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_skill_entries_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(|_url| Ok(b"# Skill content\n".to_vec())));
+
+        let entries = vec![github::GitHubContentEntry {
+            name:         "SKILL.md".to_string(),
+            entry_type:   "file".to_string(),
+            download_url: Some("https://raw.githubusercontent.com/test/repo/main/skills/test/SKILL.md".to_string()),
+            path:         "skills/test/SKILL.md".to_string()
+        }];
+
+        let parent_url = github::GitHubUrl { owner: "test".into(), repo: "repo".into(), branch: "main".into(), path: "skills/test".into() };
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_skill_entries(&entries, &parent_url, "skills/test")?;
+
+        assert!(config_dir.path().join("skills/test/SKILL.md").exists() == true);
+        Ok(())
+    }
 }
