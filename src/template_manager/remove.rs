@@ -674,15 +674,16 @@ mod tests
         template_manager::cwd_test_guard
     };
 
-    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool, Option<&str>)]) -> anyhow::Result<()>
+    fn write_synthetic_agent_defaults(config_dir: &std::path::Path, agents: &[(&str, bool, Option<&str>, Option<&str>)]) -> anyhow::Result<()>
     {
         let entries = agents
             .iter()
-            .map(|(name, reads_cross_client_skills, userprofile_skill_dir)| {
+            .map(|(name, reads_cross_client_skills, userprofile_skill_dir, skill_dir_override)| {
                 let userprofile = userprofile_skill_dir.map(|dir| format!("    userprofile_skill_dir: '{dir}'\n")).unwrap_or_default();
+                let skill = skill_dir_override.map(|d| format!("'{d}'")).unwrap_or_else(|| format!("'$workspace/.{name}/skills'"));
                 format!(
-                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: \
-                     '$workspace/.{name}/skills'\n{userprofile}    reads_cross_client_skills: {reads_cross_client_skills}\n"
+                    "  - name: {name}\n    markers:\n      - .{name}\n    prompt_dir: '$workspace/.{name}/prompts'\n    skill_dir: {skill}\n{userprofile}    \
+                     reads_cross_client_skills: {reads_cross_client_skills}\n"
                 )
             })
             .collect::<Vec<_>>()
@@ -764,7 +765,7 @@ mod tests
 
         let yaml = "version: 5\nagents:\n  fake:\n    instructions: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None), ("fake", true, None, None)])?;
 
         let agent_file = workspace.path().join(".bogus/instructions.md");
         fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
@@ -881,7 +882,7 @@ mod tests
 
         let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let agent_file = workspace.path().join(".bogus/instructions.md");
         fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
@@ -962,7 +963,7 @@ mod tests
 
         let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let agent_file = workspace.path().join(".bogus/instructions.md");
         fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
@@ -1069,7 +1070,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, Some("$userprofile/.bogus/skills"))])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, Some("$userprofile/.bogus/skills"), None)])?;
 
         // Track an agent file so remove --agent has something to find.
         let agent_file = workspace.path().join(".bogus/instructions.md");
@@ -1100,9 +1101,9 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
-        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("fake", true, None, None), ("foobar", true, None, Some("$workspace/.agents/skills"))])?;
         fs::create_dir_all(workspace.path().join(".fake"))?;
+        fs::create_dir_all(workspace.path().join(".foobar"))?;
 
         // Place a cross-client skill
         let skill_dir = workspace.path().join(".agents/skills/git-workflow");
@@ -1114,7 +1115,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("bogus"), None, false, true);
+        let result = manager.remove(Some("fake"), None, false, true);
 
         assert!(result.is_ok() == true);
         // The cross-client skill must be preserved because another agent still needs it.
@@ -1128,8 +1129,8 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None), ("fake", true, None)])?;
-        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("fake", true, None, None), ("foobar", true, None, Some("$workspace/.agents/skills"))])?;
+        fs::create_dir_all(workspace.path().join(".fake"))?;
 
         // Agent/top-level skill (lang: none → must be deleted when last agent removed)
         let skill_dir = workspace.path().join(".agents/skills/git-workflow");
@@ -1152,7 +1153,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("bogus"), None, true, false);
+        let result = manager.remove(Some("fake"), None, true, false);
 
         assert!(result.is_ok() == true);
         // Agent/top-level skill must be deleted — it has no language owner
@@ -1168,7 +1169,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None, None)])?;
 
         let agent_file = workspace.path().join(".bogus/instructions.md");
         fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
@@ -1196,7 +1197,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None, None)])?;
 
         let agent_file = workspace.path().join(".bogus/instructions.md");
         let user_file = workspace.path().join(".bogus/user-notes.md");
@@ -1233,7 +1234,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let agents_md = workspace.path().join("AGENTS.md");
         let agent_file = workspace.path().join(".bogus/instructions.md");
@@ -1270,9 +1271,9 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        // bogus is the only cross-client agent installed
-        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None)])?;
-        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        // fake is the only cross-client agent installed
+        write_synthetic_agent_defaults(data_dir.path(), &[("fake", true, None, None)])?;
+        fs::create_dir_all(workspace.path().join(".fake"))?;
 
         // Agent-specific top-level skill (lang: none → should be deleted)
         let agent_skill_dir = workspace.path().join(".agents/skills/git-workflow");
@@ -1296,7 +1297,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(Some("bogus"), None, true, false);
+        let result = manager.remove(Some("fake"), None, true, false);
 
         assert!(result.is_ok() == true);
         // Agent/top-level skill must be gone — it belongs to no language
@@ -1357,7 +1358,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        write_synthetic_agent_defaults(data_dir.path(), &[("fake", false, None)])?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("fake", false, None, None)])?;
 
         // Skill in cross-client dir (tracked with lang: CppScript — installed by a cross-client agent)
         let cc_skill_dir = workspace.path().join(".agents/skills/cppscript-conventions");

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.2)
+**Last updated:** 2026-05-16 (v21.1.4)
 
 <!-- {mission} -->
 
@@ -819,6 +819,29 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-05-16 (v21.1.4, init/remove integration tests)
+
+- Added 12 integration tests in new `src/template_manager/integration_tests.rs` exercising init→remove sequences across all three canonical test agent archetypes (bogus, fake, foobar) and both synthetic languages (Rust++, CppScript)
+- Tests cover: single-operation sanity (3), remove-preserves-sibling scope (3), agent switching and coexistence (2), language guard enforcement (2), and cross-client cleanup edge cases (2)
+- Introduced `IntegrationFixture` struct providing a self-contained config_dir with templates.yml, agent-defaults.yml, source files, and helper methods (`init`, `remove_agent`, `remove_lang`) that drive the full `TemplateManager::update()` and `TemplateManager::remove()` pipelines
+- Test count: 309 → 321
+- Version bump: 21.1.3 → 21.1.4 (PATCH — test coverage addition)
+
+### 2026-05-16 (v21.1.3, canonical test agent archetypes)
+
+- Established three canonical test agent archetypes with well-defined attributes for synthetic test catalogs:
+  - **bogus**: `reads_cross_client_skills: false`, native-only (like Claude/Vibe)
+  - **fake**: `reads_cross_client_skills: true`, hybrid with native dir + reads `.agents/skills/` (like Cursor/Codex)
+  - **foobar**: `reads_cross_client_skills: true`, cross-client-only with `skill_dir: $workspace/.agents/skills`
+- Updated `synthetic_catalog()` in `file_tracker.rs`: changed bogus from `true` to `false`, added foobar agent entry
+- Extended `write_synthetic_agent_defaults` helper in `remove.rs` to accept optional `skill_dir` override (4th tuple element); updated all 11 call sites
+- Extended `write_synthetic_agent_defaults` helper in `template_engine.rs` to accept optional `skill_dir` override (3rd tuple element); updated all 10 call sites
+- Updated 3 cross-client removal tests in `remove.rs` to use `fake`/`foobar` instead of `bogus` for semantic clarity
+- Renamed 2 cross-client routing tests in `template_engine.rs` from `*_bogus*` to `*_fake*` and switched to fake agent
+- Updated inline YAML in `list.rs` to use `reads_cross_client_skills: false` for bogus (was `true`)
+- Rationale: test agents should have stable, semantically meaningful attributes so cross-client vs native-only behavior is obvious from the agent name alone
+- Version bump: 21.1.2 → 21.1.3 (PATCH — test infrastructure cleanup)
 
 ### 2026-05-16 (v21.1.2, fix adopted skill copies losing lang attribution)
 

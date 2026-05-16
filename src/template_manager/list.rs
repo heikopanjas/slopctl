@@ -420,7 +420,7 @@ mod tests
         std::fs::write(
             config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
             "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
-             '$workspace/.bogus/skills'\n    reads_cross_client_skills: true\n"
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
         )?;
 
         let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
