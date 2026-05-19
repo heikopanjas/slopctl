@@ -4,7 +4,7 @@ description: Start an agentic coding session by reading the primary instruction 
 license: MIT
 metadata:
   author: Heiko Panjas
-  source: slopctl
+  version: "1.0"
 ---
 
 # Init Session
