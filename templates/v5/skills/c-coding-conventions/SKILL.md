@@ -3,7 +3,7 @@ name: c-coding-conventions
 description: C coding conventions covering naming, const-correctness, memory management, header organization, and defensive programming. Load before writing, reviewing, or refactoring C code.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

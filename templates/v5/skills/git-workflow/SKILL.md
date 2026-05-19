@@ -3,7 +3,7 @@ name: git-workflow
 description: Git commit message format using conventional commits, with character limits, commit types, branch workflow, and examples. Load before making a commit or reviewing git history.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

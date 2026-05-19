@@ -3,7 +3,7 @@ name: rust-coding-conventions
 description: Rust coding conventions covering error handling, naming, module organization, formatting, and testing. Load before writing, reviewing, or refactoring Rust code.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

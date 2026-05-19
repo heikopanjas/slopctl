@@ -3,7 +3,7 @@ name: cpp-coding-conventions
 description: C++ coding conventions covering RAII, naming, class design, modern C++ features, and documentation. Load before writing, reviewing, or refactoring C++ code.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 
