@@ -985,10 +985,10 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 
 - All skill definitions use a single `source` field (GitHub URL or local path); the skill name is derived from the source directory name
 - **Agent skills** (`agents.<name>.skills`): installed to the agent's native workspace skill directory (e.g. `.claude/skills/`, `.codex/skills/`, `.cursor/skills/`), regardless of cross-client support
-- **Language skills** (`languages.<name>.skills`): use the smart default — cross-client `.agents/skills/` for agents that support it (Cursor, Codex, Copilot, OpenCode), native skill dir for native-only agents (Claude, Vibe)
-- **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`; same routing rules as language skills
+- **Language skills** (`languages.<name>.skills`): distributed by installed agents — one shared copy in `.agents/skills/` when any cross-client agent is installed; one copy per native-only agent skill dir (e.g. `.claude/skills/`) when native-only agents are installed; `.agents/skills/` only when no agents are installed
+- **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`; same distribution rules as language skills
 - **Language include skills**: skills from an included *language* are also propagated depth-first (e.g. `swiftui` including `swift` inherits `swift`'s skills); cycle detection prevents infinite recursion. See the [`includes` section](#includes-composable-languages-and-shared-groups) for full details.
-- **Top-level skills** (`skills`): use the smart default — cross-client `.agents/skills/` for cross-client agents, native dir for native-only agents; optional `target: '$userprofile'` installs globally (e.g. `~/.codex/skills`)
+- **Top-level skills** (`skills`): same agent-aware distribution as language skills; optional `target: '$userprofile'` installs globally (e.g. `~/.codex/skills`)
 - GitHub skills are cached during `templates --update` via one tarball download per repository (not per file); `init` uses the same tarball path for URL-based skills not yet cached
 - Skills are tracked with the `"skill"` category in the file tracker for modification detection
 - The `templates --list` command shows available skills (including agent and language skill counts); `status` shows installed skills
@@ -1012,8 +1012,11 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 | How the skill is defined / invoked | Agent context | Installed to |
 | --- | --- | --- |
 | `agents.<name>.skills` in templates.yml | named agent | agent's native workspace skill dir |
-| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | cross-client agent | `.agents/skills/` |
-| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | native-only agent | agent's native workspace dir |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | no agents installed | `.agents/skills/` |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | cross-client agent(s) installed | `.agents/skills/` |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | native-only agent(s) installed | each native agent skill dir |
+| `languages` / top-level `skills` in templates.yml — `target` omitted or `$workspace` | mixed cross-client + native-only | `.agents/skills/` plus each native-only copy |
+| `init --agent <native-only>` after language install | native-only agent added later | hydrates installed language skills from templates into agent native dir |
 | Any skill definition — `target: '$userprofile'` | any agent | agent's userprofile skill dir (global exception; see table above) |
 
 **Example per-agent skills in templates.yml:**
@@ -1508,12 +1511,15 @@ Run `slopctl init --agent <new-agent>`. slopctl detects the existing language fr
 Add it to the relevant `skills:` section in `templates.yml`, then run `slopctl templates --update` and `slopctl init --lang <lang>` or `slopctl init --agent <agent>`. Language skills install with their language, agent skills install with their agent, and top-level skills install with any init run.
 
 **Where are skills installed?**
-It depends on how the skill is defined or invoked. See the [slopctl skill routing decisions](#agent-skills) table for the full matrix. In short:
+It depends on how the skill is defined and which agents are installed. See the [slopctl skill routing decisions](#agent-skills) table for the full matrix. In short:
 
-- **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`): language and top-level skills go to `.agents/skills/` — these agents scan it natively, so no duplication occurs.
-- **Native-only agents** (`claude`, `vibe`): language and top-level skills go to the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`.
-- **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir.
-- **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir for explicit global policy installs (e.g. `~/.codex/skills/`).
+- **No agents installed**: language and top-level skills go to `.agents/skills/`
+- **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`): one shared copy in `.agents/skills/`
+- **Native-only agents** (`claude`, `vibe`): one copy in the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`
+- **Mixed agents**: both the shared `.agents/skills/` copy and native-only copies
+- **Adding a native-only agent after language install**: language skills are hydrated from templates into the agent's native skill dir
+- **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir
+- **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir for explicit global policy installs (e.g. `~/.codex/skills/`)
 
 ## License
 

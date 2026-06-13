@@ -418,7 +418,14 @@ impl TemplateManager
             }
 
             let is_main_file = file.file_name().is_some_and(|name| name == "AGENTS.md");
-            let should_remove = remove_all == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
+            // Files that physically live inside the agent's directory tree must always
+            // be removed when removing that agent. Language skills (lang != LANG_NONE,
+            // agent == []) are installed into the native skill dir of native-only agents
+            // like Claude; the tracker records them as lang-owned, so is_unreferenced()
+            // stays false. We force-delete by physical location so the agent directory
+            // is fully cleaned up and status no longer reports the agent as installed.
+            let in_agent_dir = has_agent_target == true && agent.is_some_and(|a| Self::path_belongs_to_agent(file, a));
+            let should_remove = remove_all == true || in_agent_dir == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
 
             if should_remove == true
             {
@@ -1414,6 +1421,56 @@ mod tests
 
         let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");
+        Ok(())
+    }
+
+    // ── Regression: language skills in native agent dir must go with agent ──
+
+    #[test]
+    fn test_remove_agent_removes_lang_skills_in_agent_skill_dir() -> anyhow::Result<()>
+    {
+        // Scenario: init --agent claude (native-only) --lang rust
+        // Language skills (rust-coding-conventions, rust-build-commands) are installed
+        // to .claude/skills/ because Claude can't read .agents/skills/.
+        // The tracker records these with lang: [rust], agent: [] (no agent owner).
+        // remove --agent claude must still delete them so .claude/ becomes empty
+        // and status no longer reports Claude as installed.
+
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // native-only agent (reads_cross_client_skills: false)
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None, None)])?;
+
+        let skill_a_dir = workspace.path().join(".bogus/skills/rpp-conventions");
+        let skill_b_dir = workspace.path().join(".bogus/skills/rpp-build");
+        fs::create_dir_all(&skill_a_dir)?;
+        fs::create_dir_all(&skill_b_dir)?;
+        let skill_a = skill_a_dir.join("SKILL.md");
+        let skill_b = skill_b_dir.join("SKILL.md");
+        fs::write(&skill_a, "# Rust++ Conventions")?;
+        fs::write(&skill_b, "# Rust++ Build")?;
+
+        // Tracker records both as lang-owned (no agent owner) — mirrors what init does
+        // for native-only agents.
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&skill_a, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&skill_b, "sha2".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        let result = manager.remove(Some("bogus"), None, true, false);
+
+        assert!(result.is_ok() == true);
+        // Both language skills physically in the agent dir must be deleted
+        assert!(skill_a.exists() == false, "lang skill in agent dir must be deleted on remove --agent");
+        assert!(skill_b.exists() == false, "lang skill in agent dir must be deleted on remove --agent");
+        // .bogus/ must be empty and gone so status no longer reports the agent
+        assert!(workspace.path().join(".bogus").exists() == false, ".bogus/ must be removed when empty after agent removal");
+
         Ok(())
     }
 

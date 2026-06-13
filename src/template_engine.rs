@@ -356,22 +356,203 @@ impl<'a> TemplateEngine<'a>
             .collect()
     }
 
-    /// Return the default directory for non-agent-specific skills
-    fn default_non_agent_skill_dir(&self, agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path) -> PathBuf
+    /// Returns true when a skill uses smart multi-target distribution (omitted target or bare `$workspace`).
+    fn skill_uses_smart_distribution(target: Option<&str>) -> bool
     {
-        if let Some(agent_name) = agent &&
-            agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, agent_name) == false &&
-            let Some(skill_dir) = agent_defaults::get_skill_dir_from_catalog(agent_catalog, agent_name)
-        {
-            return self.resolve_placeholder(skill_dir, workspace, userprofile);
-        }
-
-        self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile)
+        target.is_none() == true || target == Some(agent_defaults::PLACEHOLDER_WORKSPACE)
     }
 
-    fn target_already_scheduled(files: &[ResolvedFile], target: &Path) -> bool
+    /// Compute all workspace skill directories for non-agent-specific skills.
+    ///
+    /// Distributes language and top-level skills based on installed agents:
+    /// - no agents: `.agents/skills/` only
+    /// - cross-client agents: one shared copy in `.agents/skills/`
+    /// - native-only agents: one copy per native skill dir
+    /// - mixed: both shared and each native-only copy
+    fn non_agent_skill_target_dirs(
+        &self, options_agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path
+    ) -> Vec<PathBuf>
     {
-        files.iter().any(|entry| entry.target == target)
+        let cross_client_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile);
+        let mut installed = agent_defaults::detect_all_installed_agents_from_catalog(agent_catalog, workspace);
+
+        if let Some(agent_name) = options_agent &&
+            installed.iter().any(|name| name == agent_name) == false
+        {
+            installed.push(agent_name.to_string());
+        }
+
+        let mut needs_cross_client = installed.is_empty() == true;
+        let mut native_only_agents: Vec<String> = Vec::new();
+
+        for agent_name in &installed
+        {
+            if agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, agent_name) == true
+            {
+                needs_cross_client = true;
+            }
+            else
+            {
+                native_only_agents.push(agent_name.clone());
+            }
+        }
+
+        let mut dirs: Vec<PathBuf> = Vec::new();
+
+        if needs_cross_client == true
+        {
+            dirs.push(cross_client_dir.clone());
+        }
+
+        for agent_name in native_only_agents
+        {
+            if let Some(raw_skill_dir) = agent_defaults::get_skill_dir_from_catalog(agent_catalog, &agent_name) &&
+                raw_skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+            {
+                let native_dir = self.resolve_placeholder(raw_skill_dir, workspace, userprofile);
+                if dirs.contains(&native_dir) == false
+                {
+                    dirs.push(native_dir);
+                }
+            }
+        }
+
+        if dirs.is_empty() == true
+        {
+            dirs.push(cross_client_dir);
+        }
+
+        dirs
+    }
+
+    /// Install non-agent-specific skills using smart multi-target distribution or explicit targets.
+    #[allow(clippy::too_many_arguments)]
+    fn install_non_agent_skills(
+        &self, skills: &[bom::SkillDefinition], target_dirs: &[PathBuf], options_agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog,
+        workspace: &Path, userprofile: &Path, temp_path: &Path, lang: &str, agent: &str, local_cache_only: bool, files_to_copy: &mut Vec<ResolvedFile>
+    ) -> Result<()>
+    {
+        let default_dir = target_dirs.first().cloned().unwrap_or_else(|| self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile));
+
+        for (dir, group) in self.group_skills_by_target(skills, &default_dir, options_agent, agent_catalog, workspace, userprofile)
+        {
+            for skill in group
+            {
+                if Self::skill_uses_smart_distribution(skill.target.as_deref()) == true
+                {
+                    for target_dir in target_dirs
+                    {
+                        self.install_skills(
+                            std::iter::once((skill.derive_name(), skill.source.as_str())),
+                            target_dir,
+                            temp_path,
+                            lang,
+                            agent,
+                            local_cache_only,
+                            files_to_copy
+                        )?;
+                    }
+                }
+                else
+                {
+                    self.install_skills(
+                        std::iter::once((skill.derive_name(), skill.source.as_str())),
+                        &dir,
+                        temp_path,
+                        lang,
+                        agent,
+                        local_cache_only,
+                        files_to_copy
+                    )?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Install selected non-agent-specific skills using smart multi-target distribution.
+    #[allow(clippy::too_many_arguments)]
+    fn install_partial_non_agent_skills(
+        &self, skills: &[bom::SkillDefinition], requested: &HashSet<String>, target_dirs: &[PathBuf], options_agent: Option<&str>,
+        agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path, temp_path: &Path, lang: &str, agent: &str, local_cache_only: bool,
+        files_to_copy: &mut Vec<ResolvedFile>
+    ) -> Result<()>
+    {
+        let default_dir = target_dirs.first().cloned().unwrap_or_else(|| self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile));
+
+        for (dir, group) in self.group_skills_by_target(skills, &default_dir, options_agent, agent_catalog, workspace, userprofile)
+        {
+            for skill in group
+            {
+                let pairs: Vec<(String, String)> = self.skill_install_pairs_for_partial(skill, requested);
+                if pairs.is_empty() == false
+                {
+                    if Self::skill_uses_smart_distribution(skill.target.as_deref()) == true
+                    {
+                        for target_dir in target_dirs
+                        {
+                            self.install_skills(
+                                pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+                                target_dir,
+                                temp_path,
+                                lang,
+                                agent,
+                                local_cache_only,
+                                files_to_copy
+                            )?;
+                        }
+                    }
+                    else
+                    {
+                        self.install_skills(
+                            pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+                            &dir,
+                            temp_path,
+                            lang,
+                            agent,
+                            local_cache_only,
+                            files_to_copy
+                        )?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Hydrate language skills for already-installed languages into a native-only agent directory.
+    #[allow(clippy::too_many_arguments)]
+    fn hydrate_language_skills_for_native_agent(
+        &self, agent_name: &str, native_skill_dir: &Path, config: &TemplateConfig, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path,
+        userprofile: &Path, existing_tracker: &FileTracker, temp_path: &Path, files_to_copy: &mut Vec<ResolvedFile>
+    ) -> Result<()>
+    {
+        let target_dirs = [native_skill_dir.to_path_buf()];
+
+        for lang in existing_tracker.get_installed_languages()
+        {
+            let lang_skills = bom::resolve_language_skills(&lang, config)?;
+            if lang_skills.is_empty() == false
+            {
+                self.install_non_agent_skills(
+                    &lang_skills,
+                    &target_dirs,
+                    Some(agent_name),
+                    agent_catalog,
+                    workspace,
+                    userprofile,
+                    temp_path,
+                    &lang,
+                    AGENT_ALL,
+                    false,
+                    files_to_copy
+                )?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Resolves a source string to a local file path
@@ -677,7 +858,7 @@ impl<'a> TemplateEngine<'a>
                     .agent
                     .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
                     .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
-                let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
+                let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, &agent_catalog, &workspace, &userprofile);
 
                 if let Some(agent_name) = options.agent &&
                     let Some(agent_config) = config.agents.get(agent_name) &&
@@ -708,19 +889,20 @@ impl<'a> TemplateEngine<'a>
                         lang_skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
                     if filtered.is_empty() == false
                     {
-                        for (dir, group) in self.group_skills_by_target(&filtered, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-                        {
-                            let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
-                            self.install_skills(
-                                pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
-                                &dir,
-                                temp_path,
-                                lang,
-                                AGENT_ALL,
-                                local_cache_only,
-                                &mut files_to_copy
-                            )?;
-                        }
+                        self.install_partial_non_agent_skills(
+                            &filtered,
+                            partial.skills,
+                            &non_agent_skill_dirs,
+                            options.agent,
+                            &agent_catalog,
+                            &workspace,
+                            &userprofile,
+                            temp_path,
+                            lang,
+                            AGENT_ALL,
+                            local_cache_only,
+                            &mut files_to_copy
+                        )?;
                     }
                 }
 
@@ -730,19 +912,20 @@ impl<'a> TemplateEngine<'a>
                         config.skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
                     if filtered.is_empty() == false
                     {
-                        for (dir, group) in self.group_skills_by_target(&filtered, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-                        {
-                            let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
-                            self.install_skills(
-                                pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
-                                &dir,
-                                temp_path,
-                                LANG_NONE,
-                                AGENT_ALL,
-                                local_cache_only,
-                                &mut files_to_copy
-                            )?;
-                        }
+                        self.install_partial_non_agent_skills(
+                            &filtered,
+                            partial.skills,
+                            &non_agent_skill_dirs,
+                            options.agent,
+                            &agent_catalog,
+                            &workspace,
+                            &userprofile,
+                            temp_path,
+                            LANG_NONE,
+                            AGENT_ALL,
+                            local_cache_only,
+                            &mut files_to_copy
+                        )?;
                     }
                 }
             }
@@ -881,12 +1064,9 @@ impl<'a> TemplateEngine<'a>
                 .agent
                 .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
                 .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
-            let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
-
-            // AgentDefaults is the only source of truth for deciding whether non-agent
-            // skills belong in the cross-agent directory or the selected agent's native dir.
+            let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, &agent_catalog, &workspace, &userprofile);
+            let existing_tracker = FileTracker::new(&workspace).ok();
             let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, a) == false);
-            let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
 
             if let Some(agent_name) = options.agent &&
                 let Some(agent_config) = config.agents.get(agent_name) &&
@@ -912,30 +1092,15 @@ impl<'a> TemplateEngine<'a>
                 let lang_skills = bom::resolve_language_skills(lang, &config)?;
                 if lang_skills.is_empty() == false
                 {
-                    for (dir, group) in self.group_skills_by_target(&lang_skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-                    {
-                        self.install_skills(
-                            group.iter().map(|s| (s.derive_name(), s.source.as_str())),
-                            &dir,
-                            temp_path,
-                            lang,
-                            AGENT_ALL,
-                            local_cache_only,
-                            &mut files_to_copy
-                        )?;
-                    }
-                }
-            }
-
-            if config.skills.is_empty() == false
-            {
-                for (dir, group) in self.group_skills_by_target(&config.skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-                {
-                    self.install_skills(
-                        group.iter().map(|s| (s.derive_name(), s.source.as_str())),
-                        &dir,
+                    self.install_non_agent_skills(
+                        &lang_skills,
+                        &non_agent_skill_dirs,
+                        options.agent,
+                        &agent_catalog,
+                        &workspace,
+                        &userprofile,
                         temp_path,
-                        LANG_NONE,
+                        lang,
                         AGENT_ALL,
                         local_cache_only,
                         &mut files_to_copy
@@ -943,51 +1108,33 @@ impl<'a> TemplateEngine<'a>
                 }
             }
 
-            // Migrate any skills already in .agents/skills/ into the agent's native skill
-            // dir when the agent doesn't read the cross-client path. This ensures Claude and
-            // Vibe users don't lose access to skills that were previously installed without
-            // an agent specified.
-            //
-            // Load the existing tracker to preserve each skill's original `lang` attribution.
-            // Without this, language skills (e.g. lang: "swift") are stamped LANG_NONE and
-            // `remove --lang swift` can no longer find the adopted copies via tracker sweep.
-            let existing_tracker = FileTracker::new(&workspace).ok();
-
-            if native_only_agent == true &&
-                let Some(ref native_dir) = agent_skill_dir &&
-                cross_client_skill_dir.is_dir() == true &&
-                let Ok(entries) = std::fs::read_dir(&cross_client_skill_dir)
+            if config.skills.is_empty() == false
             {
-                for entry in entries.flatten()
-                {
-                    if entry.path().is_dir() == true
-                    {
-                        let mut skill_files: Vec<PathBuf> = Vec::new();
-                        crate::utils::collect_files_recursive(&entry.path(), &mut skill_files)?;
-                        for src in skill_files
-                        {
-                            // Preserve the full relative path under the skill name.
-                            if let Ok(relative) = src.strip_prefix(&cross_client_skill_dir)
-                            {
-                                let target = native_dir.join(relative);
-                                if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
-                                {
-                                    let (lang, mut agent) = existing_tracker
-                                        .as_ref()
-                                        .and_then(|t| t.get_metadata(&src))
-                                        .map(|m| (m.lang.clone(), m.agent.clone()))
-                                        .unwrap_or_else(|| (Vec::new(), Vec::new()));
-                                    if let Some(agent_name) = options.agent &&
-                                        agent.iter().any(|owner| owner == agent_name) == false
-                                    {
-                                        agent.push(agent_name.to_string());
-                                    }
-                                    files_to_copy.push(ResolvedFile { source: src, target, lang, agent });
-                                }
-                            }
-                        }
-                    }
-                }
+                self.install_non_agent_skills(
+                    &config.skills,
+                    &non_agent_skill_dirs,
+                    options.agent,
+                    &agent_catalog,
+                    &workspace,
+                    &userprofile,
+                    temp_path,
+                    options.lang.unwrap_or(LANG_NONE),
+                    options.agent.unwrap_or(AGENT_ALL),
+                    local_cache_only,
+                    &mut files_to_copy
+                )?;
+            }
+
+            // When adding a native-only agent after language install, hydrate language skills from
+            // templates into the agent's native skill dir (replaces broad .agents/skills/ adoption).
+            if native_only_agent == true &&
+                options.lang.is_none() == true &&
+                let Some(agent_name) = options.agent &&
+                let Some(ref native_dir) = agent_skill_dir &&
+                let Some(ref tracker) = existing_tracker &&
+                tracker.get_installed_languages().is_empty() == false
+            {
+                self.hydrate_language_skills_for_native_agent(agent_name, native_dir, &config, &agent_catalog, &workspace, &userprofile, tracker, temp_path, &mut files_to_copy)?;
             }
         }
 
@@ -2697,7 +2844,7 @@ languages:
     }
 
     #[test]
-    fn test_adopt_cross_client_skills_to_bogus() -> anyhow::Result<()>
+    fn test_lang_skills_with_no_agents_route_to_cross_client() -> anyhow::Result<()>
     {
         let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let workspace = tempfile::TempDir::new()?;
@@ -2705,16 +2852,123 @@ languages:
         let original_cwd = std::env::current_dir()?;
         std::env::set_current_dir(workspace.path())?;
 
-        // Pre-populate .agents/skills/ as if a previous agent-less install had run
-        let cross_skill = workspace.path().join(".agents/skills/git-workflow");
-        std::fs::create_dir_all(&cross_skill)?;
-        std::fs::write(cross_skill.join("SKILL.md"), "# Git Workflow")?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &[])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None), ("fake", true, None)])?;
 
-        // Minimal config with no language skills so we can isolate the adoption behaviour
-        let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus: {}\nlanguages: {}\nintegration: {}\n";
-        std::fs::write(config_dir.path().join("templates.yml"), yaml)?;
-        std::fs::write(config_dir.path().join("AGENTS.md"), "<!-- SLOPCTL-TEMPLATE -->\n# Project\n")?;
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        assert_eq!(skill_targets.len(), 1);
+        assert!(skill_targets[0].contains(".agents/skills") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_lang_skills_with_installed_native_agent_route_to_native_dir() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &[])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None), ("fake", true, None)])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        assert_eq!(skill_targets.len(), 1);
+        assert!(skill_targets[0].contains(".bogus/skills") == true);
+        assert!(skill_targets[0].contains(".agents/skills") == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_lang_skills_with_mixed_agents_route_to_both_dirs() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        fs::create_dir_all(workspace.path().join(".bogus"))?;
+        fs::create_dir_all(workspace.path().join(".fake"))?;
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &[])?;
+        write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None), ("fake", true, None)])?;
+
+        let engine = TemplateEngine::new(config_dir.path());
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
+        let resolved = engine.resolve_all_files(&options);
+        let _ = std::env::set_current_dir(&original_cwd);
+        let resolved = resolved?;
+
+        let skill_targets: Vec<String> =
+            resolved.files.iter().filter(|f| f.target.to_string_lossy().contains("SKILL.md")).map(|f| f.target.to_string_lossy().into_owned()).collect();
+
+        assert_eq!(skill_targets.len(), 2);
+        assert!(skill_targets.iter().any(|t| t.contains(".agents/skills") == true) == true);
+        assert!(skill_targets.iter().any(|t| t.contains(".bogus/skills") == true) == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_hydrate_language_skills_when_adding_native_agent() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        setup_skill_routing_config(config_dir.path(), "rpp-skill", &["bogus"])?;
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
+
+        // Simulate prior language install: tracker records rust++ lang skill in cross-client dir
+        let cross_skill = workspace.path().join(".agents/skills/rpp-skill/SKILL.md");
+        fs::create_dir_all(cross_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&cross_skill, "# Skill")?;
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&cross_skill, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        tracker.save()?;
 
         let engine = TemplateEngine::new(config_dir.path());
         let options = UpdateOptions {
@@ -2730,18 +2984,12 @@ languages:
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
 
-        // Use Path::ends_with with relative components to avoid symlink / path-separator
-        // mismatches between workspace.path() (raw TempDir) and the canonicalized cwd
-        // that resolve_all_files uses internally (macOS /var vs /private/var, Windows \).
-        let native_rel = std::path::Path::new(".bogus/skills/git-workflow");
-        let adopted: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.parent().is_some_and(|p| p.ends_with(native_rel))).collect();
+        let native_rel = std::path::Path::new(".bogus/skills/rpp-skill");
+        let hydrated: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.parent().is_some_and(|p| p.ends_with(native_rel))).collect();
 
-        assert!(adopted.is_empty() == false, "expected cross-client skill to be adopted into .bogus/skills/");
-        assert!(adopted[0].target.ends_with(std::path::Path::new(".bogus/skills/git-workflow/SKILL.md")) == true);
-        // The .agents/skills/ path must not appear in copy targets
-        let cross_rel = std::path::Path::new(".agents/skills");
-        let cross_targets: Vec<&ResolvedFile> = resolved.files.iter().filter(|f| f.target.ancestors().any(|a| a.ends_with(cross_rel))).collect();
-        assert!(cross_targets.is_empty() == true, "cross-client skills should not be copy targets when agent uses native dir");
+        assert!(hydrated.is_empty() == false, "expected language skill to be hydrated into .bogus/skills/");
+        assert!(hydrated[0].target.ends_with(std::path::Path::new(".bogus/skills/rpp-skill/SKILL.md")) == true);
+        assert_eq!(hydrated[0].lang, vec!["Rust++".to_string()]);
 
         Ok(())
     }

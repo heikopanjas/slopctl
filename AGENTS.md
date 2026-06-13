@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v22.0.0)
+**Last updated:** 2026-07-06 (v22.1.0)
 
 <!-- {mission} -->
 
@@ -907,6 +907,24 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 - Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
 - Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
 - Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
+
+### 2026-06-13 (v22.1.0, agent-aware skill distribution replaces adoption)
+
+- Replaced broad `.agents/skills/` → native-agent adoption with deterministic skill distribution based on installed agents
+- Language and top-level skills with omitted target or bare `target: '$workspace'` now install to all required directories: `.agents/skills/` when cross-client agents are present (or no agents), plus one copy per native-only agent skill dir when native-only agents are present
+- `init --agent <native-only>` after a language install now hydrates language skills from templates into the agent's native skill dir instead of copying arbitrary files from `.agents/skills/`
+- Explicit `target: '$userprofile'` and full path targets remain single-target overrides
+- Added `non_agent_skill_target_dirs`, `install_non_agent_skills`, and `hydrate_language_skills_for_native_agent` in `src/template_engine.rs`
+- Removed obsolete adoption block and `target_already_scheduled` helper
+- Version bump: 22.0.1 → 22.1.0 (MINOR — new distribution/hydration behavior, fully backwards compatible for typical single-agent workflows)
+
+### 2026-06-13 (v22.0.1, fix remove --agent leaving lang skills in agent dir)
+
+- Fixed `remove --agent <name>` not deleting language skills that were installed into the agent's native skill directory (e.g. `.claude/skills/`), causing the agent marker directory to remain non-empty and `slopctl status` to still report the agent as installed after removal
+- Root cause: native-only agents (e.g. Claude, Vibe) receive language skills in their native skill dir instead of `.agents/skills/`; the tracker records these with `lang: [<lang>]` and `agent: []` (no agent owner); `release_agent(file, "claude")` was a no-op, so `is_unreferenced()` stayed `false` and the file was kept with "still referenced"
+- Fix: in the removal loop, added `in_agent_dir` flag — when `true` (file's path matches the agent's directory tree via `path_belongs_to_agent`), force-delete the file regardless of `is_unreferenced`; physical location in the agent's directory is sufficient reason for removal
+- Added regression test `test_remove_agent_removes_lang_skills_in_agent_skill_dir` (was reproducing the bug before the fix)
+- Version bump: 22.0.0 → 22.0.1 (PATCH — bug fix)
 
 ### 2026-06-13 (v22.0.0, tracker owner arrays and ref counts)
 
