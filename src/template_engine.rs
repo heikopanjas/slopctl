@@ -76,10 +76,10 @@ pub struct ResolvedFile
 {
     pub source: PathBuf,
     pub target: PathBuf,
-    /// Language name or `LANG_NONE` for language-agnostic files
-    pub lang:   String,
-    /// Agent name or `AGENT_ALL` for agent-agnostic files
-    pub agent:  String
+    /// Language owners for this file
+    pub lang:   Vec<String>,
+    /// Agent owners for this file
+    pub agent:  Vec<String>
 }
 
 /// All files, fragments, and directories resolved from templates.yml for a given set of options
@@ -105,8 +105,8 @@ pub struct ResolvedFiles
 pub struct ResolvedContent
 {
     pub content: String,
-    pub lang:    String,
-    pub agent:   String
+    pub lang:    Vec<String>,
+    pub agent:   Vec<String>
 }
 
 struct PreflightPlan
@@ -225,6 +225,19 @@ impl<'a> TemplateEngine<'a>
     pub fn config_dir(&self) -> &Path
     {
         self.config_dir
+    }
+
+    /// Convert a scalar owner into a tracker owner list.
+    fn owner_list(owner: &str, sentinel: &str) -> Vec<String>
+    {
+        if owner == sentinel
+        {
+            Vec::new()
+        }
+        else
+        {
+            vec![owner.to_string()]
+        }
     }
 
     /// Resolves a target path string containing placeholder variables
@@ -578,7 +591,12 @@ impl<'a> TemplateEngine<'a>
                 }
                 else
                 {
-                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
+                    files_to_copy.push(ResolvedFile {
+                        source: source_path,
+                        target: target_path,
+                        lang:   Self::owner_list(lang, LANG_NONE),
+                        agent:  Self::owner_list(agent, AGENT_ALL)
+                    });
                 }
             };
 
@@ -640,8 +658,8 @@ impl<'a> TemplateEngine<'a>
                             files_to_copy.push(ResolvedFile {
                                 source: source_path,
                                 target: target_path,
-                                lang:   LANG_NONE.to_string(),
-                                agent:  agent_name.to_string()
+                                lang:   Vec::new(),
+                                agent:  Self::owner_list(agent_name, AGENT_ALL)
                             });
                         }
                         else if local_cache_only == true
@@ -767,7 +785,12 @@ impl<'a> TemplateEngine<'a>
                 else
                 {
                     let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
-                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
+                    files_to_copy.push(ResolvedFile {
+                        source: source_path,
+                        target: target_path,
+                        lang:   Self::owner_list(lang, LANG_NONE),
+                        agent:  Self::owner_list(agent, AGENT_ALL)
+                    });
                 }
             };
 
@@ -835,7 +858,7 @@ impl<'a> TemplateEngine<'a>
                     if source_path.exists()
                     {
                         let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                        files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: LANG_NONE.to_string(), agent: agent_name.to_string() });
+                        files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: Vec::new(), agent: Self::owner_list(agent_name, AGENT_ALL) });
                     }
                 }
 
@@ -949,9 +972,17 @@ impl<'a> TemplateEngine<'a>
                                 let target = native_dir.join(relative);
                                 if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
                                 {
-                                    let lang =
-                                        existing_tracker.as_ref().and_then(|t| t.get_metadata(&src)).map(|m| m.lang.clone()).unwrap_or_else(|| LANG_NONE.to_string());
-                                    files_to_copy.push(ResolvedFile { source: src, target, lang, agent: AGENT_ALL.to_string() });
+                                    let (lang, mut agent) = existing_tracker
+                                        .as_ref()
+                                        .and_then(|t| t.get_metadata(&src))
+                                        .map(|m| (m.lang.clone(), m.agent.clone()))
+                                        .unwrap_or_else(|| (Vec::new(), Vec::new()));
+                                    if let Some(agent_name) = options.agent &&
+                                        agent.iter().any(|owner| owner == agent_name) == false
+                                    {
+                                        agent.push(agent_name.to_string());
+                                    }
+                                    files_to_copy.push(ResolvedFile { source: src, target, lang, agent });
                                 }
                             }
                         }
@@ -985,7 +1016,11 @@ impl<'a> TemplateEngine<'a>
 
         let fresh_main = Self::generate_fresh_main(&resolved.context, options)?;
         let main_target = normalize_path(&resolved.context.target);
-        map.insert(main_target, ResolvedContent { content: fresh_main, lang: options.lang.unwrap_or(LANG_NONE).to_string(), agent: AGENT_ALL.to_string() });
+        map.insert(main_target, ResolvedContent {
+            content: fresh_main,
+            lang:    options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default(),
+            agent:   options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default()
+        });
 
         for entry in &resolved.files
         {
@@ -1074,11 +1109,6 @@ impl<'a> TemplateEngine<'a>
         }
     }
 
-    fn is_top_level_cross_client_skill(entry: &ResolvedFile, cross_client_skill_dir: &Path) -> bool
-    {
-        entry.lang == LANG_NONE && entry.agent == AGENT_ALL && entry.target.starts_with(cross_client_skill_dir)
-    }
-
     fn push_parent_conflict(conflicts: &mut Vec<String>, path: &Path)
     {
         if let Some(parent) = path.parent() &&
@@ -1094,9 +1124,6 @@ impl<'a> TemplateEngine<'a>
         file_tracker: &FileTracker
     ) -> Result<PreflightPlan>
     {
-        let workspace = std::env::current_dir()?;
-        let userprofile = dirs::home_dir().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not determine home directory"))?;
-        let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
         let mut conflicts = Vec::new();
         let mut planned_files = Vec::new();
         let mut seen_targets: HashMap<PathBuf, &Path> = HashMap::new();
@@ -1140,43 +1167,7 @@ impl<'a> TemplateEngine<'a>
             {
                 conflicts.push(format!("target '{}' exists as a directory", entry.target.display()));
             }
-            else if Self::is_top_level_cross_client_skill(entry, &cross_client_skill_dir) == true && entry.target.exists() == true
-            {
-                match file_tracker.check_modification(&entry.target)?
-                {
-                    | FileStatus::Unmodified =>
-                    {
-                        if let Some(metadata) = file_tracker.get_metadata(&entry.target)
-                        {
-                            if metadata.original_sha == source_sha
-                            {
-                                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
-                            }
-                            else
-                            {
-                                conflicts.push(format!("shared skill '{}' differs from the tracked template", entry.target.display()));
-                            }
-                        }
-                        else
-                        {
-                            conflicts.push(format!("shared skill '{}' is missing tracker metadata", entry.target.display()));
-                        }
-                    }
-                    | FileStatus::NotTracked =>
-                    {
-                        conflicts.push(format!("shared skill '{}' already exists but is not tracked", entry.target.display()));
-                    }
-                    | FileStatus::Modified =>
-                    {
-                        conflicts.push(format!("shared skill '{}' has local modifications", entry.target.display()));
-                    }
-                    | FileStatus::Deleted =>
-                    {
-                        planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
-                    }
-                }
-            }
-            else if entry.target.exists() == false || options.force == true
+            else if entry.target.exists() == false
             {
                 planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
             }
@@ -1184,7 +1175,33 @@ impl<'a> TemplateEngine<'a>
             {
                 match file_tracker.check_modification(&entry.target)?
                 {
-                    | FileStatus::Unmodified | FileStatus::Deleted =>
+                    | FileStatus::Unmodified =>
+                    {
+                        if let Some(metadata) = file_tracker.get_metadata(&entry.target)
+                        {
+                            let adds_new_owners = metadata.would_add_owner_lists(&entry.lang, &entry.agent);
+                            if metadata.original_sha == source_sha
+                            {
+                                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                            }
+                            else if adds_new_owners == true
+                            {
+                                conflicts.push(format!(
+                                    "target '{}' is already owned by another language or agent with different template content; use 'slopctl merge' to combine it",
+                                    entry.target.display()
+                                ));
+                            }
+                            else
+                            {
+                                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+                            }
+                        }
+                        else
+                        {
+                            conflicts.push(format!("target '{}' is tracked as unmodified but metadata is missing", entry.target.display()));
+                        }
+                    }
+                    | FileStatus::Deleted =>
                     {
                         planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
                     }
@@ -1194,7 +1211,23 @@ impl<'a> TemplateEngine<'a>
                     }
                     | FileStatus::Modified =>
                     {
-                        conflicts.push(format!("target '{}' has local modifications", entry.target.display()));
+                        let adds_new_owners =
+                            file_tracker.get_metadata(&entry.target).map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
+                        if options.force == true && adds_new_owners == false
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+                        }
+                        else if adds_new_owners == true
+                        {
+                            conflicts.push(format!(
+                                "target '{}' has local modifications and cannot be shared with a new language or agent; use 'slopctl merge' to combine it",
+                                entry.target.display()
+                            ));
+                        }
+                        else
+                        {
+                            conflicts.push(format!("target '{}' has local modifications", entry.target.display()));
+                        }
                     }
                 }
             }
@@ -1418,14 +1451,9 @@ impl<'a> TemplateEngine<'a>
         println!("  {} {}", "✓".green(), ctx.target.display().to_string().yellow());
 
         let sha = FileTracker::calculate_sha256(&ctx.target)?;
-        file_tracker.record_installation(
-            &ctx.target,
-            sha,
-            ctx.template_version,
-            options.lang.unwrap_or(LANG_NONE).to_string(),
-            AGENT_ALL.to_string(),
-            "main".to_string()
-        );
+        let lang_owners = options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default();
+        let agent_owners = options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default();
+        file_tracker.record_installation_with_owners(&ctx.target, sha, ctx.template_version, &lang_owners, &agent_owners, "main".to_string());
 
         Ok(())
     }
@@ -1465,7 +1493,7 @@ impl<'a> TemplateEngine<'a>
                 println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
             }
 
-            file_tracker.record_installation(target, planned.source_sha.clone(), template_version, entry.lang.clone(), entry.agent.clone(), planned.category.clone());
+            file_tracker.record_installation_with_owners(target, planned.source_sha.clone(), template_version, &entry.lang, &entry.agent, planned.category.clone());
         }
 
         Ok(())
@@ -1576,7 +1604,12 @@ impl<'a> TemplateEngine<'a>
                         {
                             println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
                         }
-                        files_to_copy.push(ResolvedFile { source: source_dir, target, lang: lang.to_string(), agent: agent.to_string() });
+                        files_to_copy.push(ResolvedFile {
+                            source: source_dir,
+                            target,
+                            lang: Self::owner_list(lang, LANG_NONE),
+                            agent: Self::owner_list(agent, AGENT_ALL)
+                        });
                     }
                 }
                 else if local_cache_only == true
@@ -1611,7 +1644,12 @@ impl<'a> TemplateEngine<'a>
             else if path.is_file() == true &&
                 let Some(filename) = path.file_name()
             {
-                files_to_copy.push(ResolvedFile { source: path.clone(), target: target_base.join(filename), lang: lang.to_string(), agent: agent.to_string() });
+                files_to_copy.push(ResolvedFile {
+                    source: path.clone(),
+                    target: target_base.join(filename),
+                    lang:   Self::owner_list(lang, LANG_NONE),
+                    agent:  Self::owner_list(agent, AGENT_ALL)
+                });
             }
         }
 
@@ -1637,7 +1675,7 @@ mod tests
 
     fn rf(source: &str, target: &str) -> ResolvedFile
     {
-        ResolvedFile { source: PathBuf::from(source), target: PathBuf::from(target), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }
+        ResolvedFile { source: PathBuf::from(source), target: PathBuf::from(target), lang: Vec::new(), agent: Vec::new() }
     }
 
     // -- load_template_config --
@@ -2546,7 +2584,7 @@ languages:
         fs::write(&source, "# Skill")?;
         let source_sha = FileTracker::calculate_sha256(&source)?;
 
-        let files = vec![ResolvedFile { source, target: target.clone(), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }];
+        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new() }];
         let plan = PreflightPlan {
             files: vec![PlannedFileAction {
                 index:      0,

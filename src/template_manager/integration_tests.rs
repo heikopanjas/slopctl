@@ -60,6 +60,8 @@ languages:
     files:
       - source: rpp-format.toml
         target: '$workspace/.rpp.toml'
+      - source: shared-gitignore
+        target: '$workspace/.gitignore'
       - source: rpp-hint.md
         target: '$instructions'
     skills:
@@ -69,6 +71,8 @@ languages:
     files:
       - source: cppscript-format.json
         target: '$workspace/.cppscript-format'
+      - source: shared-gitignore
+        target: '$workspace/.gitignore'
 
 skills:
   - source: 'skills/git-workflow'
@@ -136,6 +140,7 @@ agents:
         fs::write(d.join("rpp-format.toml"), "max_width = 167\n")?;
         fs::write(d.join("rpp-hint.md"), "## Rust++ Conventions\n")?;
         fs::write(d.join("cppscript-format.json"), "{}\n")?;
+        fs::write(d.join("shared-gitignore"), "target/\n")?;
         fs::write(d.join("cmake-hint.md"), "## CMake Conventions\n")?;
 
         // ── Fragment source files ────────────────────────────────────────
@@ -419,10 +424,10 @@ fn test_init_agent_then_different_agent_coexist() -> anyhow::Result<()>
     Ok(())
 }
 
-// ── Language guard ───────────────────────────────────────────────────────────
+// ── Multi-language installation ──────────────────────────────────────────────
 
 #[test]
-fn test_init_lang_then_different_lang_blocked() -> anyhow::Result<()>
+fn test_init_lang_then_different_lang_succeeds_when_targets_do_not_conflict() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
     let fixture = IntegrationFixture::new()?;
@@ -432,14 +437,48 @@ fn test_init_lang_then_different_lang_blocked() -> anyhow::Result<()>
     fixture.init(Some("fake"), Some("Rust++"))?;
     assert_eq!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language(), Some("Rust++".to_string()));
 
-    // Attempting a different language must fail
-    let result = fixture.init(Some("fake"), Some("CppScript"));
-    assert!(result.is_err() == true, "second init with different lang must be rejected");
-    let err = result.unwrap_err().to_string();
-    assert!(err.contains("Rust++") == true, "error must mention installed language");
+    fixture.init(Some("fake"), Some("CppScript"))?;
 
-    // Workspace must be unchanged — CppScript file must not appear
-    assert!(workspace.path().join(".cppscript-format").exists() == false, "blocked init must not create files");
+    assert!(workspace.path().join(".rpp.toml").exists() == true, "first language file must remain");
+    assert!(workspace.path().join(".cppscript-format").exists() == true, "second language file must be installed");
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let installed = tracker.get_installed_languages();
+    assert_eq!(installed, vec!["CppScript".to_string(), "Rust++".to_string()]);
+    let gitignore_meta = tracker.get_metadata(&workspace.path().join(".gitignore")).ok_or_else(|| anyhow::anyhow!("missing shared gitignore metadata"))?;
+    assert_eq!(gitignore_meta.lang, vec!["CppScript".to_string(), "Rust++".to_string()]);
+    assert_eq!(gitignore_meta.ref_count, 2);
+
+    Ok(())
+}
+
+#[test]
+fn test_init_second_lang_blocks_conflicting_shared_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    fs::write(fixture.config_dir.path().join("cppscript-gitignore"), "build/\n")?;
+    let templates_path = fixture.config_dir.path().join("templates.yml");
+    let templates = fs::read_to_string(&templates_path)?;
+    let updated = templates.replace(
+        "      - source: cppscript-format.json\n        target: '$workspace/.cppscript-format'\n      - source: shared-gitignore\n        target: \
+         '$workspace/.gitignore'",
+        "      - source: cppscript-format.json\n        target: '$workspace/.cppscript-format'\n      - source: cppscript-gitignore\n        target: \
+         '$workspace/.gitignore'"
+    );
+    fs::write(&templates_path, updated)?;
+
+    let result = fixture.init(Some("fake"), Some("CppScript"));
+
+    assert!(result.is_err() == true, "different shared file content must be rejected");
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains(".gitignore") == true);
+    assert!(message.contains("slopctl merge") == true);
+    assert!(workspace.path().join(".cppscript-format").exists() == false, "failed preflight must not write second language files");
 
     Ok(())
 }
@@ -489,9 +528,10 @@ fn test_remove_last_cross_client_cleans_agents_skills() -> anyhow::Result<()>
     // Remove fake — it is the last (only) cross-client agent
     fixture.remove_agent("fake")?;
 
-    // Non-language skills (lang: none) must be cleaned
+    // Top-level skills are still referenced by the language install, so removing
+    // the last cross-client agent must not delete them.
     let git_skill = cross_client_dir.join("git-workflow/SKILL.md");
-    assert!(git_skill.exists() == false, "top-level skill must be deleted when last cross-client agent removed");
+    assert!(git_skill.exists() == true, "top-level skill must survive while still language-owned");
 
     // Language skills must survive (owned by Rust++, not by the agent)
     let tracker = FileTracker::new(&std::env::current_dir()?)?;
