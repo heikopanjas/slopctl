@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v21.5.0)
+**Last updated:** 2026-07-06 (v22.0.0)
 
 <!-- {mission} -->
 
@@ -87,6 +87,14 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always use `--dry-run` to verify CLI behavior before writing destructive tests
 - Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
 - One public struct or major component per source file; shared helpers go in `utils.rs`
+
+### File Tracker Ownership
+
+- Tracker entries use `lang: Vec<String>` and `agent: Vec<String>` owner arrays, plus a stored `ref_count`
+- `ref_count` must always equal `lang.len() + agent.len()`; add/remove operations increment or decrement only when a unique owner is added or released
+- Legacy scalar tracker values (`lang: none`, `agent: all`) are obsolete; old `.slopctl/tracker.yml` files are not migrated and workspaces should recreate tracker state fresh
+- Shared ownership only applies to identical files, such as shared `.gitignore`, formatter config files, and skill files; if the incoming template SHA differs from the tracked SHA, `init` must fail preflight and point users to merge instead of incrementing `ref_count`
+- `AGENTS.md` is a special main file: ownership can be tracked, but normal `remove --lang` and `remove --agent` must not delete it
 
 ### Security & Safety
 
@@ -899,6 +907,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 - Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
 - Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
 - Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
+
+### 2026-06-13 (v22.0.0, tracker owner arrays and ref counts)
+
+- **BREAKING**: changed `FileMetadata.lang` and `FileMetadata.agent` from scalar strings to unique owner arrays, and added a stored `ref_count` that must equal `lang.len() + agent.len()`
+- Removed the single-language `init` guard; `init` can now add another language when shared targets such as `.gitignore` or skill files are byte-identical to the tracked template
+- Installation preflight now treats tracked identical files as shared ownership refreshes, while differing template content remains a conflict that must go through merge instead of incrementing `ref_count`
+- `remove --lang` and `remove --agent` now release ownership first and only delete non-main files when no language or agent owners remain
+- Existing scalar `.slopctl/tracker.yml` files are intentionally not migrated; users must recreate tracker state fresh
+- Version bump: 21.1.7 → 22.0.0 (MAJOR — breaking tracker schema and multi-language init behavior)
 
 ### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
 

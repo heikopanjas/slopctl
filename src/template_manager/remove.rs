@@ -13,7 +13,7 @@ use crate::{
     agent_defaults::resolve_placeholder_path,
     bom,
     bom::BillOfMaterials,
-    file_tracker::{FileTracker, LANG_NONE},
+    file_tracker::FileTracker,
     template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
@@ -167,10 +167,10 @@ impl TemplateManager
                                     {
                                         // Skip skills that belong to a language installation — those
                                         // must survive agent removal. Only agent-specific and
-                                        // top-level skills (lang == LANG_NONE) are orphaned when
+                                        // top-level skills (no language owners) are orphaned when
                                         // the last cross-client agent leaves.
                                         // Untracked files (no metadata) are treated as agent-owned.
-                                        let is_lang_skill = file_tracker.get_metadata(&f).map(|meta| meta.lang != LANG_NONE).unwrap_or(false);
+                                        let is_lang_skill = file_tracker.get_metadata(&f).map(|meta| meta.lang.is_empty() == false).unwrap_or(false);
 
                                         if is_lang_skill == false && files_to_remove.contains(&f) == false
                                         {
@@ -331,7 +331,7 @@ impl TemplateManager
                 for (rel_path, meta) in all_entries
                 {
                     let abs_path = current_dir.join(&rel_path);
-                    if meta.lang == lang_name &&
+                    if meta.has_lang(lang_name) == true &&
                         meta.category != "main" &&
                         meta.category != "skill" &&
                         abs_path.exists() == true &&
@@ -347,7 +347,7 @@ impl TemplateManager
             for (rel_path, meta) in all_entries
             {
                 let abs_path = current_dir.join(&rel_path);
-                if meta.lang == lang_name && meta.category == "skill" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
+                if meta.has_lang(lang_name) == true && meta.category == "skill" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                 {
                     files_to_remove.push(abs_path);
                 }
@@ -406,28 +406,53 @@ impl TemplateManager
         let mut removed_count = 0;
         for file in &files_to_remove
         {
-            file_tracker.remove_entry(file);
-            match remove_file_and_cleanup_parents(file)
+            if has_lang_target == true &&
+                let Some(lang_name) = lang
             {
-                | Ok(_) =>
+                file_tracker.release_lang(file, lang_name);
+            }
+            if has_agent_target == true &&
+                let Some(agent_name) = agent
+            {
+                file_tracker.release_agent(file, agent_name);
+            }
+
+            let is_main_file = file.file_name().is_some_and(|name| name == "AGENTS.md");
+            let should_remove = remove_all == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
+
+            if should_remove == true
+            {
+                file_tracker.remove_entry(file);
+                match remove_file_and_cleanup_parents(file)
                 {
-                    println!("{} Removed {}", "✓".green(), file.display());
-                    removed_count += 1;
+                    | Ok(_) =>
+                    {
+                        println!("{} Removed {}", "✓".green(), file.display());
+                        removed_count += 1;
+                    }
+                    | Err(e) =>
+                    {
+                        eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
+                    }
                 }
-                | Err(e) =>
-                {
-                    eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e);
-                }
+            }
+            else
+            {
+                println!("{} Kept {} (still referenced)", "→".blue(), file.display().to_string().yellow());
             }
         }
 
-        // When a language is removed, AGENTS.md stays on disk but its tracker entry
-        // still carries `lang: "<lang>"`. Reset it to LANG_NONE so that
-        // `get_installed_language()` and `status` no longer report the language.
+        // Main AGENTS.md stays on disk during normal remove operations, so release
+        // ownership there explicitly even when it was not in the deletion candidate list.
         if has_lang_target == true
         {
             let lang_name = lang.unwrap();
             file_tracker.clear_lang_for_category(lang_name, "main");
+        }
+        if has_agent_target == true
+        {
+            let agent_name = agent.unwrap();
+            file_tracker.clear_agent_for_category(agent_name, "main");
         }
 
         file_tracker.save()?;
