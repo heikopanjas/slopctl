@@ -141,11 +141,11 @@ It covers error handling, naming, module organization, formatting, testing, and 
 - Example:
 
   ```rust
-  mod template_manager;
+  mod foo_store;
   mod utils;
 
   pub use anyhow::Result;
-  pub use template_manager::TemplateManager;
+  pub use foo_store::FooStore;
   pub use utils::copy_dir_all;
   ```
 
@@ -163,10 +163,10 @@ It covers error handling, naming, module organization, formatting, testing, and 
 - Example:
 
   ```rust
-  /// Creates a new TemplateManager instance
+  /// Creates a new FooStore instance
   ///
   /// Initializes paths to local data and cache directories using the `dirs` crate.
-  /// Templates are stored in the local data directory and backups in the cache directory.
+  /// Records are stored in the local data directory and backups in the cache directory.
   ///
   /// # Errors
   ///
@@ -187,12 +187,12 @@ It covers error handling, naming, module organization, formatting, testing, and 
 - Example:
 
   ```rust
-  /// Manages template files for coding agent instructions
+  /// Manages Foo records in the local store
   ///
-  /// The `TemplateManager` handles all operations related to template storage,
-  /// verification, backup, and synchronization. Templates are stored in the
+  /// The `FooStore` handles all operations related to record storage,
+  /// verification, backup, and synchronization. Records are stored in the
   /// local data directory and backed up to the cache directory before modifications.
-  pub struct TemplateManager
+  pub struct FooStore
   {
       config_dir: PathBuf,
       cache_dir:  PathBuf
@@ -211,13 +211,13 @@ It covers error handling, naming, module organization, formatting, testing, and 
 
 **Naming Conventions:**
 
-- Types (structs, enums, traits): Upper PascalCase (e.g., `TemplateManager`, `FileMapping`, `Result`)
-- Functions/methods: snake_case (e.g., `download_file`, `create_backup`, `load_template_config`)
+- Types (structs, enums, traits): Upper PascalCase (e.g., `FooStore`, `BarMapping`, `Result`)
+- Functions/methods: snake_case (e.g., `download_file`, `create_backup`, `load_config`)
 - Variables and function parameters: snake_case (e.g., `config_dir`, `source_path`, `file_name`)
 - Constants: UPPER_SNAKE_CASE (e.g., `MAX_WIDTH`, `DEFAULT_TIMEOUT`)
 - Type parameters: Single uppercase letter or PascalCase (e.g., `T`, `E`, `Error`)
 - Lifetimes: Short lowercase names (e.g., `'a`, `'static`)
-- Module names: snake_case (e.g., `template_manager`, `utils`)
+- Module names: snake_case (e.g., `foo_store`, `utils`)
 
 **Enums and Pattern Matching:**
 
@@ -250,8 +250,8 @@ It covers error handling, naming, module organization, formatting, testing, and 
 
   ```rust
   #[derive(Parser)]
-  #[command(name = "my-app")]
-  #[command(about = "A manager for coding agent instruction files", long_about = None)]
+  #[command(name = "foo-cli")]
+  #[command(about = "An example command-line tool", long_about = None)]
   struct Cli
   {
       #[command(subcommand)]
@@ -348,7 +348,7 @@ It covers error handling, naming, module organization, formatting, testing, and 
 - Example:
 
   ```rust
-  //! Template management functionality for my-app
+  //! Core functionality for foo-cli
 
   /// Creates a timestamped backup of a directory
   ///
@@ -389,7 +389,7 @@ It covers error handling, naming, module organization, formatting, testing, and 
   src/
   ├── main.rs              # CLI entry point
   ├── lib.rs               # Public API
-  ├── template_manager.rs  # Core functionality
+  ├── foo_store.rs         # Core functionality
   └── utils.rs             # Shared utilities
   ```
 

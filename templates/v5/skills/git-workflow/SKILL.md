@@ -17,11 +17,15 @@ character limits, conventional commit types, and examples.
 ## Commit Protocol (CRITICAL)
 
 - **NEVER commit automatically** - always wait for explicit confirmation
+- **IF A COMMIT MESSAGE HAS A BODY, EVERY BODY LINE MUST BE A BULLET**
+- **BODY BULLETS MUST START WITH `-`**
+- **DO NOT write prose paragraphs in commit message bodies**
 
 Whenever asked to commit changes:
 
 - Stage the changes
 - Write a detailed but concise commit message using conventional commits format
+- If using a commit body, write it as bullet points that explain what and why
 - Commit the changes
 
 This is **CRITICAL**!
@@ -55,12 +59,14 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 - No period at end of subject line
 - Keep concise and descriptive
 
-**Body Rules (if needed):**
+**Body Rules (MANDATORY WHEN A BODY EXISTS):**
 
 - Add blank line after subject before body
-- Wrap each line at 72 characters maximum
+- Body text is optional for simple commits
+- Start every body line with `-`, except wrapped continuation lines
+- Use lowercase text after each bullet marker
+- Wrap each body line at 72 characters maximum
 - Explain what and why, not how
-- Use bullet points (`-`) for all body items with lowercase text after bullet
 - Keep it concise
 
 **Special Character Safety:**
@@ -82,7 +88,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 Good:
 
 ```text
-feat(api): add KStringTrim function
+feat(api): add FooTrim function
 
 - add trimming function to remove whitespace from
   both ends of string
@@ -93,6 +99,8 @@ Good (short):
 
 ```text
 fix(build): correct static library output name
+
+- keep release artifacts named consistently
 ```
 
 Bad (too long):
@@ -104,7 +112,7 @@ feat(api): add a new comprehensive string trimming function that handles all edg
 Bad (special characters):
 
 ```text
-fix: update `KString` with "nested 'quotes'" & $special chars!
+fix: update `Foo` with "nested 'quotes'" & $special chars!
 ```
 
 **Invoking git commit safely:**

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-16 (v21.1.7)
+**Last updated:** 2026-06-21 (v21.1.8)
 
 <!-- {mission} -->
 
@@ -819,6 +819,19 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-06-21 (v21.1.8, de-brand template example code)
+
+- Removed cross-project artifacts from the example snippets in the shipped coding-convention templates so installed templates read as project-neutral
+- Replaced the external `KString` C string library case study (type, API, `KSTRING_*` macros, `KS_` internal prefix, `KStringEncoding`, `libkstring` outputs, `kstr` locals) with ultra-generic `Foo`/`FOO_*`/`F_`/`libfoo` placeholders in `c-coding-conventions`
+- Replaced slopctl's own `TemplateManager`/`template_manager`/`my-app` and the "manager for coding agent instructions" wording with `FooStore`/`foo_store`/`foo-cli` and neutral prose in `rust-coding-conventions`
+- Replaced the `P3Model` prefix example with `LibModel` in `c++-coding-conventions`
+- Replaced `KStringTrim`/`KString` commit examples with `FooTrim`/`Foo` in `git-workflow`
+- Applied the same edits to both the shipped `skills/*/SKILL.md` files and their unreferenced legacy root `*.md` mirrors so the two copies stay consistent
+- Decision (with user): use ultra-generic `Foo`/`Bar` placeholders, and clean the legacy root duplicates rather than delete them
+- Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
 
 ### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
 
