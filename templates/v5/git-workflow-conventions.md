@@ -67,7 +67,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 Good:
 
 ```text
-feat(api): add KStringTrim function
+feat(api): add FooTrim function
 
 - add trimming function to remove whitespace from
   both ends of string
@@ -89,5 +89,5 @@ feat(api): add a new comprehensive string trimming function that handles all edg
 Bad (special characters):
 
 ```text
-fix: update `KString` with "nested 'quotes'" & $special chars!
+fix: update `Foo` with "nested 'quotes'" & $special chars!
 ```
