@@ -92,6 +92,70 @@ if store != nil {
     TheDrowningRootView(store: store!)
 }
 
+### **IMPORTANT**: Explicit `self.` and `Self.` qualification for member access
+
+- **ALWAYS** qualify access to **instance** properties and methods with `self.`.
+- **ALWAYS** qualify access to **type-level** members (declared with `static` or `class`) with `Self.` when accessed from inside the same type. Use the concrete type name (e.g. `MyType.shared`) only when referring to a different type.
+- Both rules apply in **every** context: method bodies, initializers, computed properties, property observers, closures, escaping closures, `@MainActor` code, SwiftUI views and view builders, and result builders.
+- Both rules cover reads, writes, method calls, and the use of members as arguments.
+- The only unqualified identifiers permitted inside a type are local variables, function parameters, and globally scoped symbols (free functions, top-level constants, imported APIs).
+- Rationale: explicit qualification makes the scope of every identifier immediately visible — `self.` marks instance state, `Self.` marks type-level state, and unqualified names are guaranteed to be local or global. This eliminates shadowing bugs, makes refactors safer, and keeps the codebase consistent and greppable.
+
+```swift
+// CORRECT: instance members use self., type-level members use Self.
+final class LocationCoordinator {
+    static let defaultTimeout: TimeInterval = 30
+    static func makeDefault() -> LocationCoordinator {
+        return LocationCoordinator(manager: CLLocationManager())
+    }
+
+    private var location: CLLocation?
+    private let manager: CLLocationManager
+
+    init(manager: CLLocationManager) {
+        self.manager = manager
+        self.manager.delegate = self
+    }
+
+    func refresh() {
+        self.manager.requestLocation()
+        self.scheduleTimeout(after: Self.defaultTimeout)
+        if let location = self.location {
+            self.process(location)
+        }
+    }
+
+    private func process(_ location: CLLocation) {
+        self.location = location
+    }
+
+    private func scheduleTimeout(after seconds: TimeInterval) {
+        // ...
+    }
+}
+
+// INCORRECT: implicit member access (instance and type-level)
+final class LocationCoordinator {
+    static let defaultTimeout: TimeInterval = 30
+
+    private var location: CLLocation?
+    private let manager: CLLocationManager
+
+    init(manager: CLLocationManager) {
+        self.manager = manager
+        manager.delegate = self                  // missing self.
+    }
+
+    func refresh() {
+        manager.requestLocation()                // missing self.
+        scheduleTimeout(after: defaultTimeout)   // missing self. and Self.
+        if let location {                        // shadows the property; unclear
+            process(location)                    // missing self.
+        }
+    }
+}
+```
+
 ### Force Unwrapping
 
 - **NEVER** use force unwrapping (`!`) for optionals. **ALWAYS** use optional binding (`if let`, `guard let`) or optional chaining.
