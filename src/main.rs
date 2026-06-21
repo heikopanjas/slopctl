@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use std::{fs, io};
 
 use clap::Parser;
@@ -6,7 +8,8 @@ use owo_colors::OwoColorize;
 use slopctl::{
     Config, EffectiveConfig, MergeOptions, Result, TemplateManager, UpdateOptions,
     agent_defaults::AGENT_DEFAULTS_FILE,
-    cli::{Cli, Commands}
+    cli::{Cli, Commands},
+    model_defaults::MODEL_DEFAULTS_FILE
 };
 
 /// Default template source URL (V5 templates - agents.md standard)
@@ -14,6 +17,9 @@ const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/de
 
 /// Default agent defaults source URL
 const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
+
+/// Default model defaults source URL
+const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -174,6 +180,103 @@ fn bootstrap_agent_defaults_if_missing(manager: &TemplateManager, template_sourc
     }
 
     Err(anyhow::anyhow!("Failed to bootstrap {}; run slopctl agents --update", AGENT_DEFAULTS_FILE))
+}
+
+/// Resolves model defaults source URL from CLI argument, config, or default
+///
+/// Returns (source_url, is_configured, fallback_url).
+fn resolve_models_source(from: Option<String>) -> (String, bool, Option<String>)
+{
+    let cwd = std::env::current_dir().ok();
+    let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
+    let configured_source = effective.as_ref().and_then(|c| c.get("models.uri"));
+    let fallback_source = effective.as_ref().and_then(|c| c.get("models.fallbackUri"));
+
+    let (source, is_configured) = if let Some(from_url) = from
+    {
+        (from_url, false)
+    }
+    else if let Some(config_url) = configured_source
+    {
+        (config_url, true)
+    }
+    else
+    {
+        (DEFAULT_MODELS_SOURCE_URL.to_string(), false)
+    };
+
+    (source, is_configured, fallback_source)
+}
+
+/// Downloads or copies model defaults with automatic fallback
+///
+/// # Errors
+///
+/// Returns an error if both primary and fallback sources fail.
+fn download_model_defaults_with_fallback(manager: &TemplateManager, source: &str, fallback: Option<String>) -> Result<()>
+{
+    match manager.download_or_copy_model_defaults(source)
+    {
+        | Ok(()) => Ok(()),
+        | Err(e) =>
+        {
+            if let Some(fallback_url) = fallback
+            {
+                println!("{} Primary model defaults source failed: {}", "!".yellow(), e);
+                println!("{} Trying fallback source: {}", "→".blue(), fallback_url.yellow());
+                manager.download_or_copy_model_defaults(&fallback_url)
+            }
+            else
+            {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Bootstrap model defaults after template download when the catalog is missing
+///
+/// # Errors
+///
+/// Returns an error if all bootstrap sources fail.
+fn bootstrap_model_defaults_if_missing(manager: &TemplateManager, template_source: &str, dry_run: bool) -> Result<()>
+{
+    if manager.has_model_defaults() == true
+    {
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir().ok();
+    let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
+    let configured_model_source = effective.as_ref().and_then(|c| c.get("models.uri"));
+    let configured_model_fallback = effective.as_ref().and_then(|c| c.get("models.fallbackUri"));
+
+    let mut candidates: Vec<String> = Vec::new();
+    for candidate in
+        [configured_model_source, configured_model_fallback, Some(template_source.to_string()), Some(DEFAULT_MODELS_SOURCE_URL.to_string())].into_iter().flatten()
+    {
+        if candidates.contains(&candidate) == false
+        {
+            candidates.push(candidate);
+        }
+    }
+
+    if dry_run == true
+    {
+        println!("{} Missing {}; would bootstrap from {}", "→".blue(), MODEL_DEFAULTS_FILE.yellow(), candidates.join(", ").yellow());
+        return Ok(());
+    }
+
+    for source in candidates
+    {
+        match manager.download_or_copy_model_defaults(&source)
+        {
+            | Ok(()) => return Ok(()),
+            | Err(e) => println!("{} Could not bootstrap {} from {}: {}", "!".yellow(), MODEL_DEFAULTS_FILE.yellow(), source.yellow(), e)
+        }
+    }
+
+    Err(anyhow::anyhow!("Failed to bootstrap {}; run slopctl models --update", MODEL_DEFAULTS_FILE))
 }
 
 /// Resolves mission content from CLI argument
@@ -401,9 +504,9 @@ fn main()
             if lang.is_none() == true && agent.is_none() == true
             {
                 eprintln!("{} Must specify at least one of --lang or --agent", "✗".red());
-                eprintln!("{} Examples: slopctl init --lang rust", "→".blue());
-                eprintln!("{}          slopctl init --agent cursor", "→".blue());
-                eprintln!("{}          slopctl init --lang rust --agent cursor", "→".blue());
+                eprintln!("{} Examples: slopctl init --lang <language>", "→".blue());
+                eprintln!("{}          slopctl init --agent <agent>", "→".blue());
+                eprintln!("{}          slopctl init --lang <language> --agent <agent>", "→".blue());
                 std::process::exit(1);
             }
 
@@ -451,6 +554,11 @@ fn main()
                     if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, &source, false)
                     {
                         eprintln!("{} Failed to bootstrap agent defaults: {}", "✗".red(), e);
+                        std::process::exit(1);
+                    }
+                    if let Err(e) = bootstrap_model_defaults_if_missing(&manager, &source, false)
+                    {
+                        eprintln!("{} Failed to bootstrap model defaults: {}", "✗".red(), e);
                         std::process::exit(1);
                     }
                 }
@@ -512,6 +620,10 @@ fn main()
                     {
                         Err(e)
                     }
+                    else if let Err(e) = bootstrap_model_defaults_if_missing(&manager, &source, true)
+                    {
+                        Err(e)
+                    }
                     else
                     {
                         println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -525,7 +637,9 @@ fn main()
                         println!("{} Using configured source", "→".blue());
                     }
                     println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-                    download_with_fallback(&manager, &source, fallback).and_then(|()| bootstrap_agent_defaults_if_missing(&manager, &source, false))
+                    download_with_fallback(&manager, &source, fallback)
+                        .and_then(|()| bootstrap_agent_defaults_if_missing(&manager, &source, false))
+                        .and_then(|()| bootstrap_model_defaults_if_missing(&manager, &source, false))
                 }
             }
             else
@@ -683,7 +797,84 @@ fn main()
             }
             manager.merge(&merge_options, dry_run, preview, verbose)
         }
-        | Commands::ListModels { provider } => manager.list_models(provider.as_deref()),
+        | Commands::Models { update, list, verify, from, dry_run } =>
+        {
+            if update == false && list == false && verify == false
+            {
+                eprintln!("{} Must specify --update, --list, or --verify", "✗".red());
+                eprintln!("{} Examples: slopctl models --update", "→".blue());
+                eprintln!("{}          slopctl models --list", "→".blue());
+                eprintln!("{}          slopctl models --verify", "→".blue());
+                eprintln!("{}          slopctl models --update --list", "→".blue());
+                std::process::exit(1);
+            }
+
+            if from.is_some() == true && update == false && verify == false
+            {
+                eprintln!("{} --from requires --update or --verify", "✗".red());
+                std::process::exit(1);
+            }
+
+            let (source, is_configured, fallback) = resolve_models_source(from);
+
+            let update_result = if update == true
+            {
+                if dry_run == true
+                {
+                    if is_configured == true
+                    {
+                        println!("{} Using configured model defaults source", "→".blue());
+                    }
+                    println!("{} Dry run: would update model defaults from {}", "→".blue(), source.yellow());
+                    if let Some(ref fallback_url) = fallback
+                    {
+                        println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
+                    }
+                    println!(
+                        "{} Model defaults would be downloaded to: {}",
+                        "→".blue(),
+                        manager.get_config_dir().join(MODEL_DEFAULTS_FILE).display().to_string().yellow()
+                    );
+                    println!("\n{} Dry run complete. No files were modified.", "✓".green());
+                    Ok(())
+                }
+                else
+                {
+                    if is_configured == true
+                    {
+                        println!("{} Using configured model defaults source", "→".blue());
+                    }
+                    println!("{} Updating model defaults from {}", "→".blue(), source.yellow());
+                    download_model_defaults_with_fallback(&manager, &source, fallback)
+                }
+            }
+            else
+            {
+                Ok(())
+            };
+
+            update_result
+                .and_then(|()| {
+                    if verify == true
+                    {
+                        manager.verify_models(&source)
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+                .and_then(|()| {
+                    if list == true
+                    {
+                        manager.list_models_catalog()
+                    }
+                    else
+                    {
+                        Ok(())
+                    }
+                })
+        }
         | Commands::Completions { shell } =>
         {
             let shell: clap_complete::Shell = shell.into();
@@ -699,5 +890,118 @@ fn main()
     {
         eprintln!("{} {}", "✗".red(), e.to_string().red());
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_resolve_mission_content_inline()
+    {
+        let result = resolve_mission_content("Build a CLI tool").unwrap();
+        assert_eq!(result, "Build a CLI tool");
+    }
+
+    #[test]
+    fn test_resolve_mission_content_from_file()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("mission.md");
+        fs::write(&file, "# My Mission\nBuild great software.\n").unwrap();
+
+        let result = resolve_mission_content(&format!("@{}", file.display())).unwrap();
+        assert!(result.contains("My Mission") == true);
+    }
+
+    #[test]
+    fn test_resolve_mission_content_missing_file()
+    {
+        let result = resolve_mission_content("@/nonexistent/path/mission.md");
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("Failed to read mission file") == true);
+    }
+
+    #[test]
+    fn test_resolve_source_returns_default_when_no_args()
+    {
+        let (source, is_configured, _fallback) = resolve_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_resolve_source_returns_from_arg()
+    {
+        let (source, _is_configured, _) = resolve_source(Some("/tmp/my-templates".to_string()));
+        assert_eq!(source, "/tmp/my-templates");
+    }
+
+    #[test]
+    fn test_resolve_agents_source_returns_default()
+    {
+        let (source, is_configured, _) = resolve_agents_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_resolve_models_source_returns_default()
+    {
+        let (source, is_configured, _) = resolve_models_source(None);
+        assert!(source.is_empty() == false);
+        assert!(is_configured == false);
+    }
+
+    #[test]
+    fn test_handle_config_list_empty_workspace() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let result = handle_config(None, vec![], true, None, false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_set_and_get() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        handle_config(None, vec!["merge.provider".into(), "ollama".into()], false, None, false)?;
+        let result = handle_config(Some("merge.provider".into()), vec![], false, None, false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_delete() -> Result<()>
+    {
+        let _lock = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        handle_config(None, vec!["merge.provider".into(), "ollama".into()], false, None, false)?;
+        let result = handle_config(None, vec![], false, Some("merge.provider".into()), false);
+        let _ = std::env::set_current_dir(&original);
+        result
+    }
+
+    #[test]
+    fn test_handle_config_global_list() -> Result<()>
+    {
+        handle_config(None, vec![], true, None, true)?;
+        Ok(())
     }
 }

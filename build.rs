@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 use std::{env, fs, path::PathBuf};
 
 #[path = "src/cli.rs"] mod cli;

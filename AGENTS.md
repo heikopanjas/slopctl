@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-05-14 (v20.2.2)
+**Last updated:** 2026-06-21 (v21.1.8)
 
 <!-- {mission} -->
 
@@ -106,6 +106,7 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
 - CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
 - Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
+- Rust source tests must not use real-world coding-agent or programming-language fixture names. Use artificial agents `bogus` and `fake`; use artificial languages `Rust++` and `CppScript`. Real supported names belong only in shipped template/catalog data, not source fixtures.
 
 ### Documentation
 
@@ -456,19 +457,13 @@ Load the `rust-build-commands` skill when building or running the project.
 **Linting Configuration:**
 
 - Allow specific clippy lints when project style differs from defaults
-- Configure in `Cargo.toml`:
-
-  ```toml
-  [lints.clippy]
-  bool_comparison = "allow"
-  ```
-
-- Can also use module-level attributes:
+- Prefer crate-level attributes when project style intentionally differs from clippy defaults:
 
   ```rust
   #![allow(clippy::bool_comparison)]
   ```
 
+- Avoid package-level `[lints.clippy]` in `Cargo.toml` for now because the editor TOML schema flags it even though Cargo accepts it
 - Document reasoning for lint exceptions
 
 **File Organization:**
@@ -824,6 +819,154 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-06-21 (v21.1.8, de-brand template example code)
+
+- Removed cross-project artifacts from the example snippets in the shipped coding-convention templates so installed templates read as project-neutral
+- Replaced the external `KString` C string library case study (type, API, `KSTRING_*` macros, `KS_` internal prefix, `KStringEncoding`, `libkstring` outputs, `kstr` locals) with ultra-generic `Foo`/`FOO_*`/`F_`/`libfoo` placeholders in `c-coding-conventions`
+- Replaced slopctl's own `TemplateManager`/`template_manager`/`my-app` and the "manager for coding agent instructions" wording with `FooStore`/`foo_store`/`foo-cli` and neutral prose in `rust-coding-conventions`
+- Replaced the `P3Model` prefix example with `LibModel` in `c++-coding-conventions`
+- Replaced `KStringTrim`/`KString` commit examples with `FooTrim`/`Foo` in `git-workflow`
+- Applied the same edits to both the shipped `skills/*/SKILL.md` files and their unreferenced legacy root `*.md` mirrors so the two copies stay consistent
+- Decision (with user): use ultra-generic `Foo`/`Bar` placeholders, and clean the legacy root duplicates rather than delete them
+- Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
+
+### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
+
+- Added 3 `download_manager.rs` tests using GitHub hooks: agent defaults download, model defaults download, skill entries download
+- Added 11 `main.rs` tests: `resolve_mission_content` (inline, file, missing), `resolve_source`/`resolve_agents_source`/`resolve_models_source` defaults and overrides, `handle_config` list/set/get/delete for both workspace and global scopes
+- Coverage: 60.22% to 64.01% (+3.79%); main.rs 0%→18.1%, download_manager.rs 8.2%→41.1%, github.rs 33.6%→45.4%
+- Test count: 358 to 372 (361 lib + 11 main)
+- Version bump: 21.1.6 to 21.1.7 (PATCH — test coverage expansion)
+
+### 2026-05-16 (v21.1.6, Phase 2 test coverage with LLM and catalog mocking)
+
+- Added `CHAT_HOOK` thread-local test injection to `llm.rs` mirroring the existing `github.rs` hook pattern; `set_chat_test_hook()` intercepts `chat()` and `chat_stream()` calls with a canned response, enabling LLM-dependent tests without real API calls
+- Added 3 merge tests using LLM hook: diverged file merge via hook, preview mode sidecar writing, truncated response preserving `.partial` file
+- Added 2 `smart_doctor` tests using LLM hook: parsed issues via hook, empty response handling
+- Added 7 `agents.rs` tests: `has_agent_defaults`, `list_agents`, `verify_agents` (pass + stale detection), `download_or_copy` from local path, `fetch_agent_defaults_yml` local path
+- Added 7 `models.rs` tests: mirror of agents.rs test suite for model-defaults.yml
+- Added 5 `config.rs` tests: `models.uri`/`models.fallbackUri` get/set/unset, `merge.model` unset
+- Coverage: 53.25% to 60.22% (+6.97%); smart.rs reached 100%, agents.rs 0%→62.7%, models.rs 0%→62.0%, merge.rs +20.8%
+- Test count: 334 to 358
+- Version bump: 21.1.5 to 21.1.6 (PATCH — test coverage with mocking infrastructure)
+
+### 2026-05-16 (v21.1.5, cross-command integration tests)
+
+- Added 13 integration tests for doctor, status, merge (dry-run), and verify commands exercised after real init/remove operations
+- Doctor tests (5): clean workspace, missing file detection + fix, modified file detection, unmerged marker stripping, clean after removal
+- Status tests (3): after init, after agent removal, empty workspace detection
+- Merge dry-run tests (3): all unchanged, diverged file detection, new files after lang removal
+- Verify tests (2): full round-trip with local source, missing source file detection
+- Coverage improvement: 47.63% to 53.25% (+5.62%); doctor.rs +29.92%, list.rs +34.97%, merge.rs +15.18%, verify.rs +22.35%, template_engine.rs +2.34%
+- Test count: 321 to 334
+- Version bump: 21.1.4 to 21.1.5 (PATCH — test coverage improvement)
+
+### 2026-05-16 (v21.1.4, init/remove integration tests)
+
+- Added 12 integration tests in new `src/template_manager/integration_tests.rs` exercising init→remove sequences across all three canonical test agent archetypes (bogus, fake, foobar) and both synthetic languages (Rust++, CppScript)
+- Tests cover: single-operation sanity (3), remove-preserves-sibling scope (3), agent switching and coexistence (2), language guard enforcement (2), and cross-client cleanup edge cases (2)
+- Introduced `IntegrationFixture` struct providing a self-contained config_dir with templates.yml, agent-defaults.yml, source files, and helper methods (`init`, `remove_agent`, `remove_lang`) that drive the full `TemplateManager::update()` and `TemplateManager::remove()` pipelines
+- Test count: 309 → 321
+- Version bump: 21.1.3 → 21.1.4 (PATCH — test coverage addition)
+
+### 2026-05-16 (v21.1.3, canonical test agent archetypes)
+
+- Established three canonical test agent archetypes with well-defined attributes for synthetic test catalogs:
+  - **bogus**: `reads_cross_client_skills: false`, native-only (like Claude/Vibe)
+  - **fake**: `reads_cross_client_skills: true`, hybrid with native dir + reads `.agents/skills/` (like Cursor/Codex)
+  - **foobar**: `reads_cross_client_skills: true`, cross-client-only with `skill_dir: $workspace/.agents/skills`
+- Updated `synthetic_catalog()` in `file_tracker.rs`: changed bogus from `true` to `false`, added foobar agent entry
+- Extended `write_synthetic_agent_defaults` helper in `remove.rs` to accept optional `skill_dir` override (4th tuple element); updated all 11 call sites
+- Extended `write_synthetic_agent_defaults` helper in `template_engine.rs` to accept optional `skill_dir` override (3rd tuple element); updated all 10 call sites
+- Updated 3 cross-client removal tests in `remove.rs` to use `fake`/`foobar` instead of `bogus` for semantic clarity
+- Renamed 2 cross-client routing tests in `template_engine.rs` from `*_bogus*` to `*_fake*` and switched to fake agent
+- Updated inline YAML in `list.rs` to use `reads_cross_client_skills: false` for bogus (was `true`)
+- Rationale: test agents should have stable, semantically meaningful attributes so cross-client vs native-only behavior is obvious from the agent name alone
+- Version bump: 21.1.2 → 21.1.3 (PATCH — test infrastructure cleanup)
+
+### 2026-05-16 (v21.1.2, fix adopted skill copies losing lang attribution)
+
+- Fixed `init --agent <native-only-agent>` (Claude, Vibe) silently dropping `lang` attribution when adopting cross-client skills from `.agents/skills/` into the agent's native skill directory; adopted copies were stamped with `lang: LANG_NONE` instead of preserving the original language (e.g. `lang: "swift"`), causing `remove --lang swift` to leave the adopted copies behind
+- Root cause: the cross-client skill adoption block in `resolve_all_files` (`template_engine.rs`) hardcoded `lang: LANG_NONE` for every adopted `ResolvedFile`; now loads the existing `FileTracker` before the adoption loop and carries the original `lang` from each source entry; falls back to `LANG_NONE` when no tracker entry exists
+- Added regression test `test_remove_lang_removes_adopted_native_agent_skill_copies` in `src/template_manager/remove.rs`
+- Test count: 308 → 309
+- Version bump: 21.1.1 → 21.1.2 (PATCH — bug fix)
+
+### 2026-05-16 (v21.1.1, fix remove bugs and improve test coverage)
+
+- Fixed `remove --agent` deleting language skills from `.agents/skills/` when the removed agent was the last cross-client agent; language skills (tracker `lang != LANG_NONE`) are now preserved; only agent-specific and top-level skills (`lang == LANG_NONE`) are removed
+- Fixed `remove --lang` leaving a stale `lang` field on the AGENTS.md tracker entry, causing `status` to report the language as still installed after removal; the `main`-category entry is now reset to `LANG_NONE` before saving the tracker
+- Added `clear_lang_for_category(lang, category)` to `FileTracker` in `src/file_tracker.rs`
+- Added `setup_workspace_with_agent_and_lang()` lifecycle test fixture
+- Added 4 new regression and lifecycle tests; enhanced 2 existing tests with negative assertions and tracker-consistency invariants
+- Test count: 304 → 308
+- Version bump: 21.1.0 → 21.1.1 (PATCH — bug fixes)
+
+### 2026-05-16 (v21.1.0, clean up empty agent dirs after remove)
+
+- After `remove --agent <name>`, `remove --all`, and `remove --purge`, slopctl now attempts to delete each agent's marker directory (e.g. `.claude/`, `.cursor/`) if it is empty after the file-deletion pass
+- Marker directories created by `slopctl init --agent` as empty detection dirs are now fully cleaned up on removal; non-empty dirs (containing user files) are silently skipped
+- Dry-run output annotates each candidate marker dir with `(removed if empty)` so users can preview the cleanup
+- Added `list_agent_names_from_catalog` helper in `src/agent_defaults.rs` to enumerate all agent names from a loaded catalog without re-loading
+- Added 2 regression tests: `test_remove_agent_cleans_up_empty_marker_dir` and `test_remove_agent_keeps_nonempty_marker_dir`
+- Version bump: 21.0.0 → 21.1.0 (MINOR — new cleanup behavior, fully backwards compatible)
+
+### 2026-05-16 (v21.0.0, models catalog subcommand)
+
+- **BREAKING**: removed the `list-models` subcommand; replaced with `models`, a full catalog-management command mirroring `agents` and `templates`
+- Added `templates/v5/model-defaults.yml` as the data source for LLM provider configurations: API endpoints, API key environment variables, and default model identifiers
+- Added `src/model_defaults.rs`: `ModelCatalog`/`ProviderEntry` serde structs, embedded fallback via `include_str!`, three loaders (`from_dir`, `cached_from_dir`, `embedded`), `validate_model_catalog`, `OnceLock`-based fast-path helpers (`get_default_model`, `get_endpoint`, `get_models_endpoint`, `get_api_key_env`, `known_providers`)
+- Added `src/template_manager/models.rs`: `has_model_defaults`, `download_or_copy_model_defaults`, `list_models_catalog`, `verify_models` on `TemplateManager`
+- Updated `src/llm.rs`: `Provider::default_model()`, `endpoint()`, `models_endpoint()`, `api_key_env_var()` now read from the model defaults catalog first and fall back to hardcoded compile-time values; updated OpenAI default from `gpt-4o` to `gpt-4.1`, Ollama default from `llama3` to `llama3.2`
+- Updated `src/config.rs`: added `ModelsConfig { uri, fallback_uri }` and `models: ModelsConfig` to `Config`; wired `models.uri`/`models.fallbackUri` into `get`/`set`/`unset`/`list`/`valid_keys`
+- Updated `src/download_manager.rs`: added `download_model_defaults_from_url` with validate-in-tempdir-before-copy pattern
+- Updated `src/main.rs`: added `DEFAULT_MODELS_SOURCE_URL`, `resolve_models_source`, `download_model_defaults_with_fallback`, `bootstrap_model_defaults_if_missing`; `templates --update` now bootstraps `model-defaults.yml` when missing
+- `slopctl models --list` shows the catalog (providers, default models, endpoints) instead of querying the live API
+- `slopctl models --update` / `--verify` / `--from` / `--dry-run` work identically to `slopctl agents`
+- Added `models.uri` and `models.fallbackUri` as new config keys
+- Version bump: 20.2.7 → 21.0.0 (MAJOR — `list-models` subcommand removed, breaking CLI change)
+
+### 2026-05-16 (v20.2.7, synthetic source fixtures)
+
+- Removed real-world coding-agent and programming-language fixture names from Rust source and tests
+- Replaced source/test agent fixtures with `bogus` and `fake`, and language fixtures with `Rust++` and `CppScript`
+- Added catalog-driven adoption and removal paths so `TemplateManager` and `FileTracker` can use the active `agent-defaults.yml` instead of relying on embedded agent names
+- Updated CLI/help comments to use generic `<agent>` and `<language>` placeholders instead of real catalog entries
+- Version bump: 20.2.6 → 20.2.7 (PATCH — test fixture sanitization and catalog-driven lookup cleanup)
+
+### 2026-05-16 (v20.2.6, clippy lint schema fix)
+
+- Moved the project-level `clippy::bool_comparison` allowance from `Cargo.toml` package lints to crate-level attributes in `src/lib.rs`, `src/main.rs`, and `build.rs`
+- Rationale: Cargo accepts package lint configuration, but the editor TOML schema flags `[lints.clippy]`; crate-level attributes preserve clippy behavior without schema warnings
+- Version bump: 20.2.5 → 20.2.6 (PATCH — metadata schema warning fix)
+
+### 2026-05-16 (v20.2.5, catalog-driven bogus agent tests)
+
+- Added regression tests with an imaginary `bogus_agent` to prove skill routing and status detection come from `agent-defaults.yml`, not hardcoded known-agent names
+- `TemplateEngine` now loads the active `agent-defaults.yml` from its template cache for marker creation, skill directory selection, cross-client support, and userprofile skill routing
+- `slopctl status` now detects installed agents from the active agent-defaults catalog, so custom catalog agents are visible when their marker directories exist
+- Version bump: 20.2.4 → 20.2.5 (PATCH — data-driven agent defaults coverage and lookup fix)
+
+### 2026-05-16 (v20.2.4, marker-based status detection)
+
+- Fixed `slopctl status` reporting no installed agents when an agent only had marker directories and skills installed
+- Status now detects installed agents through `AgentDefaults` workspace markers instead of BoM-managed agent files
+- This makes Codex, Vibe, OpenCode, and other marker-only agent installs visible in workspace status
+- Added regression coverage for detecting a marker-only Codex install
+- Version bump: 20.2.3 → 20.2.4 (PATCH — workspace status detection bug fix)
+
+### 2026-05-16 (v20.2.3, transactional skill installation)
+
+- Made `init` preflight resolved install targets before writing files or creating directories
+- Skill install targets are derived from `AgentDefaults` and skill scope, not from previously installed agents or existing workspace directories
+- Top-level skills for agents that do not read `.agents/skills/` continue to route to the selected agent's native `skill_dir`
+- Existing `.agents/skills/` files are treated as shared targets: identical tracked files refresh tracker metadata without copying, while untracked, modified, or different tracked files stop the install before any writes
+- Cross-client skill adoption now skips native targets already scheduled from the current template set, preventing duplicate target errors
+- Added regression coverage for AgentDefaults-based routing, shared skill conflicts, and atomic preflight failure behavior
+- Version bump: 20.2.2 → 20.2.3 (PATCH — skill routing and install transaction bug fix)
 
 ### 2026-05-14 (v20.2.2, commit body bullet guidance)
 

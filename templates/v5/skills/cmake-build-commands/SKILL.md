@@ -3,7 +3,7 @@ name: cmake-build-commands
 description: CMake commands for configuring, building, testing, and packaging a CMake-based project. Load when working with CMake build files or running a CMake build.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

@@ -15,7 +15,8 @@ use crate::{
     Result,
     agent_defaults::{self, AGENT_DEFAULTS_FILE},
     bom::TemplateConfig,
-    github
+    github,
+    model_defaults::{self, MODEL_DEFAULTS_FILE}
 };
 
 /// Manages downloading templates from remote sources
@@ -209,6 +210,59 @@ impl DownloadManager
         }
     }
 
+    /// Downloads the model defaults catalog from a GitHub URL
+    ///
+    /// Downloads only `model-defaults.yml` into the global template cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - GitHub URL to download from
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if URL parsing or download fails
+    pub fn download_model_defaults_from_url(&self, url: &str) -> Result<()>
+    {
+        let parsed =
+            github::parse_github_url(url).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path"))?;
+
+        println!("{} Repository: {}/{} (branch: {})", "→".blue(), parsed.owner.green(), parsed.repo.green(), parsed.branch.yellow());
+
+        let base_url = format!("https://raw.githubusercontent.com/{}/{}/{}", parsed.owner, parsed.repo, parsed.branch);
+        let url_path = if parsed.path.is_empty() == false
+        {
+            format!("/{}", parsed.path)
+        }
+        else
+        {
+            String::new()
+        };
+
+        let catalog_url = format!("{}{}/{}", base_url, url_path, MODEL_DEFAULTS_FILE);
+        let temp_dir = tempfile::TempDir::new()?;
+        let temp_path = temp_dir.path().join(MODEL_DEFAULTS_FILE);
+
+        print!("{} Downloading {}... ", "→".blue(), MODEL_DEFAULTS_FILE.yellow());
+        io::stdout().flush()?;
+
+        match github::download_file(&catalog_url, &temp_path)
+        {
+            | Ok(_) =>
+            {
+                model_defaults::load_model_catalog_file(&temp_path)?;
+                fs::create_dir_all(&self.config_dir)?;
+                fs::copy(&temp_path, self.config_dir.join(MODEL_DEFAULTS_FILE))?;
+                println!("{}", "✓".green());
+                Ok(())
+            }
+            | Err(e) =>
+            {
+                println!("{}", "✗".red());
+                Err(anyhow::anyhow!("Failed to download {}: {}", MODEL_DEFAULTS_FILE, e))
+            }
+        }
+    }
+
     /// Collects deduplicated local-path skill sources from all config sections
     ///
     /// Gathers skill sources from top-level skills, agent skills, language skills,
@@ -244,7 +298,7 @@ impl DownloadManager
     /// # Arguments
     ///
     /// * `parsed` - Parsed GitHub URL of the template repository
-    /// * `source` - Relative path to the skill directory within the repo (e.g. `skills/rust-coding-conventions`)
+    /// * `source` - Relative path to the skill directory within the repo
     fn download_skill_directory(&self, parsed: &github::GitHubUrl, source: &str) -> Result<()>
     {
         let skill_url = if parsed.path.is_empty() == true
@@ -400,7 +454,7 @@ mod tests
         config.skills = vec![make_skill("git-workflow", "skills/git-workflow")];
         config
             .agents
-            .insert("cursor".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("git-workflow-agent", "skills/git-workflow")], ..Default::default() });
+            .insert("bogus".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("git-workflow-agent", "skills/git-workflow")], ..Default::default() });
 
         let sources = DownloadManager::collect_local_skill_sources(&config);
         assert_eq!(sources, vec!["skills/git-workflow"]);
@@ -411,9 +465,9 @@ mod tests
     {
         let mut config = empty_config();
         config.skills = vec![make_skill("top", "skills/top-skill")];
-        config.agents.insert("cursor".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("agent", "skills/agent-skill")], ..Default::default() });
-        config.languages.insert("rust".to_string(), crate::bom::LanguageConfig { skills: vec![make_skill("lang", "skills/lang-skill")], ..Default::default() });
-        config.shared.insert("cmake".to_string(), crate::bom::SharedConfig { skills: vec![make_skill("shared", "skills/shared-skill")], ..Default::default() });
+        config.agents.insert("bogus".to_string(), crate::bom::AgentConfig { skills: vec![make_skill("agent", "skills/agent-skill")], ..Default::default() });
+        config.languages.insert("Rust++".to_string(), crate::bom::LanguageConfig { skills: vec![make_skill("lang", "skills/lang-skill")], ..Default::default() });
+        config.shared.insert("CppScript".to_string(), crate::bom::SharedConfig { skills: vec![make_skill("shared", "skills/shared-skill")], ..Default::default() });
 
         let sources = DownloadManager::collect_local_skill_sources(&config);
         assert_eq!(sources.len(), 4);
@@ -421,5 +475,61 @@ mod tests
         assert!(sources.contains(&"skills/agent-skill".to_string()) == true);
         assert!(sources.contains(&"skills/lang-skill".to_string()) == true);
         assert!(sources.contains(&"skills/shared-skill".to_string()) == true);
+    }
+
+    #[test]
+    fn test_download_agent_defaults_from_url_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let agent_yaml = b"version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                           '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n";
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(move |_url| Ok(agent_yaml.to_vec())));
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_agent_defaults_from_url("https://github.com/test/repo/tree/main/templates/v5")?;
+
+        assert!(config_dir.path().join(AGENT_DEFAULTS_FILE).exists() == true, "agent-defaults.yml must be written to config dir");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_model_defaults_from_url_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let model_yaml =
+            b"version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+              default_model: llama3.2\n";
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(move |_url| Ok(model_yaml.to_vec())));
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_model_defaults_from_url("https://github.com/test/repo/tree/main/templates/v5")?;
+
+        assert!(config_dir.path().join(MODEL_DEFAULTS_FILE).exists() == true, "model-defaults.yml must be written to config dir");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_skill_entries_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+
+        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(|_url| Ok(b"# Skill content\n".to_vec())));
+
+        let entries = vec![github::GitHubContentEntry {
+            name:         "SKILL.md".to_string(),
+            entry_type:   "file".to_string(),
+            download_url: Some("https://raw.githubusercontent.com/test/repo/main/skills/test/SKILL.md".to_string()),
+            path:         "skills/test/SKILL.md".to_string()
+        }];
+
+        let parent_url = github::GitHubUrl { owner: "test".into(), repo: "repo".into(), branch: "main".into(), path: "skills/test".into() };
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        dm.download_skill_entries(&entries, &parent_url, "skills/test")?;
+
+        assert!(config_dir.path().join("skills/test/SKILL.md").exists() == true);
+        Ok(())
     }
 }

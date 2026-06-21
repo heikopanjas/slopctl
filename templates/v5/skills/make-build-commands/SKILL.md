@@ -3,7 +3,7 @@ name: make-build-commands
 description: Make commands for building, testing, cleaning, and managing a Make-based project. Load when working with Makefiles or running a Make build.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

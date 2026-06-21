@@ -3,7 +3,8 @@ name: init-session
 description: Start an agentic coding session by reading the primary instruction files and confirming understanding.
 license: MIT
 metadata:
-  source: slopctl
+  author: Heiko Panjas
+  version: "1.0"
 ---
 
 # Init Session
