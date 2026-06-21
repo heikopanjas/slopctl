@@ -55,7 +55,7 @@ pub enum Commands
         #[arg(short, long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long)]
         agent: Option<String>,
 
@@ -120,11 +120,11 @@ pub enum Commands
     /// Remove installed files from the current workspace
     Remove
     {
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long, conflicts_with = "purge")]
         agent: Option<String>,
 
-        /// Programming language or framework (e.g., rust, c++, swift)
+        /// Programming language or framework from templates.yml
         #[arg(short, long, conflicts_with = "purge")]
         lang: Option<String>,
 
@@ -182,11 +182,11 @@ pub enum Commands
     /// AI-assisted merge of customized files with updated templates
     Merge
     {
-        /// Programming language or framework (e.g., rust, c++, swift)
+        /// Programming language or framework from templates.yml
         #[arg(short, long)]
         lang: Option<String>,
 
-        /// AI coding agent (e.g., claude, copilot, codex, cursor)
+        /// AI coding agent from templates.yml
         #[arg(short, long)]
         agent: Option<String>,
 
@@ -206,12 +206,28 @@ pub enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// List available models from an LLM provider
-    ListModels
+    /// Manage global model defaults catalog
+    Models
     {
-        /// LLM provider to query (overrides config and auto-detected provider)
+        /// Download or update global model defaults from source
+        #[arg(short, long, default_value = "false")]
+        update: bool,
+
+        /// Show known providers and their default configurations
+        #[arg(short, long, default_value = "false")]
+        list: bool,
+
+        /// Verify local model defaults: YAML validity and source freshness
+        #[arg(short = 'V', long, default_value = "false")]
+        verify: bool,
+
+        /// Path or URL to use as source (applies to --update and --verify)
         #[arg(short, long)]
-        provider: Option<String>
+        from: Option<String>,
+
+        /// Preview changes without applying them
+        #[arg(short = 'n', long, default_value = "false", requires = "update")]
+        dry_run: bool
     },
     /// Manage configuration
     Config

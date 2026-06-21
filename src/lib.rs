@@ -1,3 +1,5 @@
+#![allow(clippy::bool_comparison)]
+
 //! slopctl - A manager for coding agent instruction files
 //!
 //! This library provides functionality to manage, organize, and maintain
@@ -33,6 +35,7 @@ mod download_manager;
 mod file_tracker;
 pub mod github;
 pub mod llm;
+pub mod model_defaults;
 mod template_engine;
 mod template_manager;
 mod utils;

@@ -238,3 +238,107 @@ fn fetch_remote_agent_defaults_yml(source: &str) -> Result<String>
     github::download_file(&url, &dest_path)?;
     Ok(fs::read_to_string(dest_path)?)
 }
+
+#[cfg(test)]
+mod tests
+{
+    use super::*;
+
+    #[test]
+    fn test_has_agent_defaults_true_when_file_exists() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(config_dir.path().join(AGENT_DEFAULTS_FILE), "version: 1\nagents: []\n")?;
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        assert!(manager.has_agent_defaults() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_has_agent_defaults_false_when_missing()
+    {
+        let config_dir = tempfile::TempDir::new().unwrap();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        assert!(manager.has_agent_defaults() == false);
+    }
+
+    #[test]
+    fn test_list_agents_succeeds_with_valid_catalog() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        std::fs::write(
+            config_dir.path().join(AGENT_DEFAULTS_FILE),
+            "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
+        )?;
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.list_agents()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_agents_passes_with_matching_source() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let yaml = "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                    '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n";
+        std::fs::write(config_dir.path().join(AGENT_DEFAULTS_FILE), yaml)?;
+
+        // Use the config dir itself as source (local path); freshness check compares identical bytes
+        let source = config_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.verify_agents(&source)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_agents_detects_stale_local() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let source_dir = tempfile::TempDir::new()?;
+
+        let local_yaml = "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                          '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n";
+        let remote_yaml = "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                           '$workspace/.bogus/skills'\n    reads_cross_client_skills: true\n";
+
+        std::fs::write(config_dir.path().join(AGENT_DEFAULTS_FILE), local_yaml)?;
+        std::fs::write(source_dir.path().join(AGENT_DEFAULTS_FILE), remote_yaml)?;
+
+        let source = source_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.verify_agents(&source);
+        assert!(result.is_err() == true, "verify must fail when local differs from source");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_agent_defaults_from_local_path() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let source_dir = tempfile::TempDir::new()?;
+
+        let yaml = "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+                    '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n";
+        std::fs::write(source_dir.path().join(AGENT_DEFAULTS_FILE), yaml)?;
+
+        let source = source_dir.path().to_string_lossy().to_string();
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.download_or_copy_agent_defaults(&source)?;
+
+        assert!(config_dir.path().join(AGENT_DEFAULTS_FILE).exists() == true, "agent defaults must be copied to config dir");
+        Ok(())
+    }
+
+    #[test]
+    fn test_fetch_agent_defaults_yml_local_path() -> anyhow::Result<()>
+    {
+        let source_dir = tempfile::TempDir::new()?;
+        let yaml = "version: 1\nagents: []\n";
+        std::fs::write(source_dir.path().join(AGENT_DEFAULTS_FILE), yaml)?;
+
+        let content = fetch_agent_defaults_yml(&source_dir.path().to_string_lossy())?;
+        assert!(content.contains("version: 1") == true);
+        Ok(())
+    }
+}

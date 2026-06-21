@@ -3,7 +3,7 @@ name: c-coding-conventions
 description: C coding conventions covering naming, const-correctness, memory management, header organization, and defensive programming. Load before writing, reviewing, or refactoring C code.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 
@@ -43,9 +43,9 @@ It covers naming, const-correctness, memory management, header organization, and
 - Apply `const` to pointer targets, not just pointers: `const char*` not `char* const`
 - Use `const` to document intent and prevent accidental modification
 - Examples:
-  - ✅ Correct: `KString KStringCreate(const char* pStr, const size_t Size);`
-  - ✅ Correct: `int KStringCompare(const KString a, const KString b);`
-  - ❌ Incorrect: `KString KStringCreate(char* pStr, size_t Size);`
+  - ✅ Correct: `Foo FooCreate(const char* pStr, const size_t Size);`
+  - ✅ Correct: `int FooCompare(const Foo a, const Foo b);`
+  - ❌ Incorrect: `Foo FooCreate(char* pStr, size_t Size);`
 - Const correctness improves maintainability and compiler optimization
 
 **Comparison Conventions:**
@@ -76,10 +76,10 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Secure: Requires explicit size
-  KString KStringCreate(const char* pStr, const size_t Size);
+  Foo FooCreate(const char* pStr, const size_t Size);
 
   // Less secure: Uses strlen() internally (provide for convenience only)
-  KString KStringCreateFromCStr(const char* pStr);
+  Foo FooCreateFromCStr(const char* pStr);
   ```
 
 - Validate all size parameters before use
@@ -88,9 +88,9 @@ It covers naming, const-correctness, memory management, header organization, and
 
 **Function Naming:**
 
-- Use prefix for all public API functions (e.g., `KString` prefix)
-- Use PascalCase for public functions: `KStringCreate`, `KStringCompare`
-- Use prefix + underscore for private functions: `KS_ValidatePointer`, `KS_Release`
+- Use prefix for all public API functions (e.g., `Foo` prefix)
+- Use PascalCase for public functions: `FooCreate`, `FooCompare`
+- Use prefix + underscore for private functions: `F_ValidatePointer`, `F_Release`
 - Action verbs should be clear and descriptive
 - Common patterns:
   - Create/Destroy for resource management
@@ -103,10 +103,10 @@ It covers naming, const-correctness, memory management, header organization, and
 - **Local variables**: PascalCase (e.g., `MyVariable`, `StringLength`, `BufferSize`)
 - **Function parameters**: PascalCase (e.g., `InputString`, `MaxLength`)
 - **Pointer variables**: PascalCase with `p` prefix (e.g., `pData`, `pBuffer`, `pString`)
-- **Type names**: PascalCase (e.g., `KString`, `KStringEncoding`)
-- **Enum constants**: UPPER_SNAKE_CASE with prefix (e.g., `KSTRING_ENCODING_UTF8`)
-- **Macro definitions**: UPPER_SNAKE_CASE with prefix (e.g., `KSTRING_MAX_SHORT_LENGTH`)
-- **Static functions**: Prefix with project abbreviation (e.g., `KS_` for KString internals)
+- **Type names**: PascalCase (e.g., `Foo`, `FooEncoding`)
+- **Enum constants**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_ENCODING_UTF8`)
+- **Macro definitions**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_MAX_SHORT_LENGTH`)
+- **Static functions**: Prefix with project abbreviation (e.g., `F_` for Foo internals)
 
 **Type Definitions:**
 
@@ -116,10 +116,10 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // In header (opaque handle)
-  typedef struct KString KString;
+  typedef struct Foo Foo;
 
   // In implementation file
-  struct KString {
+  struct Foo {
       uint32_t size;
       // ... implementation details
   };
@@ -136,11 +136,11 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   typedef enum {
-      KSTRING_ENCODING_UTF8     = 0,  // Default UTF-8 encoding
-      KSTRING_ENCODING_UTF16LE  = 1,  // UTF-16 Little Endian
-      KSTRING_ENCODING_UTF16BE  = 2,  // UTF-16 Big Endian
-      KSTRING_ENCODING_ANSI     = 3   // ANSI/Windows-1252 (legacy)
-  } KStringEncoding;
+      FOO_ENCODING_UTF8     = 0,  // Default UTF-8 encoding
+      FOO_ENCODING_UTF16LE  = 1,  // UTF-16 Little Endian
+      FOO_ENCODING_UTF16BE  = 2,  // UTF-16 Big Endian
+      FOO_ENCODING_ANSI     = 3   // ANSI/Windows-1252 (legacy)
+  } FooEncoding;
   ```
 
 - Add comments for each enum value explaining its purpose
@@ -154,7 +154,7 @@ It covers naming, const-correctness, memory management, header organization, and
 - Document ownership transfer clearly in function comments
 - Functions that return pointers transfer ownership (caller must free)
 - Functions that take `const` pointers do not take ownership
-- Provide cleanup functions for resource types (e.g., `KStringDestroy`)
+- Provide cleanup functions for resource types (e.g., `FooDestroy`)
 - Example:
 
   ```c
@@ -178,12 +178,12 @@ It covers naming, const-correctness, memory management, header organization, and
   ```c
   // Validate input parameters
   if (NULL == pStr || 0 == Size) {
-      return InvalidKString();  // Return sentinel value
+      return InvalidFoo();  // Return sentinel value
   }
 
   // Check for overflow
   if (Size > MAX_VALID_SIZE) {
-      return InvalidKString();
+      return InvalidFoo();
   }
   ```
 
@@ -198,15 +198,15 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example structure:
 
   ```c
-  KString KStringCreate(const char* pStr, const size_t Size)
+  Foo FooCreate(const char* pStr, const size_t Size)
   {
       // 1. Validate parameters
       if (NULL == pStr || 0 == Size) {
-          return InvalidKString();
+          return InvalidFoo();
       }
 
       // 2. Handle short string case
-      if (Size <= KSTRING_MAX_SHORT_LENGTH) {
+      if (Size <= FOO_MAX_SHORT_LENGTH) {
           return CreateShortString(pStr, Size);
       }
 
@@ -222,25 +222,25 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  #ifndef KSTRING_H
-  #define KSTRING_H
+  #ifndef FOO_H
+  #define FOO_H
 
   #include <stddef.h>
   #include <stdint.h>
   #include <stdbool.h>
 
   // Macros and constants
-  #define KSTRING_MAX_SHORT_LENGTH 12
+  #define FOO_MAX_SHORT_LENGTH 12
 
   // Type definitions
-  typedef struct KString KString;
-  typedef enum { /* ... */ } KStringEncoding;
+  typedef struct Foo Foo;
+  typedef enum { /* ... */ } FooEncoding;
 
   // Public API declarations
-  KString KStringCreate(const char* pStr, const size_t Size);
-  void KStringDestroy(const KString kstr);
+  Foo FooCreate(const char* pStr, const size_t Size);
+  void FooDestroy(const Foo foo);
 
-  #endif // KSTRING_H
+  #endif // FOO_H
   ```
 
 **Implementation File Organization:**
@@ -251,18 +251,18 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  #include "KString.h"
+  #include "Foo.h"
 
   // Private macros
-  #define KSTRING_SIZE_MASK 0x3FFFFFFF
+  #define FOO_SIZE_MASK 0x3FFFFFFF
 
   // Private helper functions
   static inline size_t GetSizeFromField(uint32_t SizeField) {
-      return SizeField & KSTRING_SIZE_MASK;
+      return SizeField & FOO_SIZE_MASK;
   }
 
   // Public API implementations
-  KString KStringCreate(const char* pStr, const size_t Size) {
+  Foo FooCreate(const char* pStr, const size_t Size) {
       // ... implementation
   }
   ```
@@ -280,7 +280,7 @@ It covers naming, const-correctness, memory management, header organization, and
   // Upper 2 bits store encoding, lower 30 bits store size
   static inline size_t GetSizeFromField(uint32_t SizeField)
   {
-      return SizeField & KSTRING_SIZE_MASK;
+      return SizeField & FOO_SIZE_MASK;
   }
   ```
 
@@ -296,12 +296,12 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Function: opening brace on next line
-  KString KStringCreate(const char* pStr, const size_t Size)
+  Foo FooCreate(const char* pStr, const size_t Size)
   {
       // Control structure: opening brace on next line
       if (NULL == pStr)
       {
-          return InvalidKString();
+          return InvalidFoo();
       }
 
       for (size_t i = 0; i < Size; i++)
@@ -325,17 +325,17 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Size field layout: 30 bits size + 2 bits encoding (32 bits total)
-  #define KSTRING_SIZE_MASK         0x3FFFFFFF  // Lower 30 bits
-  #define KSTRING_ENCODING_MASK     0xC0000000  // Upper 2 bits
-  #define KSTRING_ENCODING_SHIFT    30
+  #define FOO_SIZE_MASK         0x3FFFFFFF  // Lower 30 bits
+  #define FOO_ENCODING_MASK     0xC0000000  // Upper 2 bits
+  #define FOO_ENCODING_SHIFT    30
 
   // Extract components
   static inline size_t GetSizeFromField(uint32_t SizeField) {
-      return SizeField & KSTRING_SIZE_MASK;
+      return SizeField & FOO_SIZE_MASK;
   }
 
-  static inline KStringEncoding GetEncodingFromField(uint32_t SizeField) {
-      return (KStringEncoding)((SizeField & KSTRING_ENCODING_MASK) >> KSTRING_ENCODING_SHIFT);
+  static inline FooEncoding GetEncodingFromField(uint32_t SizeField) {
+      return (FooEncoding)((SizeField & FOO_ENCODING_MASK) >> FOO_ENCODING_SHIFT);
   }
   ```
 
@@ -377,7 +377,7 @@ It covers naming, const-correctness, memory management, header organization, and
   #include <assert.h>
 
   // Verify structure size matches specification
-  static_assert(sizeof(KString) == 16, "KString must be exactly 16 bytes");
+  static_assert(sizeof(Foo) == 16, "Foo must be exactly 16 bytes");
 
   // Verify bit field sizes
   static_assert(sizeof(uint32_t) * 8 >= 32, "uint32_t must be at least 32 bits");
@@ -393,9 +393,9 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  static inline bool KS_IsShortString(KString kstr)
+  static inline bool F_IsShortString(Foo foo)
   {
-      return GetSizeFromField(kstr.size) <= KSTRING_MAX_SHORT_LENGTH;
+      return GetSizeFromField(foo.size) <= FOO_MAX_SHORT_LENGTH;
   }
   ```
 
@@ -411,7 +411,7 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Pass by value for 16-byte struct (fits in registers)
-  int KStringCompare(const KString a, const KString b)
+  int FooCompare(const Foo a, const Foo b)
   {
       // Fast path: compare sizes first
       size_t SizeA = GetSizeFromField(a.size);
@@ -442,17 +442,17 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   /**
-   * Creates a new KString from a byte array with explicit size.
+   * Creates a new Foo from a byte array with explicit size.
    *
    * @param pStr Pointer to character data (not necessarily null-terminated)
    * @param Size Number of bytes in the string
-   * @return New KString instance, or invalid KString on allocation failure
+   * @return New Foo instance, or invalid Foo on allocation failure
    *
-   * @note Caller is responsible for calling KStringDestroy() when done
+   * @note Caller is responsible for calling FooDestroy() when done
    * @note Uses UTF-8 encoding by default
    * @note Size must not exceed maximum supported size (2^30 - 1 bytes)
    */
-  KString KStringCreate(const char* pStr, const size_t Size);
+  Foo FooCreate(const char* pStr, const size_t Size);
   ```
 
 - Keep documentation concise but complete
@@ -480,9 +480,9 @@ It covers naming, const-correctness, memory management, header organization, and
 - Support multiple platforms (Linux, macOS, Windows)
 - Generate both shared and static libraries
 - Example targets:
-  - Linux: `libkstring.so`, `libkstring.a`
-  - macOS: `libkstring.dylib`, `libkstring.a`
-  - Windows: `kstring.dll`, `kstring.lib`
+  - Linux: `libfoo.so`, `libfoo.a`
+  - macOS: `libfoo.dylib`, `libfoo.a`
+  - Windows: `foo.dll`, `foo.lib`
 - Use Ninja generator for fast parallel builds
 - Separate examples into `_examples/` subdirectory
 - Build artifacts in `_build/` directory (gitignored)

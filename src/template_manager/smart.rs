@@ -175,4 +175,94 @@ mod tests
         assert!(matches!(issues[0].kind, SmartIssueKind::Contradiction) == true);
         Ok(())
     }
+
+    #[test]
+    fn test_smart_doctor_returns_parsed_issues_via_hook() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::cwd_test_guard();
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        std::fs::write(workspace.path().join("AGENTS.md"), "# Project\n## Rules\nDo X.\nNever do X.\n")?;
+        std::fs::write(
+            config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
+            "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
+        )?;
+
+        let mut tracker = crate::FileTracker::new(workspace.path())?;
+        tracker.record_installation(
+            &workspace.path().join("AGENTS.md"),
+            "sha".into(),
+            5,
+            crate::file_tracker::LANG_NONE.into(),
+            crate::file_tracker::AGENT_ALL.into(),
+            "main".into()
+        );
+        tracker.save()?;
+
+        // Write workspace config with merge.provider = ollama (no API key required)
+        let slopctl_dir = workspace.path().join(".slopctl");
+        std::fs::create_dir_all(&slopctl_dir)?;
+        std::fs::write(slopctl_dir.join("config.yml"), "merge:\n  provider: ollama\n")?;
+
+        let _hook = crate::llm::set_chat_test_hook(Box::new(|_msgs| {
+            Ok(crate::llm::ChatResponse {
+                content:       r#"[{"kind":"contradiction","description":"Do X conflicts with Never do X"}]"#.to_string(),
+                input_tokens:  Some(50),
+                output_tokens: Some(20),
+                stop_reason:   Some("stop".to_string())
+            })
+        }));
+
+        let manager = crate::TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let issues = manager.smart_doctor()?;
+
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(issues[0].kind, SmartIssueKind::Contradiction) == true);
+        assert!(issues[0].description.contains("Do X") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_smart_doctor_handles_empty_response_via_hook() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::cwd_test_guard();
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        std::env::set_current_dir(workspace.path())?;
+
+        std::fs::write(workspace.path().join("AGENTS.md"), "# Clean file\n")?;
+        std::fs::write(
+            config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
+            "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
+             '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
+        )?;
+
+        let mut tracker = crate::FileTracker::new(workspace.path())?;
+        tracker.record_installation(
+            &workspace.path().join("AGENTS.md"),
+            "sha".into(),
+            5,
+            crate::file_tracker::LANG_NONE.into(),
+            crate::file_tracker::AGENT_ALL.into(),
+            "main".into()
+        );
+        tracker.save()?;
+
+        let slopctl_dir = workspace.path().join(".slopctl");
+        std::fs::create_dir_all(&slopctl_dir)?;
+        std::fs::write(slopctl_dir.join("config.yml"), "merge:\n  provider: ollama\n")?;
+
+        let _hook = crate::llm::set_chat_test_hook(Box::new(|_msgs| {
+            Ok(crate::llm::ChatResponse { content: "[]".to_string(), input_tokens: Some(30), output_tokens: Some(5), stop_reason: Some("stop".to_string()) })
+        }));
+
+        let manager = crate::TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let issues = manager.smart_doctor()?;
+
+        assert!(issues.is_empty() == true, "clean file must produce no issues");
+        Ok(())
+    }
 }

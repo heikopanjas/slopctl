@@ -4,6 +4,7 @@
 //! API keys are read from environment variables; Ollama requires no key.
 
 use std::{
+    cell::RefCell,
     env,
     io::{BufRead, BufReader},
     time::Duration
@@ -11,7 +12,40 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{Result, model_defaults};
+
+// ── Test injection hooks ─────────────────────────────────────────────────────
+
+type ChatHook = Box<dyn Fn(&[ChatMessage]) -> Result<ChatResponse>>;
+
+thread_local! {
+    static CHAT_HOOK: RefCell<Option<ChatHook>> = const { RefCell::new(None) };
+}
+
+/// RAII guard that clears the chat test hook when dropped
+pub struct ChatTestHookGuard
+{
+    _private: ()
+}
+
+impl Drop for ChatTestHookGuard
+{
+    fn drop(&mut self)
+    {
+        CHAT_HOOK.with(|h| *h.borrow_mut() = None);
+    }
+}
+
+/// Install a test hook for `LlmClient::chat()` and `LlmClient::chat_stream()`
+///
+/// When set, the hook intercepts all chat calls and returns the hook's result
+/// instead of making real HTTP requests.  The returned guard clears the hook
+/// on drop.
+pub fn set_chat_test_hook(hook: ChatHook) -> ChatTestHookGuard
+{
+    CHAT_HOOK.with(|h| *h.borrow_mut() = Some(hook));
+    ChatTestHookGuard { _private: () }
+}
 
 /// Supported LLM providers
 #[derive(Debug, Clone, PartialEq)]
@@ -43,8 +77,14 @@ impl Provider
     }
 
     /// Returns the environment variable name that holds the API key for this provider
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     fn api_key_env_var(&self) -> Option<&'static str>
     {
+        if let Some(env_var) = model_defaults::get_api_key_env(self.name())
+        {
+            return Some(env_var);
+        }
         match self
         {
             | Self::OpenAi => Some("OPENAI_API_KEY"),
@@ -88,20 +128,32 @@ impl Provider
     }
 
     /// Returns the default model for this provider
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     pub fn default_model(&self) -> &'static str
     {
+        if let Some(model) = model_defaults::get_default_model(self.name())
+        {
+            return model;
+        }
         match self
         {
-            | Self::OpenAi => "gpt-4o",
+            | Self::OpenAi => "gpt-4.1",
             | Self::Anthropic => "claude-sonnet-4-6",
-            | Self::Ollama => "llama3",
+            | Self::Ollama => "llama3.2",
             | Self::Mistral => "mistral-large-latest"
         }
     }
 
     /// Returns the base API endpoint URL for chat completions
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     fn endpoint(&self) -> &'static str
     {
+        if let Some(ep) = model_defaults::get_endpoint(self.name())
+        {
+            return ep;
+        }
         match self
         {
             | Self::OpenAi => "https://api.openai.com/v1/chat/completions",
@@ -112,8 +164,14 @@ impl Provider
     }
 
     /// Returns the API endpoint URL for listing available models
+    ///
+    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
     pub fn models_endpoint(&self) -> &'static str
     {
+        if let Some(ep) = model_defaults::get_models_endpoint(self.name())
+        {
+            return ep;
+        }
         match self
         {
             | Self::OpenAi => "https://api.openai.com/v1/models",
@@ -202,6 +260,11 @@ impl LlmClient
     /// Convenience wrapper around `chat_stream` with a no-op callback.
     pub fn chat(&self, messages: &[ChatMessage]) -> Result<ChatResponse>
     {
+        let hooked = CHAT_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(messages)));
+        if let Some(result) = hooked
+        {
+            return result;
+        }
         self.chat_stream(messages, |_| {})
     }
 
@@ -209,8 +272,17 @@ impl LlmClient
     ///
     /// Returns the accumulated response with full content and usage metadata.
     /// The `on_chunk` callback receives each content fragment as it arrives.
-    pub fn chat_stream(&self, messages: &[ChatMessage], on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
+    pub fn chat_stream(&self, messages: &[ChatMessage], mut on_chunk: impl FnMut(&str)) -> Result<ChatResponse>
     {
+        let hooked = CHAT_HOOK.with(|h| h.borrow().as_ref().map(|hook| hook(messages)));
+        if let Some(result) = hooked
+        {
+            if let Ok(ref resp) = result
+            {
+                on_chunk(&resp.content);
+            }
+            return result;
+        }
         match self.provider
         {
             | Provider::Anthropic => self.stream_anthropic(messages, on_chunk),
@@ -534,10 +606,12 @@ mod tests
     #[test]
     fn test_provider_default_model()
     {
-        assert_eq!(Provider::OpenAi.default_model(), "gpt-4o");
-        assert_eq!(Provider::Anthropic.default_model(), "claude-sonnet-4-6");
-        assert_eq!(Provider::Ollama.default_model(), "llama3");
-        assert_eq!(Provider::Mistral.default_model(), "mistral-large-latest");
+        // Defaults come from the model-defaults catalog (embedded or cached).
+        // Verify that each provider returns a non-empty string.
+        assert!(Provider::OpenAi.default_model().is_empty() == false);
+        assert!(Provider::Anthropic.default_model().is_empty() == false);
+        assert!(Provider::Ollama.default_model().is_empty() == false);
+        assert!(Provider::Mistral.default_model().is_empty() == false);
     }
 
     #[test]
@@ -574,7 +648,7 @@ mod tests
     {
         let client = LlmClient::new(Provider::Ollama, None)?;
         assert_eq!(client.provider_name(), "ollama");
-        assert_eq!(client.model_name(), "llama3");
+        assert!(client.model_name().is_empty() == false);
         Ok(())
     }
 

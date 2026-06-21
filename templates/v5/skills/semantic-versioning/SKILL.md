@@ -3,7 +3,7 @@ name: semantic-versioning
 description: Rules for when to increment PATCH, MINOR, or MAJOR version numbers using semantic versioning. Load when deciding how to version a code change or preparing a release.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

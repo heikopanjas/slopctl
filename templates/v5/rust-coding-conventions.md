@@ -11,21 +11,59 @@
 - Write self-documenting code with clear naming and structure
 - Leverage the type system for compile-time safety
 - Keep functions focused and modular
+- **DRY (Don't Repeat Yourself)**: Extract shared logic into functions, traits, or structs. When the same pattern appears in 2+ places, factor it out. Use parameter structs (e.g. `DownloadOptions`) to aggregate related arguments rather than passing many individual parameters. Prefer a single source of truth for data rather than duplicating paths in config and code.
 
 **Error Handling:**
 
 - Use `Result<T, E>` for all fallible operations
-- Define a project-wide `Result<T>` type alias with unified error type:
+- Use `anyhow` crate for error handling; re-export from `lib.rs`:
 
   ```rust
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+  pub use anyhow::Result;
+  ```
+
+- Use `anyhow!()` macro for constructing errors:
+
+  ```rust
+  Err(anyhow!("Config file not found"))
+  Err(anyhow!("Failed to download {}: {}", url, e))
   ```
 
 - Use `?` operator for error propagation
 - Avoid `.unwrap()` in library code; only use in application entry points after proper error handling
 - Use `.ok_or_else()` or `.ok_or()` to convert `Option` to `Result` with meaningful error messages
-- Provide context when returning errors: `Err(format!("Failed to download {}: {}", url, e).into())`
 - Never panic in library code unless documenting preconditions with `#[panic]` doc comments
+- Use the `require!` macro for precondition checks with early return:
+
+  ```rust
+  require!(config_file.exists() == true, Err(anyhow!("Config not found")));
+  require!(name.is_empty() == false, None);
+  require!(count > 0, Ok(()));
+  ```
+
+  - Syntax: `require!(condition, return_expression)`
+  - Returns the expression when the condition is **false**
+  - Works with any return type: `Result`, `Option`, or bare values
+  - Use `require!` only for precondition checks at the **top of a function** (before any real work), mimicking design-by-contract
+  - Do NOT use `require!` for conditional logic deep inside function bodies; those should remain as regular `if` blocks
+
+- Define `require!` in `src/lib.rs` so future sessions can add or restore it:
+
+  ```rust
+  /// Early-return guard macro for precondition checks
+  ///
+  /// Returns the given expression when the condition is false.
+  /// Works with any return type: `Result`, `Option`, or bare values.
+  #[macro_export]
+  macro_rules! require {
+      ($cond:expr, $ret:expr) => {
+          if ($cond) == false
+          {
+              return $ret;
+          }
+      };
+  }
+  ```
 
 **Comparison and Conditional Expressions:**
 
@@ -39,6 +77,43 @@
 - Use explicit comparisons with `None`: `if option_value.is_none() == true` or `if option_value == None`
 - Allow clippy warnings for explicit boolean comparisons with project-level configuration
 
+**Loop Flow Control:**
+
+- Avoid `if condition { continue; }` guards at the top of loop bodies; they add visual noise especially with `AlwaysNextLine` brace style
+- Instead, combine guard conditions with the subsequent logic using `&&`, `if/else if/else` chains, or let-chains
+- Examples:
+  - ❌ Incorrect:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == true
+        {
+            continue;
+        }
+        if let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+  - ✅ Correct:
+
+    ```rust
+    for entry in &files
+    {
+        if entry.is_skippable() == false &&
+            let Some(value) = entry.process()
+        {
+            handle(value);
+        }
+    }
+    ```
+
+- For multi-branch dispatch, use `if/else if/else` instead of `continue` to skip to the next branch
+- Exception: `continue` inside `match` error arms (log-and-skip) is acceptable since it serves as early return from an error handler, not a guard
+
 **Module Organization:**
 
 - Use module structure to organize code by functionality
@@ -51,13 +126,12 @@
 - Example:
 
   ```rust
-  mod template_manager;
+  mod foo_store;
   mod utils;
 
-  pub use template_manager::TemplateManager;
+  pub use anyhow::Result;
+  pub use foo_store::FooStore;
   pub use utils::copy_dir_all;
-
-  pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
   ```
 
 **Functions and Methods:**
@@ -74,10 +148,10 @@
 - Example:
 
   ```rust
-  /// Creates a new TemplateManager instance
+  /// Creates a new FooStore instance
   ///
   /// Initializes paths to local data and cache directories using the `dirs` crate.
-  /// Templates are stored in the local data directory and backups in the cache directory.
+  /// Records are stored in the local data directory and backups in the cache directory.
   ///
   /// # Errors
   ///
@@ -98,12 +172,12 @@
 - Example:
 
   ```rust
-  /// Manages template files for coding agent instructions
+  /// Manages Foo records in the local store
   ///
-  /// The `TemplateManager` handles all operations related to template storage,
-  /// verification, backup, and synchronization. Templates are stored in the
+  /// The `FooStore` handles all operations related to record storage,
+  /// verification, backup, and synchronization. Records are stored in the
   /// local data directory and backed up to the cache directory before modifications.
-  pub struct TemplateManager
+  pub struct FooStore
   {
       config_dir: PathBuf,
       cache_dir:  PathBuf
@@ -113,16 +187,22 @@
 - Use `#[derive]` for common traits when appropriate
 - Implement `Default` for structs with sensible defaults
 - Group related structs together in the same file when tightly coupled
+- Never wrap collection types in `Option`; use empty collections instead:
+  - ❌ `Option<Vec<T>>`, `Option<HashMap<K,V>>` — creates redundant states (`None` vs empty)
+  - ✅ `Vec<T>`, `HashMap<K,V>` — empty collection represents absence
+  - For serde: use `#[serde(default, skip_serializing_if = "Vec::is_empty")]` or `"HashMap::is_empty"`
+  - `Option` is appropriate for non-collection types where the default/zero value differs from absence (e.g., `Option<Config>`)
+- When exposing an internal `Vec<T>` via a getter, return `&[T]` (slice) not `&Vec<T>`
 
 **Naming Conventions:**
 
-- Types (structs, enums, traits): Upper PascalCase (e.g., `TemplateManager`, `FileMapping`, `Result`)
-- Functions/methods: snake_case (e.g., `download_file`, `create_backup`, `load_template_config`)
+- Types (structs, enums, traits): Upper PascalCase (e.g., `FooStore`, `BarMapping`, `Result`)
+- Functions/methods: snake_case (e.g., `download_file`, `create_backup`, `load_config`)
 - Variables and function parameters: snake_case (e.g., `config_dir`, `source_path`, `file_name`)
 - Constants: UPPER_SNAKE_CASE (e.g., `MAX_WIDTH`, `DEFAULT_TIMEOUT`)
 - Type parameters: Single uppercase letter or PascalCase (e.g., `T`, `E`, `Error`)
 - Lifetimes: Short lowercase names (e.g., `'a`, `'static`)
-- Module names: snake_case (e.g., `template_manager`, `utils`)
+- Module names: snake_case (e.g., `foo_store`, `utils`)
 
 **Enums and Pattern Matching:**
 
@@ -136,9 +216,14 @@
 
   ```rust
   let Some(value) = option else {
-      return Err("Missing value".into());
+      return Err(anyhow!("Missing value"));
   };
   ```
+
+- Prefer `Option<T>` over sentinel enum variants. Do not add `Invalid`, `Unknown`, or `None` variants to an enum solely to avoid wrapping it in `Option`. `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time, whereas sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm.
+  - ❌ Incorrect: `enum Color { Invalid, Red, Green, Blue }` returned from a parser
+  - ✅ Correct: `enum Color { Red, Green, Blue }` with `Option<Color>` at the boundary
+  - Exception: when "unknown" is a meaningful domain state — e.g. forward-compatible protocol parsing where unrecognized variants must round-trip — model it explicitly (`HttpVersion::Unknown(String)`). This is "modeling the domain accurately," not "avoiding `Option`."
 
 **CLI Design with clap:**
 
@@ -150,8 +235,8 @@
 
   ```rust
   #[derive(Parser)]
-  #[command(name = "my-app")]
-  #[command(about = "A manager for coding agent instruction files", long_about = None)]
+  #[command(name = "foo-cli")]
+  #[command(about = "An example command-line tool", long_about = None)]
   struct Cli
   {
       #[command(subcommand)]
@@ -248,7 +333,7 @@
 - Example:
 
   ```rust
-  //! Template management functionality for my-app
+  //! Core functionality for foo-cli
 
   /// Creates a timestamped backup of a directory
   ///
@@ -267,19 +352,13 @@
 **Linting Configuration:**
 
 - Allow specific clippy lints when project style differs from defaults
-- Configure in `Cargo.toml`:
-
-  ```toml
-  [lints.clippy]
-  bool_comparison = "allow"
-  ```
-
-- Can also use module-level attributes:
+- Prefer crate-level attributes when project style intentionally differs from clippy defaults:
 
   ```rust
   #![allow(clippy::bool_comparison)]
   ```
 
+- Avoid package-level `[lints.clippy]` in `Cargo.toml` for now because the editor TOML schema flags it even though Cargo accepts it
 - Document reasoning for lint exceptions
 
 **File Organization:**
@@ -295,7 +374,7 @@
   src/
   ├── main.rs              # CLI entry point
   ├── lib.rs               # Public API
-  ├── template_manager.rs  # Core functionality
+  ├── foo_store.rs         # Core functionality
   └── utils.rs             # Shared utilities
   ```
 
@@ -303,6 +382,8 @@
 
 - Use `std::env::current_dir()` over hardcoding paths
 - Use `Path` and `PathBuf` for filesystem paths
+- Use `Path::starts_with()` for path prefix/subpath checks; avoid string-based path comparison (e.g. `path.starts_with("foo/")`) to ensure cross-platform behavior (Windows uses `\`, Unix uses `/`)
+- When resolving placeholders in paths (e.g. `$workspace/AGENTS.md`), use `Path::join()` with the suffix instead of string replace; string replace can produce mixed separators on Windows
 - Leverage `std::io::Write` trait for flushing output buffers
 - Use `owo-colors` or similar crate for terminal output styling
 - Use platform-appropriate paths via `dirs` crate (prefer over `$HOME` env var)

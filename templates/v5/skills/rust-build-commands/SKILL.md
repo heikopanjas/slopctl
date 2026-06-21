@@ -3,7 +3,7 @@ name: rust-build-commands
 description: Cargo commands for building, testing, formatting, linting, and managing dependencies in a Rust project. Load when building, running, or managing a Rust project.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 

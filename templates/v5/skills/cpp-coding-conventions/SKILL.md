@@ -3,7 +3,7 @@ name: cpp-coding-conventions
 description: C++ coding conventions covering RAII, naming, class design, modern C++ features, and documentation. Load before writing, reviewing, or refactoring C++ code.
 license: MIT
 metadata:
-  author: slopctl
+  author: Heiko Panjas
   version: "1.0"
 ---
 
@@ -181,7 +181,7 @@ It covers RAII, naming, class structure, modern C++ features, documentation, and
 - **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_EPISODE_LENGTH`, `DEFAULT_TIMEOUT`)
 - **Namespaces**: lowercase (e.g., `myproject`, `utils`)
 - **Template parameters**: Single uppercase letter or PascalCase (e.g., `T`, `ValueType`)
-- Remove redundant prefixes from class names (e.g., use `Model` instead of `P3Model`)
+- Remove redundant prefixes from class names (e.g., use `Model` instead of `LibModel`)
 
 **Include Guards:**
 
