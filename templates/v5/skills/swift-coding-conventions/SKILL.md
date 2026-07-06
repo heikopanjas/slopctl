@@ -4,7 +4,7 @@ description: Swift coding conventions covering naming, access control, concurren
 license: MIT
 metadata:
   author: Heiko Panjas
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Swift Coding Conventions
@@ -194,11 +194,49 @@ let regions = values.filter { value in
 
 ## File Organization
 
-### Single Responsibility
+### **IMPORTANT**: One primary type per file
 
-- **One primary type per file** (exceptions for small, tightly-coupled helper types)
-- File name must match the primary type name: `ProcessManager.swift` contains `ProcessManager` class
-- Place closely related types in the same file only when they form a cohesive unit
+- **Each top-level `class`, `struct`, `enum`, or `actor` MUST live in its own `.swift` file.**
+- **File name MUST match the type name** (PascalCase): `CovidPresenter.swift` contains `CovidPresenter`; `ProcessManager.swift` contains `ProcessManager`.
+- This applies equally to domain types, presenters, services, views (`struct …: View`), and actors — not only classes.
+- **Do not bundle** sibling top-level types into one file because they are empty subclasses, thin wrappers, co-located DTOs, or “related” helpers.
+
+**Allowed exceptions (narrow):**
+
+- **Private nested types** declared inside a parent type (e.g. nested enums on a public enum)
+- **Small, tightly-coupled helper types** that exist only to support the primary type and are not standalone API — use sparingly; when in doubt, split into a separate file
+
+**NOT allowed:**
+
+```swift
+// INCORRECT: multiple top-level classes in one file
+open class ProcessDataPresenter: ProcessPresenter {}
+public final class WeatherPresenter: ProcessDataPresenter {}
+public final class CovidPresenter: ProcessDataPresenter {}
+
+// INCORRECT: multiple top-level structs/enums in one file
+enum TimeSeriesInterval { case hourly }
+struct TimeSeriesPoint { let value: Double }
+class ARIMAPredictor {}
+```
+
+```swift
+// CORRECT: one primary type per file
+// File: CovidPresenter.swift
+@MainActor
+@Observable
+public final class CovidPresenter: ProcessDataPresenter {}
+
+// File: TimeSeriesPoint.swift
+struct TimeSeriesPoint {
+    let timestamp: Date
+    let value: Double
+}
+```
+
+**Protocols:** prefer one primary protocol per file when the protocol is a shared contract (`ProcessControllerProtocol.swift`). Multiple small related protocols in one file is discouraged; split when each protocol is consumed independently.
+
+**Extensions:** `TypeName+Feature.swift` is allowed for extensions on an existing type defined elsewhere; the extension file must not introduce additional top-level types.
 
 ## Naming Conventions
 
