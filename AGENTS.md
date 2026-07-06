@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v21.3.0)
+**Last updated:** 2026-07-06 (v21.3.3)
 
 <!-- {mission} -->
 
@@ -819,6 +819,31 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-06 (v21.3.3, restore require! in Rust template)
+
+- Restored the `require!` macro usage and definition block in `skills/rust-coding-conventions/SKILL.md` and legacy `rust-coding-conventions.md`
+- Rationale: `require!` is an intentional project convention for top-of-function preconditions without verbose `if` guards
+- Version bump: 21.3.2 to 21.3.3 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.2, de-brand C/C++/Rust template examples)
+
+- Removed remaining cross-project artifacts from C, C++, and Rust coding-convention template examples
+- C: replaced the KString-shaped Foo string tutorial (SSO, encoding bits, `InvalidFoo`) with a simple opaque-handle API using generic flag words
+- C++: replaced media-domain examples (`Episode`, `MediaType`, episode Doxygen) with neutral `Record`/`ContentType` placeholders
+- Rust: removed slopctl-shaped examples (`require!`, `max_width = 167` in conventions doc, backup/cache dirs, `$workspace/AGENTS.md` path example, GitHub test name); kept generic `FooStore`/`foo-cli` vocabulary
+- Applied edits to shipped skills and legacy root mirrors; bumped skill frontmatter versions to 1.1 (C/C++/Rust conventions)
+- Verified with `templates --verify` and `cargo test`; content-only change, no source or behavior changes
+- Version bump: 21.3.1 to 21.3.2 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.1, de-brand Swift template examples)
+
+- Removed cross-project artifacts from Swift coding-convention template examples so installed templates read as project-neutral
+- Replaced DoomKit/TheDrowning branding and environmental-monitoring domain names (Covid*, Weather*, radiation units, Berlin coordinates, etc.) with ultra-generic Foo/Bar-style placeholders in `skills/swift-coding-conventions/SKILL.md` and the legacy root `swift-coding-conventions.md` mirror
+- Renamed bundled example types consistently: `FooManager`, `FooSensor`, `FooPresenter`, `BarController`, `RemoteDataService`, `NetworkMonitor`, `Logger`, and related identifiers; kept Apple SDK imports (`WeatherKit`, `CoreLocation`, etc.) unchanged
+- Bumped shipped skill frontmatter `metadata.version` from 2.1 to 2.2
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (371 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.3.0 to 21.3.1 (PATCH — template content fix)
 
 ### 2026-07-06 (v21.3.0, skill refresh stale file pruning)
 

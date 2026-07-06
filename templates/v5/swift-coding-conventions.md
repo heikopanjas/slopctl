@@ -1,8 +1,8 @@
-# Swift Coding Conventions for DoomKit
+# Swift Coding Conventions
 
 *Last updated: November 16, 2025*
 
-This document establishes comprehensive coding standards and style guidelines for the DoomKit Swift Package. These conventions ensure consistency, maintainability, and adherence to Swift best practices across the entire codebase.
+This document establishes comprehensive coding standards and style guidelines for Swift packages. These conventions ensure consistency, maintainability, and adherence to Swift best practices across the entire codebase.
 
 ---
 
@@ -59,7 +59,7 @@ import CoreLocation
 ### Single Responsibility
 
 - **One primary type per file** (exceptions for small, tightly-coupled helper types)
-- File name must match the primary type name: `ProcessManager.swift` contains `ProcessManager` class
+- File name must match the primary type name: `FooManager.swift` contains `FooManager` class
 - Place closely related types in the same file only when they form a cohesive unit
 
 ---
@@ -76,10 +76,10 @@ import CoreLocation
 
 ```swift
 // CORRECT: PascalCase for types
-public class ProcessManager { }
+public class FooManager { }
 public struct Location { }
-public enum ProcessQuality { }
-public protocol ProcessController { }
+public enum FooQuality { }
+public protocol FooController { }
 
 // INCORRECT
 public class processManager { }  // Wrong case
@@ -91,19 +91,19 @@ public struct location { }       // Wrong case
 ```swift
 // CORRECT: camelCase for properties and variables
 let locationManager = LocationManager()
-var subscriptions: [ProcessSubscription] = []
+var subscriptions: [FooSubscription] = []
 private let updateInterval: TimeInterval = 60
 
 // INCORRECT
 let LocationManager = LocationManager()  // Wrong case
-var Subscriptions: [ProcessSubscription] = []  // Wrong case
+var Subscriptions: [FooSubscription] = []  // Wrong case
 ```
 
 ### Functions & Methods
 
 ```swift
 // CORRECT: camelCase, descriptive action verbs
-func refreshData(for location: Location) async throws -> ProcessSensor?
+func refreshData(for location: Location) async throws -> FooSensor?
 func updateLocation(location: Location) -> Void
 private func significantLocationChange(previous: Location?, current: Location) -> Bool
 
@@ -118,7 +118,7 @@ func location_update() { }  // Snake case
 ```swift
 // CORRECT: Use static let for type-level constants
 public class LocationManager {
-    public static let houseOfWorldCultures = Location(latitude: 52.51889, longitude: 13.36528)
+    public static let exampleLocation = Location(latitude: 37.0, longitude: -122.0)
 }
 
 // CORRECT: camelCase for constant properties
@@ -129,7 +129,7 @@ private let updateInterval: TimeInterval = 60
 
 ```swift
 // CORRECT: PascalCase for enum name, camelCase for cases
-public enum ProcessQuality {
+public enum FooQuality {
     case good
     case uncertain
     case bad
@@ -137,10 +137,10 @@ public enum ProcessQuality {
 }
 
 // CORRECT: Associated value enums
-public enum ProcessSelector: Hashable {
-    case weather(Weather)
+public enum FooSelector: Hashable {
+    case channel(Channel)
     case forecast(Forecast)
-    case covid(Covid)
+    case sample(SampleCategory)
 }
 ```
 
@@ -148,7 +148,7 @@ public enum ProcessSelector: Hashable {
 
 ```swift
 // CORRECT: Use descriptive protocol names
-public protocol ProcessController { }
+public protocol FooController { }
 public protocol LocationManagerDelegate: Identifiable where ID == UUID { }
 
 // CORRECT: Protocol names ending in -able, -ible indicate capability
@@ -163,7 +163,7 @@ protocol Sendable { }  // Standard library example
 
 ```swift
 // CORRECT: Opening brace on same line, closing brace on new line
-public class ProcessManager {
+public class FooManager {
     func updateSubscriptions() {
         for subscription in subscriptions {
             subscription.update(timeout: updateInterval)
@@ -172,7 +172,7 @@ public class ProcessManager {
 }
 
 // INCORRECT
-public class ProcessManager
+public class FooManager
 {  // Opening brace on new line
     func updateSubscriptions()
     {
@@ -191,7 +191,7 @@ public class ProcessManager
 // CORRECT: 4-space indentation
 public init(
     name: String, location: Location, placemark: String?, customData: [String: Any]?,
-    measurements: [ProcessSelector: [ProcessValue<Dimension>]], timestamp: Date?
+    measurements: [FooSelector: [FooValue<Dimension>]], timestamp: Date?
 ) {
     self.name = name
     self.location = location
@@ -233,9 +233,9 @@ public func dataWithRetry(
 
 ```swift
 // CORRECT: Explicit public for exported API
-public class ProcessManager: Identifiable, LocationManagerDelegate {
+public class FooManager: Identifiable, LocationManagerDelegate {
     public let id = UUID()
-    public static let shared = ProcessManager()
+    public static let shared = FooManager()
 
     private let locationManager = LocationManager()  // Internal implementation
     private var location: Location?  // Private state
@@ -265,9 +265,9 @@ public class ProcessManager: Identifiable, LocationManagerDelegate {
 
 ```swift
 // CORRECT: Class with protocol conformance
-public class ProcessManager: Identifiable, LocationManagerDelegate {
+public class FooManager: Identifiable, LocationManagerDelegate {
     public let id = UUID()
-    public static let shared = ProcessManager()
+    public static let shared = FooManager()
 
     private init() {
         // Singleton pattern
@@ -275,8 +275,8 @@ public class ProcessManager: Identifiable, LocationManagerDelegate {
 }
 
 // CORRECT: Subclass with inheritance
-public class WeatherController: ProcessController {
-    public func refreshData(for location: Location) async throws -> ProcessSensor? {
+public class BarController: FooController {
+    public func refreshData(for location: Location) async throws -> FooSensor? {
         // Implementation
     }
 }
@@ -297,10 +297,10 @@ public struct Location: Equatable, Hashable {
 }
 
 // CORRECT: Generic struct with computed properties
-public struct ProcessValue<T: Dimension>: Identifiable {
+public struct FooValue<T: Dimension>: Identifiable {
     public let id = UUID()
     public let value: Measurement<T>
-    public let quality: ProcessQuality
+    public let quality: FooQuality
     public let timestamp: Date
 }
 ```
@@ -309,7 +309,7 @@ public struct ProcessValue<T: Dimension>: Identifiable {
 
 ```swift
 // CORRECT: Simple enum
-public enum ProcessQuality {
+public enum FooQuality {
     case good
     case uncertain
     case bad
@@ -317,17 +317,17 @@ public enum ProcessQuality {
 }
 
 // CORRECT: Enum with raw values
-public enum Weather: Int, CaseIterable {
+public enum Channel: Int, CaseIterable {
     case temperature = 0
     case apparentTemperature = 1
     case dewPoint = 2
 }
 
 // CORRECT: Enum with associated values
-public enum ProcessSelector: Hashable {
-    case weather(Weather)
+public enum FooSelector: Hashable {
+    case channel(Channel)
     case forecast(Forecast)
-    case covid(Covid)
+    case sample(SampleCategory)
 }
 ```
 
@@ -340,8 +340,8 @@ public protocol LocationManagerDelegate: Identifiable where ID == UUID {
 }
 
 // CORRECT: Simple protocol
-public protocol ProcessController {
-    func refreshData(for location: Location) async throws -> ProcessSensor?
+public protocol FooController {
+    func refreshData(for location: Location) async throws -> FooSensor?
 }
 ```
 
@@ -353,12 +353,12 @@ public protocol ProcessController {
 
 ```swift
 // CORRECT: Property declarations with explicit types
-public class ProcessManager {
+public class FooManager {
     public let id = UUID()  // Type inferred from initializer
     private let locationManager = LocationManager()
     private var location: Location?  // Optional type explicit
     private let updateInterval: TimeInterval = 60  // Explicit type
-    private var subscriptions: [ProcessSubscription] = []  // Explicit initialization
+    private var subscriptions: [FooSubscription] = []  // Explicit initialization
 }
 ```
 
@@ -416,10 +416,10 @@ lazy var dateFormatter: DateFormatter = {
 
 ```swift
 // CORRECT: Function signature formatting
-public func refreshData(for location: Location) async throws -> ProcessSensor? {
-    var measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
+public func refreshData(for location: Location) async throws -> FooSensor? {
+    var measurements: [FooSelector: [FooValue<Dimension>]] = [:]
     // Implementation
-    return ProcessSensor(name: "", location: location, measurements: measurements, timestamp: Date.now)
+    return FooSensor(name: "", location: location, measurements: measurements, timestamp: Date.now)
 }
 ```
 
@@ -428,7 +428,7 @@ public func refreshData(for location: Location) async throws -> ProcessSensor? {
 ```swift
 // CORRECT: Descriptive external labels
 func updateLocation(location: Location) -> Void { }
-func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) { }
+func add(subscriber: any FooSubscriber, timeout: TimeInterval) { }
 
 // CORRECT: Omit external label with underscore when appropriate
 func process(_ data: Data) -> Result { }
@@ -455,9 +455,9 @@ public func dataWithRetry(
 
 ```swift
 // CORRECT: Convenience initializers calling designated initializers
-public struct ProcessValue<T: Dimension> {
+public struct FooValue<T: Dimension> {
     // Designated initializer (most comprehensive)
-    public init(value: Measurement<T>, customData: [String: Any]?, quality: ProcessQuality, timestamp: Date) {
+    public init(value: Measurement<T>, customData: [String: Any]?, quality: FooQuality, timestamp: Date) {
         self.value = value
         self.customData = customData
         self.quality = quality
@@ -465,11 +465,11 @@ public struct ProcessValue<T: Dimension> {
     }
 
     // Convenience initializers
-    public init(value: Measurement<T>, quality: ProcessQuality, timestamp: Date) {
+    public init(value: Measurement<T>, quality: FooQuality, timestamp: Date) {
         self.init(value: value, customData: nil, quality: quality, timestamp: timestamp)
     }
 
-    public init(value: Measurement<T>, quality: ProcessQuality) {
+    public init(value: Measurement<T>, quality: FooQuality) {
         self.init(value: value, quality: quality, timestamp: Date.now)
     }
 
@@ -528,7 +528,7 @@ if needsUpdate == true {
 
 ```swift
 // CORRECT: Guard for preconditions and early exits
-guard ReachabilityManager.shared.isConnected else {
+guard NetworkMonitor.shared.isConnected else {
     throw URLError(.notConnectedToInternet)
 }
 
@@ -618,9 +618,9 @@ enum NetworkError: Error {
 
 ```swift
 // CORRECT: Function that can throw
-public func refreshData(for location: Location) async throws -> ProcessSensor? {
-    let weather = try await WeatherService.shared.weather(for: clLocation)
-    // Process weather data
+public func refreshData(for location: Location) async throws -> FooSensor? {
+    let payload = try await RemoteDataService.shared.fetch(for: clLocation)
+    // Process remote payload
     return sensor
 }
 ```
@@ -673,10 +673,10 @@ let config = try! Configuration.load()  // Only if guaranteed to succeed
 
 ```swift
 // CORRECT: Async function declaration
-public func refreshData(for location: Location) async throws -> ProcessSensor? {
-    let weather = try await WeatherService.shared.weather(for: clLocation)
+public func refreshData(for location: Location) async throws -> FooSensor? {
+    let payload = try await RemoteDataService.shared.fetch(for: clLocation)
     let placemark = await LocationManager.reverseGeocodeLocation(location: location)
-    return ProcessSensor(/* ... */)
+    return FooSensor(/* ... */)
 }
 ```
 
@@ -720,9 +720,9 @@ actor NetworkManager {
 
 ```swift
 // CORRECT: @unchecked Sendable for custom Dimension types
-public class UnitRadiation: Dimension, @unchecked Sendable {
-    public static let sieverts = UnitRadiation(
-        symbol: "Sv/h",
+public class UnitExample: Dimension, @unchecked Sendable {
+    public static let baseUnits = UnitExample(
+        symbol: "units",
         converter: UnitConverterLinear(coefficient: 1.0)
     )
 }
@@ -745,8 +745,8 @@ for await value in asyncSequence {
 
 ```swift
 // CORRECT: Protocol with requirements
-public protocol ProcessController {
-    func refreshData(for location: Location) async throws -> ProcessSensor?
+public protocol FooController {
+    func refreshData(for location: Location) async throws -> FooSensor?
 }
 
 // CORRECT: Protocol with associated type constraints
@@ -759,14 +759,14 @@ public protocol LocationManagerDelegate: Identifiable where ID == UUID {
 
 ```swift
 // CORRECT: Conformance in type definition
-public class ProcessManager: Identifiable, LocationManagerDelegate {
+public class FooManager: Identifiable, LocationManagerDelegate {
     // Implementation
 }
 
 // CORRECT: Conformance in extension (when appropriate)
-extension ProcessManager: CustomStringConvertible {
+extension FooManager: CustomStringConvertible {
     public var description: String {
-        return "ProcessManager with \(subscriptions.count) subscriptions"
+        return "FooManager with \(subscriptions.count) subscriptions"
     }
 }
 ```
@@ -793,22 +793,22 @@ extension Location: Equatable, Hashable {
 
 ```swift
 // CORRECT: Organize extensions by purpose
-// File: ProcessManager.swift
+// File: FooManager.swift
 
-public class ProcessManager {
+public class FooManager {
     // Core implementation
 }
 
 // MARK: - LocationManagerDelegate
-extension ProcessManager: LocationManagerDelegate {
+extension FooManager: LocationManagerDelegate {
     public func locationManager(didUpdateLocation location: Location) {
         // Implementation
     }
 }
 
 // MARK: - Subscription Management
-extension ProcessManager {
-    public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) {
+extension FooManager {
+    public func add(subscriber: any FooSubscriber, timeout: TimeInterval) {
         // Implementation
     }
 }
@@ -822,10 +822,10 @@ extension ProcessManager {
 
 ```swift
 // CORRECT: Generic struct with type constraints
-public struct ProcessValue<T: Dimension>: Identifiable {
+public struct FooValue<T: Dimension>: Identifiable {
     public let id = UUID()
     public let value: Measurement<T>
-    public let quality: ProcessQuality
+    public let quality: FooQuality
 }
 ```
 
@@ -853,9 +853,9 @@ protocol Container {
 
 ```swift
 // CORRECT: Using 'any' for existential types
-private var subscribers: [UUID: any ProcessSubscriber] = [:]
+private var subscribers: [UUID: any FooSubscriber] = [:]
 
-public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) {
+public func add(subscriber: any FooSubscriber, timeout: TimeInterval) {
     subscribers[subscriber.id] = subscriber
 }
 ```
@@ -869,7 +869,7 @@ public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) {
 ```swift
 // CORRECT: Comment explains why, not what
 // Check if device is connected before attempting network request
-guard ReachabilityManager.shared.isConnected else {
+guard NetworkMonitor.shared.isConnected else {
     throw URLError(.notConnectedToInternet)
 }
 
@@ -892,7 +892,7 @@ self.location = location
 ```swift
 // CORRECT: DocC-style documentation
 /// A simple and fast logging facility with support for different log levels and detailed timestamps.
-public class Trace {
+public class Logger {
     /// Represents different log levels
     public enum Level: String {
         case debug = "DEBUG"
@@ -920,20 +920,20 @@ public class Trace {
 
 ```swift
 // CORRECT: Use MARK to organize code sections
-public class WeatherController {
+public class BarController {
     // MARK: - Properties
-    private let service = WeatherService.shared
+    private let service = RemoteDataService.shared
 
     // MARK: - Initialization
     public init() { }
 
     // MARK: - Public Methods
-    public func refreshData(for location: Location) async throws -> ProcessSensor? {
+    public func refreshData(for location: Location) async throws -> FooSensor? {
         // Implementation
     }
 
     // MARK: - Private Helpers
-    private func processWeatherData(_ data: WeatherData) -> ProcessSensor {
+    private func processRemotePayload(_ data: RemotePayload) -> FooSensor {
         // Implementation
     }
 }
@@ -942,7 +942,7 @@ public class WeatherController {
 ### TODO/FIXME Comments
 
 ```swift
-// TODO: Implement caching mechanism for weather data
+// TODO: Implement caching mechanism for remote data
 // FIXME: Handle edge case when location is exactly on boundary
 // NOTE: This assumes the API always returns valid data
 ```
@@ -955,9 +955,9 @@ public class WeatherController {
 
 ```swift
 // CORRECT: Blank line between logical sections
-public class ProcessManager {
+public class FooManager {
     public let id = UUID()
-    public static let shared = ProcessManager()
+    public static let shared = FooManager()
 
     private let locationManager = LocationManager()
     private var location: Location?
@@ -985,8 +985,8 @@ for i in 0..<count { }
 let range = 0...10
 
 // CORRECT: No space before colon, space after
-var measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
-func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) { }
+var measurements: [FooSelector: [FooValue<Dimension>]] = [:]
+func add(subscriber: any FooSubscriber, timeout: TimeInterval) { }
 
 // INCORRECT
 let values=[1,2,3,4]  // Missing spaces
@@ -1012,7 +1012,7 @@ func process() {
 
 ```swift
 // CORRECT: Single empty line at end of file
-public class ProcessManager {
+public class FooManager {
     // Implementation
 }
 
@@ -1050,16 +1050,16 @@ let value = optionalValue!  // Only if guaranteed non-nil
 
 ```swift
 // CORRECT: Let Swift infer obvious types
-let manager = ProcessManager.shared
+let manager = FooManager.shared
 let id = UUID()
 let values = [1, 2, 3]
 
 // CORRECT: Explicit types for clarity
 let timeout: TimeInterval = 60
-let measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
+let measurements: [FooSelector: [FooValue<Dimension>]] = [:]
 
 // AVOID: Redundant type annotations
-let manager: ProcessManager = ProcessManager.shared  // Type obvious
+let manager: FooManager = FooManager.shared  // Type obvious
 ```
 
 ### Closures
@@ -1090,11 +1090,11 @@ UIView.animate(withDuration: 0.3) {
 
 ```swift
 // CORRECT: Array initialization
-var subscriptions: [ProcessSubscription] = []
+var subscriptions: [FooSubscription] = []
 let values = [1, 2, 3, 4, 5]
 
 // CORRECT: Dictionary initialization
-var measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
+var measurements: [FooSelector: [FooValue<Dimension>]] = [:]
 let dict = ["key": "value"]
 
 // CORRECT: Set initialization
@@ -1113,7 +1113,7 @@ let evenNumbers = largeArray.lazy.filter { $0 % 2 == 0 }
 
 ```swift
 // CORRECT: Custom property wrapper usage
-@Published var measurements: [ProcessValue<Dimension>] = []
+@Published var measurements: [FooValue<Dimension>] = []
 
 // CORRECT: UserDefaults property wrapper
 @AppStorage("refreshInterval") var refreshInterval: TimeInterval = 60
@@ -1127,26 +1127,26 @@ let evenNumbers = largeArray.lazy.filter { $0 % 2 == 0 }
 
 ```swift
 // CORRECT: Controller pattern
-public class WeatherController: ProcessController {
-    public func refreshData(for location: Location) async throws -> ProcessSensor? {
+public class BarController: FooController {
+    public func refreshData(for location: Location) async throws -> FooSensor? {
         // Fetch data from service
-        // Process into ProcessSensor
+        // Process into FooSensor
         // Return structured data
     }
 }
 
 // CORRECT: Service pattern (stateless)
-public class CovidService {
-    static func fetchDistricts(for location: Location, radius: Double) async throws -> Data? {
+public class FooService {
+    static func fetchRegions(for location: Location, radius: Double) async throws -> Data? {
         // Perform HTTP request
         // Return raw data
     }
 }
 
 // CORRECT: Transformer pattern
-public class WeatherTransformer: ProcessTransformer {
-    override public func renderCurrent(measurements: [ProcessSelector: [ProcessValue<Dimension>]])
-        -> [ProcessSelector: ProcessValue<Dimension>] {
+public class BarTransformer: DataTransformer {
+    override public func renderCurrent(measurements: [FooSelector: [FooValue<Dimension>]])
+        -> [FooSelector: FooValue<Dimension>] {
         // Transform raw measurements into current values
     }
 }
@@ -1158,57 +1158,57 @@ public class WeatherTransformer: ProcessTransformer {
 // Service (HTTP) → Controller (Parse) → Transformer (Process) → Consumer (Display)
 
 // 1. Service: Fetch raw data
-let data = try await CovidService.fetchIncidence(id: districtId)
+let data = try await FooService.fetchSample(id: regionId)
 
 // 2. Controller: Parse and structure
 let sensor = try await controller.refreshData(for: location)
 
 // 3. Transformer: Process for display
-let transformer = WeatherTransformer()
+let transformer = BarTransformer()
 try transformer.renderData(sensor: sensor)
 
-// 4. Consumer uses: transformer.current, transformer.faceplate, etc.
+// 4. Consumer uses: transformer.current, transformer.displaySnapshot, etc.
 ```
 
 ### Process Architecture
 
 ```swift
-// CORRECT: ProcessValue with quality assessment
+// CORRECT: FooValue with quality assessment
 let temperature = Measurement<Dimension>(value: 20.5, unit: UnitTemperature.celsius)
-let processValue = ProcessValue(value: temperature, quality: .good, timestamp: Date.now)
+let processValue = FooValue(value: temperature, quality: .good, timestamp: Date.now)
 
-// CORRECT: ProcessSensor with measurements
-let sensor = ProcessSensor(
-    name: "Weather Station",
+// CORRECT: FooSensor with measurements
+let sensor = FooSensor(
+    name: "Example Station",
     location: location,
-    placemark: "Berlin, Germany",
+    placemark: "Example City, Region",
     customData: ["icon": "cloud.sun"],
     measurements: measurements,
     timestamp: Date.now
 )
 
-// CORRECT: ProcessSelector for data organization
-measurements[.weather(.temperature)] = [processValue]
-measurements[.weather(.humidity)] = [humidityValue]
+// CORRECT: FooSelector for data organization
+measurements[.channel(.temperature)] = [processValue]
+measurements[.channel(.humidity)] = [humidityValue]
 ```
 
 ### Custom Units Pattern
 
 ```swift
 // CORRECT: Custom Dimension subclass with @unchecked Sendable
-public class UnitRadiation: Dimension, @unchecked Sendable {
-    public static let sieverts = UnitRadiation(
-        symbol: "Sv/h",
+public class UnitExample: Dimension, @unchecked Sendable {
+    public static let baseUnits = UnitExample(
+        symbol: "units",
         converter: UnitConverterLinear(coefficient: 1.0)
     )
 
-    public static let microsieverts = UnitRadiation(
-        symbol: "µSv/h",
+    public static let microUnits = UnitExample(
+        symbol: "µunits",
         converter: UnitConverterLinear(coefficient: 0.000001)
     )
 
     override public class func baseUnit() -> Self {
-        return sieverts as! Self
+        return baseUnits as! Self
     }
 }
 ```
@@ -1216,14 +1216,14 @@ public class UnitRadiation: Dimension, @unchecked Sendable {
 ### Subscription Pattern
 
 ```swift
-// CORRECT: ProcessManager subscription system
-public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) {
-    subscriptions.append(ProcessSubscription(id: subscriber.id, timeout: timeout * 60))
+// CORRECT: FooManager subscription system
+public func add(subscriber: any FooSubscriber, timeout: TimeInterval) {
+    subscriptions.append(FooSubscription(id: subscriber.id, timeout: timeout * 60))
     subscribers[subscriber.id] = subscriber
 }
 
-// CORRECT: ProcessSubscriber protocol implementation
-public protocol ProcessSubscriber: Identifiable {
+// CORRECT: FooSubscriber protocol implementation
+public protocol FooSubscriber: Identifiable {
     func refreshData(location: Location) async
     func resetData() async
 }
@@ -1256,7 +1256,7 @@ extension URLSession {
     ) async throws -> (Data, URLResponse) {
         var lastError: Error?
 
-        guard ReachabilityManager.shared.isConnected else {
+        guard NetworkMonitor.shared.isConnected else {
             throw URLError(.notConnectedToInternet)
         }
 
@@ -1279,12 +1279,12 @@ extension URLSession {
 ### Logging Pattern
 
 ```swift
-// CORRECT: Use Trace utility for structured logging
-trace.debug("Fetching covid measurement districts...")
+// CORRECT: Use Logger utility for structured logging
+logger.debug("Fetching sample measurement regions...")
 let data = try await service.fetch()
-trace.debug("Fetched covid measurement districts.")
+logger.debug("Fetched sample measurement regions.")
 
-trace.error("Failed to parse response: \(error)")
+logger.error("Failed to parse response: \(error)")
 ```
 
 ### Platform Independence

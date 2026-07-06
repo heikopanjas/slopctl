@@ -4,7 +4,7 @@ description: C++ coding conventions covering RAII, naming, class design, modern 
 license: MIT
 metadata:
   author: Heiko Panjas
-  version: "1.0"
+  version: "1.1"
 ---
 
 # C++ Coding Conventions
@@ -174,11 +174,11 @@ It covers RAII, naming, class structure, modern C++ features, documentation, and
 
 **Naming Conventions:**
 
-- **Types** (classes, structs, enums, typedefs): Upper PascalCase (e.g., `Episode`, `MediaType`)
+- **Types** (classes, structs, enums, typedefs): Upper PascalCase (e.g., `Record`, `ContentType`)
 - **Functions/methods**: Upper PascalCase (e.g., `GetTitle`, `SetDuration`, `ParseInput`)
-- **Variables and function parameters**: camelCase (e.g., `bufferSize`, `episodeCount`)
+- **Variables and function parameters**: camelCase (e.g., `bufferSize`, `recordCount`)
 - **Member variables**: camelCase with underscore postfix (e.g., `dataSize_`, `title_`)
-- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_EPISODE_LENGTH`, `DEFAULT_TIMEOUT`)
+- **Constants**: UPPER_SNAKE_CASE (e.g., `MAX_TITLE_LENGTH`, `DEFAULT_TIMEOUT`)
 - **Namespaces**: lowercase (e.g., `myproject`, `utils`)
 - **Template parameters**: Single uppercase letter or PascalCase (e.g., `T`, `ValueType`)
 - Remove redundant prefixes from class names (e.g., use `Model` instead of `LibModel`)
@@ -369,11 +369,11 @@ It covers RAII, naming, class structure, modern C++ features, documentation, and
   // Usage: Color::Red
 
   // Acceptable: Traditional enum with prefix
-  enum MediaType
+  enum ContentType
   {
-      MEDIA_TYPE_AUDIO,
-      MEDIA_TYPE_VIDEO,
-      MEDIA_TYPE_SUBTITLE
+      CONTENT_TYPE_TEXT,
+      CONTENT_TYPE_IMAGE,
+      CONTENT_TYPE_BINARY
   };
   ```
 
@@ -444,8 +444,8 @@ It covers RAII, naming, class structure, modern C++ features, documentation, and
 - Examples:
 
   ```cpp
-  /// \brief Sets the episode title
-  /// \param title The new title for the episode
+  /// \brief Sets the record title
+  /// \param title The new title for the record
   void SetTitle(const std::string& title);
 
   // Implementation comment explaining reasoning

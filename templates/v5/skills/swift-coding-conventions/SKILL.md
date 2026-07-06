@@ -4,7 +4,7 @@ description: Swift coding conventions covering naming, access control, concurren
 license: MIT
 metadata:
   author: Heiko Panjas
-  version: "2.1"
+  version: "2.2"
 ---
 
 # Swift Coding Conventions
@@ -81,7 +81,7 @@ if let location = self.location {
 
 // CORRECT: SwiftUI branch that uses the unwrapped value
 if let store {
-    TheDrowningRootView(store: store)
+    FooRootView(store: store)
 }
 else if let errorMessage {
     Text(errorMessage)
@@ -89,7 +89,7 @@ else if let errorMessage {
 
 // INCORRECT: explicit nil check followed by force unwrap
 if store != nil {
-    TheDrowningRootView(store: store!)
+    FooRootView(store: store!)
 }
 
 ### **IMPORTANT**: Explicit `self.` and `Self.` qualification for member access
@@ -197,7 +197,7 @@ let regions = values.filter { value in
 ### **IMPORTANT**: One primary type per file
 
 - **Each top-level `class`, `struct`, `enum`, or `actor` MUST live in its own `.swift` file.**
-- **File name MUST match the type name** (PascalCase): `CovidPresenter.swift` contains `CovidPresenter`; `ProcessManager.swift` contains `ProcessManager`.
+- **File name MUST match the type name** (PascalCase): `FooPresenter.swift` contains `FooPresenter`; `FooManager.swift` contains `FooManager`.
 - This applies equally to domain types, presenters, services, views (`struct …: View`), and actors — not only classes.
 - **Do not bundle** sibling top-level types into one file because they are empty subclasses, thin wrappers, co-located DTOs, or “related” helpers.
 
@@ -210,22 +210,22 @@ let regions = values.filter { value in
 
 ```swift
 // INCORRECT: multiple top-level classes in one file
-open class ProcessDataPresenter: ProcessPresenter {}
-public final class WeatherPresenter: ProcessDataPresenter {}
-public final class CovidPresenter: ProcessDataPresenter {}
+open class BasePresenter: AbstractPresenter {}
+public final class BarPresenter: BasePresenter {}
+public final class FooPresenter: BasePresenter {}
 
 // INCORRECT: multiple top-level structs/enums in one file
 enum TimeSeriesInterval { case hourly }
 struct TimeSeriesPoint { let value: Double }
-class ARIMAPredictor {}
+class ExamplePredictor {}
 ```
 
 ```swift
 // CORRECT: one primary type per file
-// File: CovidPresenter.swift
+// File: FooPresenter.swift
 @MainActor
 @Observable
-public final class CovidPresenter: ProcessDataPresenter {}
+public final class FooPresenter: BasePresenter {}
 
 // File: TimeSeriesPoint.swift
 struct TimeSeriesPoint {
@@ -234,7 +234,7 @@ struct TimeSeriesPoint {
 }
 ```
 
-**Protocols:** prefer one primary protocol per file when the protocol is a shared contract (`ProcessControllerProtocol.swift`). Multiple small related protocols in one file is discouraged; split when each protocol is consumed independently.
+**Protocols:** prefer one primary protocol per file when the protocol is a shared contract (`FooControllerProtocol.swift`). Multiple small related protocols in one file is discouraged; split when each protocol is consumed independently.
 
 **Extensions:** `TypeName+Feature.swift` is allowed for extensions on an existing type defined elsewhere; the extension file must not introduce additional top-level types.
 
@@ -250,10 +250,10 @@ struct TimeSeriesPoint {
 
 ```swift
 // CORRECT: PascalCase for types
-public class ProcessManager {}
+public class FooManager {}
 public struct Location {}
-public enum ProcessQuality {}
-public protocol ProcessController {}
+public enum FooQuality {}
+public protocol FooController {}
 
 // INCORRECT
 public class processManager {}  // Wrong case
@@ -265,19 +265,19 @@ public struct location {}       // Wrong case
 ```swift
 // CORRECT: camelCase for properties and variables
     let locationManager = LocationManager()
-    var subscriptions: [ProcessSubscription] = []
+    var subscriptions: [FooSubscription] = []
     private let updateInterval: TimeInterval = 60
 
 // INCORRECT
     let LocationManager = LocationManager()  // Wrong case
-    var Subscriptions: [ProcessSubscription] = []  // Wrong case
+    var Subscriptions: [FooSubscription] = []  // Wrong case
 ```
 
 ### Functions & Methods
 
 ```swift
 // CORRECT: camelCase, descriptive action verbs
-    func refreshData(for location: Location) async throws -> ProcessSensor?
+    func refreshData(for location: Location) async throws -> FooSensor?
     func updateLocation(location: Location) -> Void
     private func significantLocationChange(previous: Location?, current: Location) -> Bool
 
@@ -294,7 +294,7 @@ public struct location {}       // Wrong case
 protocol Sendable {}  // Standard library example
 
 // INCORRECT: Use descriptive protocol names
-public protocol ProcessController {}
+public protocol FooController {}
 public protocol LocationManagerDelegate: Identifiable where ID == UUID {}
 ```
 
@@ -322,7 +322,7 @@ public protocol LocationManagerDelegate: Identifiable where ID == UUID {}
 
 ```swift
 // CORRECT: Opening brace on same line, closing brace on new line
-public class ProcessManager {
+public class FooManager {
     func updateSubscriptions() {
         // Implementation
     }
@@ -331,7 +331,7 @@ public class ProcessManager {
 }
 
 // INCORRECT: Opening brace on new line, closing brace on new line
-public class ProcessManager
+public class FooManager
 {
     func updateSubscriptions() {
         // Implementation
@@ -439,11 +439,11 @@ public func dataWithRetry(
 ```swift
 // CORRECT: Descriptive external labels
 func updateLocation(location: Location) -> Void {}
-func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) -> Void {}
+func add(subscriber: any FooSubscriber, timeout: TimeInterval) -> Void {}
 
 // INCORRECT: Incomplete or non-descriptive external labels
 func updateLocation(loc: Location) -> Void {}
-func add(s: any ProcessSubscriber, t: TimeInterval) -> Void {}
+func add(s: any FooSubscriber, t: TimeInterval) -> Void {}
 ```
 
 ### Default Parameters
@@ -533,7 +533,7 @@ if needsUpdate == true && location != nil {
 
 ```swift
 // CORRECT: Guard for preconditions and early exits
-guard ReachabilityManager.shared.isConnected == true else {
+guard NetworkMonitor.shared.isConnected == true else {
     throw URLError(.notConnectedToInternet)
 }
 
@@ -659,20 +659,20 @@ let config = try! Configuration.load()  // Not guaranteed to succeed
 
 ```swift
 // CORRECT: Organize extensions by purpose
-// File: ProcessManager.swift
+// File: FooManager.swift
 
-public class ProcessManager {
+public class FooManager {
     // Core implementation
 }
 
-extension ProcessManager: LocationManagerDelegate {
+extension FooManager: LocationManagerDelegate {
     public func locationManager(didUpdateLocation location: Location) -> Void {
         // Implementation
     }
 }
 
-extension ProcessManager {
-    public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) -> Void {
+extension FooManager {
+    public func add(subscriber: any FooSubscriber, timeout: TimeInterval) -> Void {
         // Implementation
     }
 }
@@ -684,10 +684,10 @@ extension ProcessManager {
 
 ```swift
 // CORRECT: Generic struct with type constraints
-public struct ProcessValue<T: Dimension>: Identifiable {
+public struct FooValue<T: Dimension>: Identifiable {
     public let id = UUID()
     public let value: Measurement<T>
-    public let quality: ProcessQuality
+    public let quality: FooQuality
 }
 ```
 
@@ -715,9 +715,9 @@ protocol Container {
 
 ```swift
 // CORRECT: Using 'any' for existential types
-private var subscribers: [UUID: any ProcessSubscriber] = [:]
+private var subscribers: [UUID: any FooSubscriber] = [:]
 
-public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) -> Void {
+public func add(subscriber: any FooSubscriber, timeout: TimeInterval) -> Void {
     subscribers[subscriber.id] = subscriber
 }
 ```
@@ -729,7 +729,7 @@ public func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) -> Voi
 ```swift
 // CORRECT: Comment explains why, not what
 // Check if device is connected before attempting network request
-guard ReachabilityManager.shared.isConnected == true else {
+guard NetworkMonitor.shared.isConnected == true else {
     throw URLError(.notConnectedToInternet)
 }
 
@@ -743,7 +743,7 @@ self.location = location
 ```swift
 // CORRECT: DocC-style documentation
 /// A simple and fast logging facility with support for different log levels and detailed timestamps.
-public class Trace {
+public class Logger {
     /// Represents different log levels
     public enum Level: String {
         case debug = "DEBUG"
@@ -765,7 +765,7 @@ public class Trace {
 ### TODO/FIXME Comments
 
 ```swift
-// TODO: Implement caching mechanism for weather data
+// TODO: Implement caching mechanism for remote data
 // FIXME: Handle edge case when location is exactly on boundary
 // NOTE: This assumes the API always returns valid data
 ```
@@ -776,9 +776,9 @@ public class Trace {
 
 ```swift
 // CORRECT: Blank line between logical sections
-public class ProcessManager {
+public class FooManager {
     public let id = UUID()
-    public static let shared = ProcessManager()
+    public static let shared = FooManager()
 
     private let locationManager = LocationManager()
     private var location: Location?
@@ -793,9 +793,9 @@ public class ProcessManager {
 }
 
 // INCORRECT: No blank line between logical sections
-public class ProcessManager {
+public class FooManager {
     public let id = UUID()
-    public static let shared = ProcessManager()
+    public static let shared = FooManager()
     private let locationManager = LocationManager()
     private var location: Location?
 
@@ -831,13 +831,13 @@ for i in 0..<count { }
 let range = 0...10
 
 // CORRECT:
-var measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
-func add(subscriber: any ProcessSubscriber, timeout: TimeInterval) -> Void {}
+var measurements: [FooSelector: [FooValue<Dimension>]] = [:]
+func add(subscriber: any FooSubscriber, timeout: TimeInterval) -> Void {}
 var dict: [String: Int]  // Spaces before colons
 
 // INCORRECT:
-var measurements : [ProcessSelector : [ProcessValue<Dimension>]] = [ : ]
-func add(subscriber : any ProcessSubscriber, timeout : TimeInterval) -> Void { }
+var measurements : [FooSelector : [FooValue<Dimension>]] = [ : ]
+func add(subscriber : any FooSubscriber, timeout : TimeInterval) -> Void { }
 var dict : [String : Int]  // Spaces before colons
 ```
 
@@ -875,16 +875,16 @@ let value = optionalValue!
 
 ```swift
 // CORRECT: Let Swift infer obvious types
-let manager = ProcessManager.shared
+let manager = FooManager.shared
 let id = UUID()
 let values = [1, 2, 3]
 
 // CORRECT: Explicit types for clarity
 let timeout: TimeInterval = 60
-let measurements: [ProcessSelector: [ProcessValue<Dimension>]] = [:]
+let measurements: [FooSelector: [FooValue<Dimension>]] = [:]
 
 // INCORRECT: Redundant type annotations
-let manager: ProcessManager = ProcessManager.shared  // Type obvious
+let manager: FooManager = FooManager.shared  // Type obvious
 ```
 
 ### Closures
