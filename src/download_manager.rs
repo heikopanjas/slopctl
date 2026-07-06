@@ -71,6 +71,8 @@ impl DownloadManager
 
         fs::create_dir_all(&self.config_dir)?;
 
+        let mut tarball_cache = github::RepoTarballCache::new();
+
         // Load template configuration
         let config = self.load_template_config(&base_url, &url_path)?;
 
@@ -85,7 +87,11 @@ impl DownloadManager
             match github::download_file(&file_url, &dest_path)
             {
                 | Ok(_) => println!("{}", "✓".green()),
-                | Err(_) => println!("{} (skipped)", "✗".red())
+                | Err(error) =>
+                {
+                    println!("{} ({})", "✗".red(), error);
+                    return Err(error);
+                }
             }
             Ok(())
         };
@@ -145,11 +151,18 @@ impl DownloadManager
             }
         }
 
-        // Download skill directories (local-path only; URL skills are fetched at install time)
+        // Copy bundled skill directories from a single template-repo tarball
         let skill_sources = Self::collect_local_skill_sources(&config);
         for source in &skill_sources
         {
-            self.download_skill_directory(&parsed, source)?;
+            self.copy_template_skill_from_tarball(&mut tarball_cache, &parsed, source)?;
+        }
+
+        // Cache URL-based skills from one tarball fetch per external repository
+        let url_skill_sources = Self::collect_url_skill_sources(&config);
+        for source in &url_skill_sources
+        {
+            self.download_url_skill_to_cache(&mut tarball_cache, source)?;
         }
 
         println!("{} Templates downloaded successfully", "✓".green());
@@ -290,78 +303,83 @@ impl DownloadManager
         sources
     }
 
-    /// Downloads a skill directory from the GitHub repository into the global template cache
-    ///
-    /// Uses the GitHub Contents API to list directory contents, then downloads each file
-    /// preserving the directory structure under `config_dir`.
-    ///
-    /// # Arguments
-    ///
-    /// * `parsed` - Parsed GitHub URL of the template repository
-    /// * `source` - Relative path to the skill directory within the repo
-    fn download_skill_directory(&self, parsed: &github::GitHubUrl, source: &str) -> Result<()>
+    /// Collects deduplicated URL-based skill sources from all config sections
+    fn collect_url_skill_sources(config: &TemplateConfig) -> Vec<String>
     {
-        let skill_url = if parsed.path.is_empty() == true
+        let mut seen = HashSet::new();
+        let mut sources = Vec::new();
+
+        let all_skills = config
+            .skills
+            .iter()
+            .chain(config.agents.values().flat_map(|a| &a.skills))
+            .chain(config.languages.values().flat_map(|l| &l.skills))
+            .chain(config.shared.values().flat_map(|s| &s.skills));
+
+        for skill in all_skills
         {
-            github::GitHubUrl { owner: parsed.owner.clone(), repo: parsed.repo.clone(), branch: parsed.branch.clone(), path: source.to_string() }
+            if github::is_url(&skill.source) == true && seen.insert(skill.source.clone()) == true
+            {
+                sources.push(skill.source.clone());
+            }
+        }
+
+        sources
+    }
+
+    /// Copies a bundled skill directory from the template repository tarball
+    fn copy_template_skill_from_tarball(&self, cache: &mut github::RepoTarballCache, parsed: &github::GitHubUrl, source: &str) -> Result<()>
+    {
+        let key = github::RepoTarballKey::from_github_url(parsed);
+        let repo_root = cache.repo_root(&key)?;
+        let skill_src = repo_root.join(github::repo_relative_template_path(parsed, source));
+        let skill_dest = self.config_dir.join(source);
+
+        print!("{} Caching {}... ", "→".blue(), source.yellow());
+        io::stdout().flush()?;
+
+        if skill_src.is_dir() == false
+        {
+            return Err(anyhow::anyhow!("Skill source not found in repository tarball: {}", skill_src.display()));
+        }
+
+        github::copy_skill_tree(&skill_src, &skill_dest)?;
+        println!("{}", "✓".green());
+        Ok(())
+    }
+
+    /// Downloads a URL-based skill repository into `config_dir/skills/<name>/`
+    fn download_url_skill_to_cache(&self, cache: &mut github::RepoTarballCache, source: &str) -> Result<()>
+    {
+        let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL for skill cache: {}", source))?;
+
+        println!("{} Caching skills from {}...", "→".blue(), source.yellow());
+
+        let key = github::RepoTarballKey::from_github_url(&parsed);
+        let repo_root = cache.repo_root(&key)?;
+        let search_root = if parsed.path.is_empty() == true
+        {
+            repo_root.to_path_buf()
         }
         else
         {
-            github::GitHubUrl {
-                owner:  parsed.owner.clone(),
-                repo:   parsed.repo.clone(),
-                branch: parsed.branch.clone(),
-                path:   format!("{}/{}", parsed.path, source)
-            }
+            repo_root.join(&parsed.path)
         };
 
-        print!("{} Downloading {}... ", "→".blue(), source.yellow());
-        io::stdout().flush()?;
-
-        let entries = match github::list_directory_contents(&skill_url)
+        let discovered = github::discover_skills_in_dir(&search_root);
+        if discovered.is_empty() == true
         {
-            | Ok(entries) => entries,
-            | Err(_) =>
-            {
-                println!("{} (skipped)", "✗".red());
-                return Ok(());
-            }
-        };
+            println!("{} No skills found (no SKILL.md) at {}", "!".yellow(), source.yellow());
+            return Ok(());
+        }
 
-        println!("{}", "✓".green());
-        self.download_skill_entries(&entries, &skill_url, source)
-    }
-
-    /// Recursively downloads skill directory entries into the global template cache
-    fn download_skill_entries(&self, entries: &[github::GitHubContentEntry], parent_url: &github::GitHubUrl, rel_path: &str) -> Result<()>
-    {
-        for entry in entries
+        for (skill_name, skill_path) in discovered
         {
-            let entry_path = format!("{}/{}", rel_path, entry.name);
-
-            if entry.entry_type == "file" &&
-                let Some(ref dl_url) = entry.download_url
-            {
-                let dest_path = self.config_dir.join(&entry_path);
-
-                print!("  {} Downloading {}... ", "→".blue(), entry_path.yellow());
-                io::stdout().flush()?;
-
-                match github::download_file(dl_url, &dest_path)
-                {
-                    | Ok(_) => println!("{}", "✓".green()),
-                    | Err(_) => println!("{} (skipped)", "✗".red())
-                }
-            }
-            else if entry.entry_type == "dir"
-            {
-                let child_url = parent_url.child(&entry.name);
-                match github::list_directory_contents(&child_url)
-                {
-                    | Ok(sub_entries) => self.download_skill_entries(&sub_entries, &child_url, &entry_path)?,
-                    | Err(e) => println!("  {} Skipping {}: {}", "!".yellow(), entry.name.yellow(), e)
-                }
-            }
+            let dest = self.config_dir.join("skills").join(&skill_name);
+            print!("{} Caching skill '{}'... ", "→".blue(), skill_name.green());
+            io::stdout().flush()?;
+            github::copy_skill_tree(&skill_path, &dest)?;
+            println!("{}", "✓".green());
         }
 
         Ok(())
@@ -511,25 +529,72 @@ mod tests
     }
 
     #[test]
-    fn test_download_skill_entries_via_hook() -> anyhow::Result<()>
+    fn test_collect_url_skill_sources_collects_urls()
+    {
+        let mut config = empty_config();
+        config.skills = vec![make_skill("local", "skills/local-skill"), make_skill("remote", "https://github.com/user/repo")];
+
+        let sources = DownloadManager::collect_url_skill_sources(&config);
+        assert_eq!(sources, vec!["https://github.com/user/repo"]);
+    }
+
+    #[test]
+    fn test_download_url_skill_to_cache_uses_no_list_hook() -> anyhow::Result<()>
     {
         let config_dir = tempfile::TempDir::new()?;
+        let tarball = build_test_github_tarball("fake-skill", b"# Fake skill\n");
 
-        let _hook = github::set_test_hooks(Box::new(|_url| Ok(vec![])), Box::new(|_url| Ok(b"# Skill content\n".to_vec())));
-
-        let entries = vec![github::GitHubContentEntry {
-            name:         "SKILL.md".to_string(),
-            entry_type:   "file".to_string(),
-            download_url: Some("https://raw.githubusercontent.com/test/repo/main/skills/test/SKILL.md".to_string()),
-            path:         "skills/test/SKILL.md".to_string()
-        }];
-
-        let parent_url = github::GitHubUrl { owner: "test".into(), repo: "repo".into(), branch: "main".into(), path: "skills/test".into() };
+        let _tarball_hook = github::set_tarball_test_hook(Box::new(move |_owner, _repo, _branch| Ok(tarball.clone())));
+        let _hooks =
+            github::set_test_hooks(Box::new(|_url| panic!("list_directory_contents must not be called during tarball skill cache")), Box::new(|_url| Ok(vec![])));
 
         let dm = DownloadManager::new(config_dir.path().to_path_buf());
-        dm.download_skill_entries(&entries, &parent_url, "skills/test")?;
+        let mut cache = github::RepoTarballCache::new();
+        dm.download_url_skill_to_cache(&mut cache, "https://github.com/user/repo/tree/main")?;
 
-        assert!(config_dir.path().join("skills/test/SKILL.md").exists() == true);
+        assert!(config_dir.path().join("skills/fake-skill/SKILL.md").exists() == true);
         Ok(())
+    }
+
+    #[test]
+    fn test_copy_template_skill_from_tarball_via_hook() -> anyhow::Result<()>
+    {
+        let config_dir = tempfile::TempDir::new()?;
+        let tarball = build_test_github_tarball_at("templates/v5/skills/fake-skill/SKILL.md", b"# Fake skill\n");
+
+        let _tarball_hook = github::set_tarball_test_hook(Box::new(move |_owner, _repo, _branch| Ok(tarball.clone())));
+
+        let parsed = github::GitHubUrl { owner: "user".into(), repo: "repo".into(), branch: "main".into(), path: "templates/v5".into() };
+
+        let dm = DownloadManager::new(config_dir.path().to_path_buf());
+        let mut cache = github::RepoTarballCache::new();
+        dm.copy_template_skill_from_tarball(&mut cache, &parsed, "skills/fake-skill")?;
+
+        assert!(config_dir.path().join("skills/fake-skill/SKILL.md").exists() == true);
+        Ok(())
+    }
+
+    /// Builds a GitHub-style tarball containing a file at `repo_relative_path`
+    fn build_test_github_tarball_at(repo_relative_path: &str, content: &[u8]) -> Vec<u8>
+    {
+        use flate2::{Compression, write::GzEncoder};
+
+        let gz = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = tar::Builder::new(gz);
+        let path = format!("owner-repo-deadbeef/{}", repo_relative_path);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_cksum();
+        builder.append_data(&mut header, &path, content).expect("append file to tarball");
+        builder.finish().expect("finish tarball");
+        builder.into_inner().expect("unwrap gzip encoder").finish().expect("finish gzip")
+    }
+
+    /// Builds a GitHub-style tarball with a skill directory at the repository root
+    fn build_test_github_tarball(skill_name: &str, skill_content: &[u8]) -> Vec<u8>
+    {
+        build_test_github_tarball_at(&format!("{}/SKILL.md", skill_name), skill_content)
     }
 }
