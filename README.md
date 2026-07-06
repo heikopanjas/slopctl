@@ -771,6 +771,39 @@ slopctl merge --list-models                      # List available models from th
 
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 
+### `update` - Refresh Individual Files or Skills
+
+Refresh one or more individual template files or skills from the global catalog without reinstalling a language's entire file set. This is useful when only a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) needs to be brought up to date.
+
+`update` reuses the same resolution pipeline as `init`, so files and skills are routed to the same locations they were originally installed to. The scope defaults to the installed language (from the FileTracker) and the agents detected in the workspace; override with `--lang`/`--agent`. Selected targets are overwritten directly. A locally customized or untracked target is skipped with an error unless `--force` is given.
+
+When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
+
+This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs a language's *complete* set).
+
+**Usage:**
+
+```bash
+slopctl update --skill rust-coding-conventions      # Refresh a single skill
+slopctl update --file .rustfmt.toml                 # Refresh a single file
+slopctl update --skill git-workflow --file .gitattributes  # Refresh several at once
+slopctl update --file .editorconfig --lang rust     # Override the language scope
+slopctl update --skill init-session --agent cursor  # Override the agent scope
+slopctl update --file .rustfmt.toml --force         # Overwrite a customized file
+slopctl update --skill git-workflow --dry-run       # Preview without writing
+```
+
+**Options:**
+
+- `--file <path>` - Workspace file path to refresh (repeatable)
+- `--skill` / `-s <name>` - Skill name to refresh (repeatable)
+- `--lang` / `-l` - Language scope override (defaults to the installed language)
+- `--agent` / `-a` - AI coding agent scope override (defaults to detected agents)
+- `--force` / `-f` - Overwrite locally customized or untracked files
+- `--dry-run` / `-n` - Preview changes without applying them
+
+At least one `--file` or `--skill` must be provided. `AGENTS.md` cannot be refreshed as a single file (it is fragment-merged); use `merge` or `init` instead.
+
 ### `config` - Manage Configuration
 
 Manage persistent configuration settings using Git-style dotted keys.

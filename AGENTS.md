@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-06-21 (v21.1.8)
+**Last updated:** 2026-07-06 (v21.3.0)
 
 <!-- {mission} -->
 
@@ -819,6 +819,29 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-06 (v21.3.0, skill refresh stale file pruning)
+
+- Enhanced `slopctl update --skill <name>` to prune slopctl-tracked skill files that were removed upstream from the template source
+- After resolving the new source file set for each requested skill, any tracked skill file whose target is absent from the new set is deleted from disk and removed from the FileTracker
+- User-added untracked files inside the skill directory are preserved; only slopctl-managed tracked files are pruned
+- A locally modified stale tracked file is blocked unless `--force` is given, matching the overwrite guard for refreshed targets
+- Dry-run output includes a separate "would be removed (stale)" section for pruned files
+- Added `collect_stale_skill_files()` helper in `src/template_manager/partial_update.rs`; added 4 regression tests (upstream removal, untracked preservation, modified stale requires force, dry-run)
+- Version bump: 21.2.0 to 21.3.0 (MINOR — new cleanup behavior on skill refresh)
+
+### 2026-07-06 (v21.2.0, partial update command)
+
+- Added a new `update` subcommand that refreshes individual template files (`--file <path>`) or skills (`--skill <name>`) from the global catalog, instead of reinstalling a language's whole set
+- Motivation: users frequently need to bring a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) up to date without touching the rest of the installed language set
+- Selectors are repeatable; at least one `--file` or `--skill` is required
+- Scope defaults to the installed language (FileTracker) and detected agents; overridable via `--lang`/`--agent`. Selected targets are overwritten directly; a customized or untracked target is skipped unless `--force` is given
+- `AGENTS.md` is rejected as a `--file` target (it is fragment-merged, carried in `ResolvedFiles.context`, not `files`); users are pointed to `merge`/`init`
+- Implementation reuses `TemplateEngine::resolve_all_files()` for correct routing (native vs cross-client skill dirs, includes, shared groups); it resolves once per effective agent and unions candidates by target path, keeping each `ResolvedFiles` alive so GitHub-downloaded temp sources survive until copy
+- New `src/template_manager/partial_update.rs` with `TemplateManager::update_partial`; added `Commands::Update` in `src/cli.rs` and its dispatch arm in `src/main.rs`
+- Added 6 unit tests using synthetic fixtures (bogus agent, Rust++ language): file refresh, skill refresh, force guard, unknown selector, dry-run, AGENTS.md rejection
+- Known limitation: a skill refresh copies current source files over; files removed upstream from a skill are not deleted
+- Version bump: 21.1.8 to 21.2.0 (MINOR — new subcommand)
 
 ### 2026-06-21 (v21.1.8, de-brand template example code)
 
