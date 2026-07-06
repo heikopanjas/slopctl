@@ -161,7 +161,7 @@ agents:
 
     fn init(&self, agent: Option<&str>, lang: Option<&str>) -> anyhow::Result<()>
     {
-        let options = UpdateOptions { lang, agent, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions { lang, agent, mission: None, force: false, dry_run: false, partial: None, local_cache_only: false };
         self.manager().update(&options)
     }
 
