@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v21.3.3)
+**Last updated:** 2026-07-06 (v21.5.0)
 
 <!-- {mission} -->
 
@@ -12,7 +12,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
-- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
+- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
 - **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
@@ -94,7 +94,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
-- GitHub tokens for API access are read from environment only, never stored in config files
+- GitHub API access is unauthenticated (no tokens or credentials); unauthenticated limits apply (~60 REST requests/hour per IP, plus raw.githubusercontent.com throttling)
 - Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
@@ -819,6 +819,25 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-06 (v21.5.0, GitHub rate-limit mitigation)
+
+- Replaced recursive GitHub Contents API skill downloads with **one tarball fetch per repository** during `templates --update` and URL-based `init` skill installs; tarball extraction uses pure-Rust `flate2` + `tar` (macOS/Linux/Windows, no shell `tar`)
+- Added shared `reqwest` HTTP client with 429/503 retry and `Retry-After` backoff; raw file downloads throttled to reduce burst 429s; download failures now propagate instead of being silently skipped
+- Added `RepoTarballCache` for per-run deduplication of tarball downloads; `discover_skills_in_dir()` walks extracted trees locally for `SKILL.md`
+- Corrected Security section: GitHub access is unauthenticated (no tokens); removed inaccurate "GitHub tokens read from environment" line
+- Added regression tests: retry after 429, tarball extract, local skill discovery, tarball-based cache without Contents API listing
+- Version bump: 21.4.0 to 21.5.0 (MINOR — new download strategy + retry behavior)
+
+### 2026-07-06 (v21.4.0, scoped cache-only partial update)
+
+- `slopctl update` now reads only from the local global template cache; it no longer discovers or downloads skills from GitHub during resolve
+- Partial update resolves only the selected `--file` / `--skill` targets instead of the full installed language skill set (eliminates misleading install output and spurious GitHub traffic)
+- `templates --update` now caches URL-based skills into `skills/<name>/` under the global template directory (previously URL skills were skipped and fetched only at `init` time)
+- Added `PartialSelectors` and `local_cache_only` to `UpdateOptions`; `resolve_all_files()` branches on partial scope in `src/template_engine.rs`
+- Added `collect_url_skill_sources()` and `download_url_skill_to_cache()` in `src/download_manager.rs`
+- Added 4 regression tests in `partial_update.rs` (skill-only scope, lang file untouched, missing cache error, no GitHub hooks) plus `collect_url_skill_sources` test
+- Version bump: 21.3.3 to 21.4.0 (MINOR — update behavior change + templates URL skill caching)
 
 ### 2026-07-06 (v21.3.3, restore require! in Rust template)
 

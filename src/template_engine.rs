@@ -5,7 +5,7 @@
 //! Follows the agents.md standard: one AGENTS.md file that works across all agents.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Write},
     path::{Path, PathBuf}
@@ -24,6 +24,15 @@ use crate::{
 /// Template marker comment used to detect unmerged template files
 pub const TEMPLATE_MARKER: &str = "<!-- SLOPCTL-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
 
+/// Selectors for partial workspace refresh (`slopctl update --file` / `--skill`)
+pub struct PartialSelectors<'a>
+{
+    /// Workspace-relative or absolute file paths to refresh
+    pub files:  &'a HashSet<String>,
+    /// Skill directory names to refresh
+    pub skills: &'a HashSet<String>
+}
+
 /// Options for the template update operation
 ///
 /// Aggregates CLI parameters that are passed through the update call chain.
@@ -31,15 +40,19 @@ pub const TEMPLATE_MARKER: &str = "<!-- SLOPCTL-TEMPLATE: This marker indicates 
 pub struct UpdateOptions<'a>
 {
     /// Programming language or framework identifier (None = no language setup)
-    pub lang:    Option<&'a str>,
+    pub lang:             Option<&'a str>,
     /// AI coding agent identifier (None = no agent-specific files)
-    pub agent:   Option<&'a str>,
+    pub agent:            Option<&'a str>,
     /// Custom mission statement to override template default
-    pub mission: Option<&'a str>,
+    pub mission:          Option<&'a str>,
     /// Force overwrite of local modifications without warning
-    pub force:   bool,
+    pub force:            bool,
     /// Preview changes without applying them
-    pub dry_run: bool
+    pub dry_run:          bool,
+    /// When set, resolve only matching files and/or skills (partial update command)
+    pub partial:          Option<&'a PartialSelectors<'a>>,
+    /// When true, read only from the global template cache (no remote fetches)
+    pub local_cache_only: bool
 }
 
 /// Context for the main AGENTS.md template and its fragments
@@ -351,11 +364,17 @@ impl<'a> TemplateEngine<'a>
     /// Resolves a source string to a local file path
     ///
     /// If the source is a URL, downloads it to the temp directory and returns
-    /// the temp path. Otherwise, joins it with config_dir for local lookup.
-    fn resolve_source_to_path(&self, source: &str, temp_dir: &Path) -> Result<PathBuf>
+    /// the temp path unless `local_cache_only` is set. Otherwise, joins it with
+    /// `config_dir` for local lookup.
+    fn resolve_source_to_path(&self, source: &str, temp_dir: &Path, local_cache_only: bool) -> Result<PathBuf>
     {
         if github::is_url(source) == true
         {
+            require!(
+                local_cache_only == false,
+                Err(anyhow::anyhow!("Template source '{}' is not in the local template cache. Run 'slopctl templates --update' first.", source))
+            );
+
             let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL: {}", source))?;
 
             let filename = source.rsplit('/').next().unwrap_or("downloaded");
@@ -383,6 +402,53 @@ impl<'a> TemplateEngine<'a>
         {
             Ok(self.config_dir.join(source))
         }
+    }
+
+    /// Returns the cached skill directory for a skill name under the global template cache
+    fn cached_skill_dir(&self, skill_name: &str) -> PathBuf
+    {
+        self.config_dir.join("skills").join(skill_name)
+    }
+
+    /// Returns true when a skill definition matches a partial-update skill selector
+    fn skill_definition_matches_partial(&self, skill: &bom::SkillDefinition, requested: &HashSet<String>) -> bool
+    {
+        requested.iter().any(|name| skill.derive_name() == name.as_str() || (github::is_url(&skill.source) == true && self.cached_skill_dir(name).is_dir() == true))
+    }
+
+    /// Builds `(skill_name, source)` install pairs for a skill definition under partial selectors
+    fn skill_install_pairs_for_partial(&self, skill: &bom::SkillDefinition, requested: &HashSet<String>) -> Vec<(String, String)>
+    {
+        if github::is_url(&skill.source) == true
+        {
+            requested.iter().filter(|name| self.cached_skill_dir(name).is_dir() == true).map(|name| (name.clone(), skill.source.clone())).collect()
+        }
+        else if requested.contains(skill.derive_name()) == true
+        {
+            vec![(skill.derive_name().to_string(), skill.source.clone())]
+        }
+        else
+        {
+            Vec::new()
+        }
+    }
+
+    /// Returns true when a resolved workspace target matches a partial file selector
+    fn target_matches_partial_files(&self, target: &Path, partial_files: &HashSet<String>, workspace: &Path) -> bool
+    {
+        let normalized_target = normalize_path(target);
+        partial_files.iter().any(|requested| {
+            let raw = Path::new(requested.as_str());
+            let resolved = if raw.is_absolute() == true
+            {
+                normalize_path(raw)
+            }
+            else
+            {
+                normalize_path(&workspace.join(raw))
+            };
+            resolved == normalized_target
+        })
     }
 
     /// Resolves all files, fragments, and directories from templates.yml for the given options
@@ -443,211 +509,450 @@ impl<'a> TemplateEngine<'a>
         let temp_dir = tempfile::TempDir::new()?;
 
         let main_config = config.main.as_ref().ok_or_else(|| anyhow::anyhow!("Missing 'main' section in templates.yml"))?;
-        let main_source = self.resolve_source_to_path(&main_config.source, temp_dir.path())?;
-        if main_source.exists() == false
+        let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
+        let skill_only_partial = options.partial.is_some_and(|partial| partial.files.is_empty() == true && partial.skills.is_empty() == false);
+        let main_source = if skill_only_partial == true || options.local_cache_only == true
+        {
+            self.config_dir.join(&main_config.source)
+        }
+        else
+        {
+            self.resolve_source_to_path(&main_config.source, temp_dir.path(), false)?
+        };
+
+        if options.partial.is_none() == true && main_source.exists() == false
         {
             return Err(anyhow::anyhow!("Main template not found: {}", main_source.display()));
         }
-        let main_target = self.resolve_placeholder(&main_config.target, &workspace, &userprofile);
 
         let mut files_to_copy: Vec<ResolvedFile> = Vec::new();
         let mut fragments: Vec<(PathBuf, String)> = Vec::new();
-
+        let mut directories_to_create: Vec<PathBuf> = Vec::new();
         let temp_path = temp_dir.path();
-        let mut process_errors: Vec<String> = Vec::new();
-        let mut process_entry = |source: &str, target: &str, category: &str, lang: &str, agent: &str| {
-            let source_path = if github::is_url(source) == true
-            {
-                match self.resolve_source_to_path(source, temp_path)
+        let local_cache_only = options.local_cache_only;
+
+        if let Some(partial) = options.partial
+        {
+            let mut process_errors: Vec<String> = Vec::new();
+            let mut process_entry = |source: &str, target: &str, category: &str, lang: &str, agent: &str| {
+                let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
+                if self.target_matches_partial_files(&target_path, partial.files, &workspace) == false
                 {
-                    | Ok(p) => p,
-                    | Err(e) =>
+                    return;
+                }
+
+                let source_path = if github::is_url(source) == true
+                {
+                    if local_cache_only == true
                     {
-                        process_errors.push(format!("Failed to download {}: {}", source, e));
+                        process_errors.push(format!("Template source '{}' is not in the local template cache. Run 'slopctl templates --update' first.", source));
                         return;
                     }
-                }
-            }
-            else
-            {
-                self.config_dir.join(source)
-            };
-
-            if source_path.exists() == false
-            {
-                return;
-            }
-
-            if target.starts_with("$instructions")
-            {
-                fragments.push((source_path, category.to_string()));
-            }
-            else
-            {
-                let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
-                files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
-            }
-        };
-
-        for entry in &config.preamble
-        {
-            process_entry(&entry.source, &entry.target, "preamble", LANG_NONE, AGENT_ALL);
-        }
-
-        for entry in &config.principles
-        {
-            process_entry(&entry.source, &entry.target, "principles", LANG_NONE, AGENT_ALL);
-        }
-
-        if options.mission.is_none() == true
-        {
-            for entry in &config.mission
-            {
-                process_entry(&entry.source, &entry.target, "mission", LANG_NONE, AGENT_ALL);
-            }
-        }
-
-        if let Some(lang) = options.lang
-        {
-            let resolved_files = bom::resolve_language_files(lang, &config)?;
-            for file_entry in &resolved_files
-            {
-                process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
-            }
-        }
-
-        for integration_config in config.integration.values()
-        {
-            for file_entry in &integration_config.files
-            {
-                process_entry(&file_entry.source, &file_entry.target, "integration", LANG_NONE, AGENT_ALL);
-            }
-        }
-
-        let mut directories_to_create: Vec<PathBuf> = Vec::new();
-
-        if let Some(agent_name) = options.agent
-        {
-            for marker_dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &workspace)
-            {
-                if directories_to_create.contains(&marker_dir) == false
-                {
-                    directories_to_create.push(marker_dir);
-                }
-            }
-        }
-
-        if let Some(agent_name) = options.agent &&
-            let Some(agent_config) = config.agents.get(agent_name)
-        {
-            for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
-            {
-                let source_path = match self.resolve_source_to_path(&entry.source, temp_path)
-                {
-                    | Ok(p) => p,
-                    | Err(e) =>
+                    match self.resolve_source_to_path(source, temp_path, false)
                     {
-                        println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
-                        continue;
+                        | Ok(p) => p,
+                        | Err(e) =>
+                        {
+                            process_errors.push(format!("Failed to download {}: {}", source, e));
+                            return;
+                        }
                     }
+                }
+                else
+                {
+                    self.config_dir.join(source)
                 };
 
-                if source_path.exists()
+                if source_path.exists() == false
                 {
-                    let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: LANG_NONE.to_string(), agent: agent_name.to_string() });
-                }
-            }
-
-            for dir_entry in &agent_config.directories
-            {
-                let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
-                if directories_to_create.contains(&dir_path) == false
-                {
-                    directories_to_create.push(dir_path);
-                }
-            }
-        }
-
-        for err in &process_errors
-        {
-            println!("{} {}", "!".yellow(), err.yellow());
-        }
-
-        let agent_skill_dir = options
-            .agent
-            .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
-            .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
-        let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
-
-        // AgentDefaults is the only source of truth for deciding whether non-agent
-        // skills belong in the cross-agent directory or the selected agent's native dir.
-        let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, a) == false);
-        let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
-
-        if let Some(agent_name) = options.agent &&
-            let Some(agent_config) = config.agents.get(agent_name) &&
-            agent_config.skills.is_empty() == false &&
-            let Some(ref default_dir) = agent_skill_dir
-        {
-            for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-            {
-                self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, agent_name, &mut files_to_copy)?;
-            }
-        }
-
-        if let Some(lang) = options.lang
-        {
-            let lang_skills = bom::resolve_language_skills(lang, &config)?;
-            if lang_skills.is_empty() == false
-            {
-                for (dir, group) in self.group_skills_by_target(&lang_skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-                {
-                    self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, lang, AGENT_ALL, &mut files_to_copy)?;
-                }
-            }
-        }
-
-        if config.skills.is_empty() == false
-        {
-            for (dir, group) in self.group_skills_by_target(&config.skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
-            {
-                self.install_skills(group.iter().map(|s| (s.derive_name(), s.source.as_str())), &dir, temp_path, LANG_NONE, AGENT_ALL, &mut files_to_copy)?;
-            }
-        }
-
-        // Migrate any skills already in .agents/skills/ into the agent's native skill
-        // dir when the agent doesn't read the cross-client path. This ensures Claude and
-        // Vibe users don't lose access to skills that were previously installed without
-        // an agent specified.
-        //
-        // Load the existing tracker to preserve each skill's original `lang` attribution.
-        // Without this, language skills (e.g. lang: "swift") are stamped LANG_NONE and
-        // `remove --lang swift` can no longer find the adopted copies via tracker sweep.
-        let existing_tracker = FileTracker::new(&workspace).ok();
-
-        if native_only_agent == true &&
-            let Some(ref native_dir) = agent_skill_dir &&
-            cross_client_skill_dir.is_dir() == true &&
-            let Ok(entries) = std::fs::read_dir(&cross_client_skill_dir)
-        {
-            for entry in entries.flatten()
-            {
-                if entry.path().is_dir() == true
-                {
-                    let mut skill_files: Vec<PathBuf> = Vec::new();
-                    crate::utils::collect_files_recursive(&entry.path(), &mut skill_files)?;
-                    for src in skill_files
+                    if local_cache_only == true
                     {
-                        // Preserve the full relative path under the skill name.
-                        if let Ok(relative) = src.strip_prefix(&cross_client_skill_dir)
+                        process_errors.push(format!("Template file '{}' not found in local template cache. Run 'slopctl templates --update' first.", source));
+                    }
+                    return;
+                }
+
+                if target.starts_with("$instructions") == true
+                {
+                    fragments.push((source_path, category.to_string()));
+                }
+                else
+                {
+                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
+                }
+            };
+
+            if partial.files.is_empty() == false
+            {
+                if let Some(lang) = options.lang
+                {
+                    let resolved_files = bom::resolve_language_files(lang, &config)?;
+                    for file_entry in &resolved_files
+                    {
+                        process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
+                    }
+                }
+
+                for integration_config in config.integration.values()
+                {
+                    for file_entry in &integration_config.files
+                    {
+                        process_entry(&file_entry.source, &file_entry.target, "integration", LANG_NONE, AGENT_ALL);
+                    }
+                }
+
+                if let Some(agent_name) = options.agent &&
+                    let Some(agent_config) = config.agents.get(agent_name)
+                {
+                    for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
+                    {
+                        let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                        if self.target_matches_partial_files(&target_path, partial.files, &workspace) == false
                         {
-                            let target = native_dir.join(relative);
-                            if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
+                            continue;
+                        }
+
+                        let source_path = if github::is_url(&entry.source) == true
+                        {
+                            if local_cache_only == true
                             {
-                                let lang =
-                                    existing_tracker.as_ref().and_then(|t| t.get_metadata(&src)).map(|m| m.lang.clone()).unwrap_or_else(|| LANG_NONE.to_string());
-                                files_to_copy.push(ResolvedFile { source: src, target, lang, agent: AGENT_ALL.to_string() });
+                                process_errors
+                                    .push(format!("Template source '{}' is not in the local template cache. Run 'slopctl templates --update' first.", entry.source));
+                                continue;
+                            }
+                            match self.resolve_source_to_path(&entry.source, temp_path, false)
+                            {
+                                | Ok(p) => p,
+                                | Err(e) =>
+                                {
+                                    process_errors.push(format!("Failed to download {}: {}", entry.source, e));
+                                    continue;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            self.config_dir.join(&entry.source)
+                        };
+
+                        if source_path.exists() == true
+                        {
+                            files_to_copy.push(ResolvedFile {
+                                source: source_path,
+                                target: target_path,
+                                lang:   LANG_NONE.to_string(),
+                                agent:  agent_name.to_string()
+                            });
+                        }
+                        else if local_cache_only == true
+                        {
+                            process_errors
+                                .push(format!("Template file '{}' not found in local template cache. Run 'slopctl templates --update' first.", entry.source));
+                        }
+                    }
+                }
+            }
+
+            if partial.skills.is_empty() == false
+            {
+                let agent_skill_dir = options
+                    .agent
+                    .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
+                    .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
+                let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
+
+                if let Some(agent_name) = options.agent &&
+                    let Some(agent_config) = config.agents.get(agent_name) &&
+                    agent_config.skills.is_empty() == false &&
+                    let Some(ref default_dir) = agent_skill_dir
+                {
+                    let filtered: Vec<bom::SkillDefinition> =
+                        agent_config.skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
+                    for (dir, group) in self.group_skills_by_target(&filtered, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                    {
+                        let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
+                        self.install_skills(
+                            pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+                            &dir,
+                            temp_path,
+                            LANG_NONE,
+                            agent_name,
+                            local_cache_only,
+                            &mut files_to_copy
+                        )?;
+                    }
+                }
+
+                if let Some(lang) = options.lang
+                {
+                    let lang_skills = bom::resolve_language_skills(lang, &config)?;
+                    let filtered: Vec<bom::SkillDefinition> =
+                        lang_skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
+                    if filtered.is_empty() == false
+                    {
+                        for (dir, group) in self.group_skills_by_target(&filtered, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                        {
+                            let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
+                            self.install_skills(
+                                pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+                                &dir,
+                                temp_path,
+                                lang,
+                                AGENT_ALL,
+                                local_cache_only,
+                                &mut files_to_copy
+                            )?;
+                        }
+                    }
+                }
+
+                if config.skills.is_empty() == false
+                {
+                    let filtered: Vec<bom::SkillDefinition> =
+                        config.skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
+                    if filtered.is_empty() == false
+                    {
+                        for (dir, group) in self.group_skills_by_target(&filtered, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                        {
+                            let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
+                            self.install_skills(
+                                pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+                                &dir,
+                                temp_path,
+                                LANG_NONE,
+                                AGENT_ALL,
+                                local_cache_only,
+                                &mut files_to_copy
+                            )?;
+                        }
+                    }
+                }
+            }
+
+            if process_errors.is_empty() == false
+            {
+                return Err(anyhow::anyhow!("{}", process_errors.join("\n")));
+            }
+        }
+        else
+        {
+            let mut process_errors: Vec<String> = Vec::new();
+            let mut process_entry = |source: &str, target: &str, category: &str, lang: &str, agent: &str| {
+                let source_path = if github::is_url(source) == true
+                {
+                    match self.resolve_source_to_path(source, temp_path, local_cache_only)
+                    {
+                        | Ok(p) => p,
+                        | Err(e) =>
+                        {
+                            process_errors.push(format!("Failed to download {}: {}", source, e));
+                            return;
+                        }
+                    }
+                }
+                else
+                {
+                    self.config_dir.join(source)
+                };
+
+                if source_path.exists() == false
+                {
+                    return;
+                }
+
+                if target.starts_with("$instructions")
+                {
+                    fragments.push((source_path, category.to_string()));
+                }
+                else
+                {
+                    let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
+                    files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: lang.to_string(), agent: agent.to_string() });
+                }
+            };
+
+            for entry in &config.preamble
+            {
+                process_entry(&entry.source, &entry.target, "preamble", LANG_NONE, AGENT_ALL);
+            }
+
+            for entry in &config.principles
+            {
+                process_entry(&entry.source, &entry.target, "principles", LANG_NONE, AGENT_ALL);
+            }
+
+            if options.mission.is_none() == true
+            {
+                for entry in &config.mission
+                {
+                    process_entry(&entry.source, &entry.target, "mission", LANG_NONE, AGENT_ALL);
+                }
+            }
+
+            if let Some(lang) = options.lang
+            {
+                let resolved_files = bom::resolve_language_files(lang, &config)?;
+                for file_entry in &resolved_files
+                {
+                    process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
+                }
+            }
+
+            for integration_config in config.integration.values()
+            {
+                for file_entry in &integration_config.files
+                {
+                    process_entry(&file_entry.source, &file_entry.target, "integration", LANG_NONE, AGENT_ALL);
+                }
+            }
+
+            if let Some(agent_name) = options.agent
+            {
+                for marker_dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &workspace)
+                {
+                    if directories_to_create.contains(&marker_dir) == false
+                    {
+                        directories_to_create.push(marker_dir);
+                    }
+                }
+            }
+
+            if let Some(agent_name) = options.agent &&
+                let Some(agent_config) = config.agents.get(agent_name)
+            {
+                for entry in agent_config.instructions.iter().chain(&agent_config.prompts)
+                {
+                    let source_path = match self.resolve_source_to_path(&entry.source, temp_path, local_cache_only)
+                    {
+                        | Ok(p) => p,
+                        | Err(e) =>
+                        {
+                            println!("{} Failed to resolve {}: {}", "!".yellow(), entry.source, e);
+                            continue;
+                        }
+                    };
+
+                    if source_path.exists()
+                    {
+                        let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
+                        files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: LANG_NONE.to_string(), agent: agent_name.to_string() });
+                    }
+                }
+
+                for dir_entry in &agent_config.directories
+                {
+                    let dir_path = self.resolve_placeholder(&dir_entry.target, &workspace, &userprofile);
+                    if directories_to_create.contains(&dir_path) == false
+                    {
+                        directories_to_create.push(dir_path);
+                    }
+                }
+            }
+
+            for err in &process_errors
+            {
+                println!("{} {}", "!".yellow(), err.yellow());
+            }
+
+            let agent_skill_dir = options
+                .agent
+                .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
+                .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
+            let cross_client_skill_dir = self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, &workspace, &userprofile);
+
+            // AgentDefaults is the only source of truth for deciding whether non-agent
+            // skills belong in the cross-agent directory or the selected agent's native dir.
+            let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, a) == false);
+            let non_agent_skill_dir = self.default_non_agent_skill_dir(options.agent, &agent_catalog, &workspace, &userprofile);
+
+            if let Some(agent_name) = options.agent &&
+                let Some(agent_config) = config.agents.get(agent_name) &&
+                agent_config.skills.is_empty() == false &&
+                let Some(ref default_dir) = agent_skill_dir
+            {
+                for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                {
+                    self.install_skills(
+                        group.iter().map(|s| (s.derive_name(), s.source.as_str())),
+                        &dir,
+                        temp_path,
+                        LANG_NONE,
+                        agent_name,
+                        local_cache_only,
+                        &mut files_to_copy
+                    )?;
+                }
+            }
+
+            if let Some(lang) = options.lang
+            {
+                let lang_skills = bom::resolve_language_skills(lang, &config)?;
+                if lang_skills.is_empty() == false
+                {
+                    for (dir, group) in self.group_skills_by_target(&lang_skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                    {
+                        self.install_skills(
+                            group.iter().map(|s| (s.derive_name(), s.source.as_str())),
+                            &dir,
+                            temp_path,
+                            lang,
+                            AGENT_ALL,
+                            local_cache_only,
+                            &mut files_to_copy
+                        )?;
+                    }
+                }
+            }
+
+            if config.skills.is_empty() == false
+            {
+                for (dir, group) in self.group_skills_by_target(&config.skills, &non_agent_skill_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                {
+                    self.install_skills(
+                        group.iter().map(|s| (s.derive_name(), s.source.as_str())),
+                        &dir,
+                        temp_path,
+                        LANG_NONE,
+                        AGENT_ALL,
+                        local_cache_only,
+                        &mut files_to_copy
+                    )?;
+                }
+            }
+
+            // Migrate any skills already in .agents/skills/ into the agent's native skill
+            // dir when the agent doesn't read the cross-client path. This ensures Claude and
+            // Vibe users don't lose access to skills that were previously installed without
+            // an agent specified.
+            //
+            // Load the existing tracker to preserve each skill's original `lang` attribution.
+            // Without this, language skills (e.g. lang: "swift") are stamped LANG_NONE and
+            // `remove --lang swift` can no longer find the adopted copies via tracker sweep.
+            let existing_tracker = FileTracker::new(&workspace).ok();
+
+            if native_only_agent == true &&
+                let Some(ref native_dir) = agent_skill_dir &&
+                cross_client_skill_dir.is_dir() == true &&
+                let Ok(entries) = std::fs::read_dir(&cross_client_skill_dir)
+            {
+                for entry in entries.flatten()
+                {
+                    if entry.path().is_dir() == true
+                    {
+                        let mut skill_files: Vec<PathBuf> = Vec::new();
+                        crate::utils::collect_files_recursive(&entry.path(), &mut skill_files)?;
+                        for src in skill_files
+                        {
+                            // Preserve the full relative path under the skill name.
+                            if let Ok(relative) = src.strip_prefix(&cross_client_skill_dir)
+                            {
+                                let target = native_dir.join(relative);
+                                if target.exists() == false && Self::target_already_scheduled(&files_to_copy, &target) == false
+                                {
+                                    let lang =
+                                        existing_tracker.as_ref().and_then(|t| t.get_metadata(&src)).map(|m| m.lang.clone()).unwrap_or_else(|| LANG_NONE.to_string());
+                                    files_to_copy.push(ResolvedFile { source: src, target, lang, agent: AGENT_ALL.to_string() });
+                                }
                             }
                         }
                     }
@@ -1179,58 +1484,57 @@ impl<'a> TemplateEngine<'a>
     /// * `skills` - Iterator of (name, source) pairs
     /// * `skill_base_dir` - Resolved target directory for skills
     /// * `temp_dir` - Temporary directory for GitHub downloads
+    /// * `local_cache_only` - When true, read URL skills from the global cache only
     /// * `files_to_copy` - Accumulator for (source, target) file pairs
-    fn install_skills<'b, I>(&self, skills: I, skill_base_dir: &Path, temp_dir: &Path, lang: &str, agent: &str, files_to_copy: &mut Vec<ResolvedFile>) -> Result<()>
+    #[allow(clippy::too_many_arguments)]
+    fn install_skills<'b, I>(
+        &self, skills: I, skill_base_dir: &Path, temp_dir: &Path, lang: &str, agent: &str, local_cache_only: bool, files_to_copy: &mut Vec<ResolvedFile>
+    ) -> Result<()>
     where I: Iterator<Item = (&'b str, &'b str)>
     {
         for (skill_name, source) in skills
         {
             if github::is_url(source) == true
             {
+                if local_cache_only == true
+                {
+                    let source_dir = self.cached_skill_dir(skill_name);
+                    require!(
+                        source_dir.is_dir() == true,
+                        Err(anyhow::anyhow!("Skill '{}' not found in local template cache. Run 'slopctl templates --update' first.", skill_name))
+                    );
+                    let target_base = skill_base_dir.join(skill_name);
+                    Self::collect_local_skill_files(&source_dir, &target_base, lang, agent, files_to_copy)?;
+                    continue;
+                }
+
                 let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL for skill '{}': {}", skill_name, source))?;
 
-                println!("{} Discovering skills at {}...", "→".blue(), source.yellow());
+                println!("{} Installing skills from {}...", "→".blue(), source.yellow());
 
-                match github::discover_skills(&parsed)
+                let staging = temp_dir.join(format!("repo_{}_{}", parsed.owner, parsed.repo));
+                let repo_root = github::fetch_repo_extracted_into(&parsed.owner, &parsed.repo, &parsed.branch, &staging)?;
+                let search_root = if parsed.path.is_empty() == true
                 {
-                    | Ok(discovered) if discovered.is_empty() == true =>
-                    {
-                        println!("{} No skills found (no SKILL.md) at {}", "!".yellow(), source.yellow());
-                    }
-                    | Ok(discovered) =>
-                    {
-                        for skill in discovered
-                        {
-                            let target_base = skill_base_dir.join(&skill.name);
-                            let prefix = format!("skill_{}", skill.name);
+                    repo_root
+                }
+                else
+                {
+                    repo_root.join(&parsed.path)
+                };
 
-                            println!("{} Installing skill '{}' from GitHub...", "→".blue(), skill.name.green());
+                let discovered = github::discover_skills_in_dir(&search_root);
+                if discovered.is_empty() == true
+                {
+                    println!("{} No skills found (no SKILL.md) at {}", "!".yellow(), source.yellow());
+                    continue;
+                }
 
-                            match github::download_directory_from_entries(skill.entries, &skill.url, temp_dir, &prefix, "")
-                            {
-                                | Ok(downloaded) =>
-                                {
-                                    for (temp_path, rel_path) in downloaded
-                                    {
-                                        files_to_copy.push(ResolvedFile {
-                                            source: temp_path,
-                                            target: target_base.join(rel_path),
-                                            lang:   lang.to_string(),
-                                            agent:  agent.to_string()
-                                        });
-                                    }
-                                }
-                                | Err(e) =>
-                                {
-                                    println!("{} Failed to download skill '{}': {}", "!".yellow(), skill.name, e);
-                                }
-                            }
-                        }
-                    }
-                    | Err(e) =>
-                    {
-                        println!("{} Failed to discover skills at '{}': {}", "!".yellow(), skill_name, e);
-                    }
+                for (name, skill_path) in discovered
+                {
+                    let target_base = skill_base_dir.join(&name);
+                    println!("{} Installing skill '{}' from GitHub...", "→".blue(), name.green());
+                    Self::collect_local_skill_files(&skill_path, &target_base, lang, agent, files_to_copy)?;
                 }
             }
             else
@@ -1256,7 +1560,10 @@ impl<'a> TemplateEngine<'a>
                 if source_dir.is_dir() == true
                 {
                     let target_base = skill_base_dir.join(skill_name);
-                    println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
+                    if local_cache_only == false
+                    {
+                        println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
+                    }
                     Self::collect_local_skill_files(&source_dir, &target_base, lang, agent, files_to_copy)?;
                 }
                 else if source_dir.is_file() == true
@@ -1265,9 +1572,16 @@ impl<'a> TemplateEngine<'a>
                     let target_path = source_dir.file_name().map(|f| target_base.join(f));
                     if let Some(target) = target_path
                     {
-                        println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
+                        if local_cache_only == false
+                        {
+                            println!("{} Installing skill '{}' from {}...", "→".blue(), skill_name.green(), label.yellow());
+                        }
                         files_to_copy.push(ResolvedFile { source: source_dir, target, lang: lang.to_string(), agent: agent.to_string() });
                     }
+                }
+                else if local_cache_only == true
+                {
+                    return Err(anyhow::anyhow!("Skill '{}' not found in local template cache. Run 'slopctl templates --update' first.", skill_name));
                 }
                 else
                 {
@@ -1452,7 +1766,15 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![(frag, "languages".to_string())], template_version: 5 };
-        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1480,7 +1802,15 @@ mod tests
             fragments: vec![(mission_frag, "mission".to_string()), (principles_frag, "principles".to_string()), (lang_frag, "languages".to_string())],
             template_version: 5
         };
-        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1500,7 +1830,15 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1520,7 +1858,15 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: Some("We build CLI tools."), force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            None,
+            mission:          Some("We build CLI tools."),
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1540,7 +1886,15 @@ mod tests
 
         let engine = TemplateEngine::new(dir.path());
         let ctx = TemplateContext { source, target: target.clone(), fragments: vec![], template_version: 5 };
-        let options = UpdateOptions { lang: None, agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         engine.merge_fragments(&ctx, &options)?;
 
@@ -1656,6 +2010,7 @@ agents:
             temp_dir.path(),
             LANG_NONE,
             AGENT_ALL,
+            false,
             &mut files_to_copy
         )?;
 
@@ -1688,6 +2043,7 @@ agents:
             temp_dir.path(),
             LANG_NONE,
             AGENT_ALL,
+            false,
             &mut files_to_copy
         )?;
 
@@ -1736,7 +2092,15 @@ languages:
         write_minimal_templates_yml(config_dir.path())?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("nonexistent"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("nonexistent"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         let result = engine.update(&options);
         assert!(result.is_err() == true);
@@ -1755,7 +2119,15 @@ languages:
         write_minimal_templates_yml(config_dir.path())?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("nonexistent"), agent: None, mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             Some("nonexistent"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         let result = engine.update(&options);
         assert!(result.is_err() == true);
@@ -1777,7 +2149,15 @@ languages:
         fs::write(config_dir.path().join("bogus/instructions.md"), "test")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: true };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          true,
+            partial:          None,
+            local_cache_only: false
+        };
 
         let result = engine.update(&options);
         assert!(result.is_ok() == true);
@@ -1799,7 +2179,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1822,7 +2210,15 @@ languages:
         fs::write(config_dir.path().join("rpp-format.toml"), "max_width = 100")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("Rust++"), agent: None, mission: None, force: false, dry_run: true };
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            None,
+            mission:          None,
+            force:            false,
+            dry_run:          true,
+            partial:          None,
+            local_cache_only: false
+        };
 
         let result = engine.update(&options);
         let _ = std::env::set_current_dir(&original_cwd);
@@ -1862,7 +2258,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1893,7 +2297,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: Some("Rust++"), agent: Some("fake"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             Some("Rust++"),
+            agent:            Some("fake"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1959,7 +2371,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("fake", true, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("fake"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -1990,7 +2410,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -2024,7 +2452,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;
@@ -2064,7 +2500,15 @@ languages:
         }
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("fake"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options)?;
         let plan = engine.preflight_installation(&resolved.context, false, &options, &resolved.files, &resolved.directories, &tracker);
         let _ = std::env::set_current_dir(&original_cwd);
@@ -2196,7 +2640,15 @@ languages:
         fs::write(&target, "# Untracked")?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("fake"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("fake"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let result = engine.update(&options);
         let _ = std::env::set_current_dir(&original_cwd);
 
@@ -2227,7 +2679,15 @@ languages:
         write_synthetic_agent_defaults(config_dir.path(), &[("bogus", false, None)])?;
 
         let engine = TemplateEngine::new(config_dir.path());
-        let options = UpdateOptions { lang: None, agent: Some("bogus"), mission: None, force: false, dry_run: false };
+        let options = UpdateOptions {
+            lang:             None,
+            agent:            Some("bogus"),
+            mission:          None,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
         let resolved = engine.resolve_all_files(&options);
         let _ = std::env::set_current_dir(&original_cwd);
         let resolved = resolved?;

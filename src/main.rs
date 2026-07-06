@@ -527,7 +527,15 @@ fn main()
                 None
             };
 
-            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), force, dry_run };
+            let options = UpdateOptions {
+                lang: lang.as_deref(),
+                agent: agent.as_deref(),
+                mission: resolved_mission.as_deref(),
+                force,
+                dry_run,
+                partial: None,
+                local_cache_only: false
+            };
 
             {
                 if manager.has_global_templates() == false

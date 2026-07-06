@@ -11,7 +11,7 @@ use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
     file_tracker::{AGENT_ALL, FileStatus, FileTracker},
-    template_engine::{self, ResolvedFile, ResolvedFiles, TemplateEngine, UpdateOptions, normalize_path}
+    template_engine::{self, PartialSelectors, ResolvedFile, ResolvedFiles, TemplateEngine, UpdateOptions, normalize_path}
 };
 
 impl TemplateManager
@@ -19,9 +19,10 @@ impl TemplateManager
     /// Refreshes individual template files or skills from the global catalog
     ///
     /// Unlike `init`, which installs a language's complete file set, this refreshes
-    /// only the selected targets. It reuses `TemplateEngine::resolve_all_files()` so
-    /// routing (native vs cross-client skill dirs, includes, shared groups) matches
-    /// what `init` produced. Selected targets are overwritten directly; a locally
+    /// only the selected targets from the local global template cache (no remote fetches).
+    /// It uses scoped `TemplateEngine::resolve_all_files()` so only matching files/skills
+    /// are resolved, while routing (native vs cross-client skill dirs, includes, shared
+    /// groups) matches what `init` produced. Selected targets are overwritten directly; a locally
     /// customized or untracked target is skipped unless `force` is set. When a skill
     /// is refreshed, slopctl-managed files removed upstream are pruned from disk and
     /// the tracker; user-added untracked files inside the skill directory are preserved.
@@ -99,6 +100,11 @@ impl TemplateManager
             }
         };
 
+        // Build partial selectors and resolve only matching targets from the local cache.
+        let file_selectors: HashSet<String> = files.iter().cloned().collect();
+        let skill_selectors: HashSet<String> = skills.iter().cloned().collect();
+        let partial = PartialSelectors { files: &file_selectors, skills: &skill_selectors };
+
         // Build the candidate universe by resolving each effective agent scope and
         // unioning the results. The owned `ResolvedFiles` values are retained so their
         // temp directories (GitHub-downloaded sources) survive until the copy phase.
@@ -106,7 +112,15 @@ impl TemplateManager
         let mut resolved_sets: Vec<ResolvedFiles> = Vec::with_capacity(effective_agents.len());
         for agent_opt in &effective_agents
         {
-            let options = UpdateOptions { lang: effective_lang.as_deref(), agent: agent_opt.as_deref(), mission: None, force, dry_run };
+            let options = UpdateOptions {
+                lang: effective_lang.as_deref(),
+                agent: agent_opt.as_deref(),
+                mission: None,
+                force,
+                dry_run,
+                partial: Some(&partial),
+                local_cache_only: true
+            };
             resolved_sets.push(engine.resolve_all_files(&options)?);
         }
 
@@ -642,6 +656,84 @@ mod tests
         assert!(hook.exists() == true);
         let tracker = FileTracker::new(workspace.path())?;
         assert!(tracker.get_metadata(&hook).is_some() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_partial_skill_only_leaves_language_file_untouched() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let lang_file = workspace.path().join(".rpp.toml");
+        fs::write(&lang_file, "custom = true\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, false)?;
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        assert_eq!(fs::read_to_string(&lang_file)?, "custom = true\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_partial_skill_only_does_not_install_other_skills() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, false)?;
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true);
+        assert!(workspace.path().join(".agents/skills/rpp-conventions/SKILL.md").exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_partial_missing_cached_skill_errors() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        fs::remove_dir_all(config_dir.path().join("skills/git-workflow"))?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        assert!(result.is_err() == true);
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("templates --update") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_partial_local_cache_only_no_github_hook() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let _hook = crate::github::set_test_hooks(
+            Box::new(|_| panic!("update must not call GitHub list_directory_contents")),
+            Box::new(|_| panic!("update must not call GitHub download_file"))
+        );
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, false)?;
+        let _ = std::env::set_current_dir(std::env::temp_dir());
         Ok(())
     }
 }
