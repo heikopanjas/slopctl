@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v22.1.0)
+**Last updated:** 2026-07-06 (v22.1.1)
 
 <!-- {mission} -->
 
@@ -370,6 +370,7 @@ Load the `rust-build-commands` skill when building or running the project.
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
+  - `required_version = "1.9.0"` - Match the pinned nightly rustfmt component
   - `tab_spaces = 4` - Standard indentation
   - `imports_granularity = "Crate"` - Group imports by crate
   - `group_imports = "StdExternalCrate"` - Organize imports logically
@@ -827,6 +828,12 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-06 (v22.1.1, rustfmt pin update)
+
+- Updated `.rustfmt.toml` `required_version` from `1.8.0` to `1.9.0` to match the active nightly rustfmt component
+- Rationale: `cargo fmt --check` rejects mismatched rustfmt versions before checking files, so the pin must track the project toolchain
+- Version bump: 22.1.0 to 22.1.1 (PATCH — tooling configuration fix)
 
 ### 2026-07-06 (v21.5.0, GitHub rate-limit mitigation)
 
