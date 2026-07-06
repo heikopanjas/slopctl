@@ -11,7 +11,7 @@
 - Write self-documenting code with clear naming and structure
 - Leverage the type system for compile-time safety
 - Keep functions focused and modular
-- **DRY (Don't Repeat Yourself)**: Extract shared logic into functions, traits, or structs. When the same pattern appears in 2+ places, factor it out. Use parameter structs (e.g. `DownloadOptions`) to aggregate related arguments rather than passing many individual parameters. Prefer a single source of truth for data rather than duplicating paths in config and code.
+- **DRY (Don't Repeat Yourself)**: Extract shared logic into functions, traits, or structs. When the same pattern appears in 2+ places, factor it out. Use parameter structs (e.g. `LoadOptions`) to aggregate related arguments rather than passing many individual parameters. Prefer a single source of truth for data rather than duplicating paths in config and code.
 
 **Error Handling:**
 
@@ -26,7 +26,7 @@
 
   ```rust
   Err(anyhow!("Config file not found"))
-  Err(anyhow!("Failed to download {}: {}", url, e))
+  Err(anyhow!("Failed to fetch {}: {}", url, e))
   ```
 
 - Use `?` operator for error propagation
@@ -131,7 +131,7 @@
 
   pub use anyhow::Result;
   pub use foo_store::FooStore;
-  pub use utils::copy_dir_all;
+  pub use utils::copy_tree;
   ```
 
 **Functions and Methods:**
@@ -150,18 +150,18 @@
   ```rust
   /// Creates a new FooStore instance
   ///
-  /// Initializes paths to local data and cache directories using the `dirs` crate.
-  /// Records are stored in the local data directory and backups in the cache directory.
+  /// Initializes paths to the primary store and working directories using the `dirs` crate.
+  /// Records are stored in the store directory and snapshots in the working directory.
   ///
   /// # Errors
   ///
-  /// Returns an error if the local data directory cannot be determined
+  /// Returns an error if the store directory cannot be determined
   pub fn new() -> Result<Self>
   ```
 
 - Pass by reference (`&`) for complex types, by value for `Copy` types
 - Use immutable references (`&`) unless mutation is required (`&mut`)
-- Keep function signatures on one line when under max width (167 chars)
+- Keep function signatures on one line when under max width (100 chars)
 - Private helper functions should have single-line doc comments when logic is non-trivial
 
 **Structs and Types:**
@@ -175,12 +175,12 @@
   /// Manages Foo records in the local store
   ///
   /// The `FooStore` handles all operations related to record storage,
-  /// verification, backup, and synchronization. Records are stored in the
-  /// local data directory and backed up to the cache directory before modifications.
+  /// validation and persistence. Records are stored in the store directory
+  /// and written to the working directory before modifications.
   pub struct FooStore
   {
-      config_dir: PathBuf,
-      cache_dir:  PathBuf
+      store_dir: PathBuf,
+      work_dir:  PathBuf
   }
   ```
 
@@ -197,8 +197,8 @@
 **Naming Conventions:**
 
 - Types (structs, enums, traits): Upper PascalCase (e.g., `FooStore`, `BarMapping`, `Result`)
-- Functions/methods: snake_case (e.g., `download_file`, `create_backup`, `load_config`)
-- Variables and function parameters: snake_case (e.g., `config_dir`, `source_path`, `file_name`)
+- Functions/methods: snake_case (e.g., `load_record`, `write_snapshot`, `open_store`)
+- Variables and function parameters: snake_case (e.g., `store_dir`, `source_path`, `file_name`)
 - Constants: UPPER_SNAKE_CASE (e.g., `MAX_WIDTH`, `DEFAULT_TIMEOUT`)
 - Type parameters: Single uppercase letter or PascalCase (e.g., `T`, `E`, `Error`)
 - Lifetimes: Short lowercase names (e.g., `'a`, `'static`)
@@ -252,7 +252,7 @@
 
 - Use project-specific rustfmt configuration for consistency
 - Key formatting rules:
-  - `max_width = 167` - Allow longer lines for readability
+  - `max_width = 100` - Allow longer lines for readability
   - `brace_style = "AlwaysNextLine"` - Opening braces on new lines
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
@@ -283,7 +283,7 @@
   use owo_colors::OwoColorize;
   use serde::{Deserialize, Serialize};
 
-  use crate::{Result, utils::copy_dir_all};
+  use crate::{Result, utils::copy_tree};
   ```
 
 - Re-export commonly used items from `lib.rs` for convenience
@@ -296,7 +296,7 @@
 - Specify features in `Cargo.toml` dependencies when needed:
 
   ```toml
-  reqwest = { version = "0.12", features = ["blocking", "json"] }
+  reqwest = { version = "0.12", features = ["json"] }
   ```
 
 **Testing:**
@@ -315,7 +315,7 @@
       use super::*;
 
       #[test]
-      fn test_parse_github_url_valid()
+      fn test_parse_url_valid()
       {
           // Test implementation
       }
@@ -335,12 +335,12 @@
   ```rust
   //! Core functionality for foo-cli
 
-  /// Creates a timestamped backup of a directory
+  /// Writes a timestamped snapshot of a directory
   ///
-  /// Backups are stored in the cache directory with timestamp: `backups/YYYY-MM-DD_HH_MM_SS/`
-  fn create_backup(&self, source_dir: &Path) -> Result<()>
+  /// Snapshots are stored in the working directory with timestamp: `snapshots/YYYY-MM-DD_HH_MM_SS/`
+  fn write_snapshot(&self, source_dir: &Path) -> Result<()>
   {
-      // Skip backup if source doesn't exist
+      // Skip snapshot if source doesn't exist
       if source_dir.exists() == false
       {
           return Ok(());
@@ -383,7 +383,7 @@
 - Use `std::env::current_dir()` over hardcoding paths
 - Use `Path` and `PathBuf` for filesystem paths
 - Use `Path::starts_with()` for path prefix/subpath checks; avoid string-based path comparison (e.g. `path.starts_with("foo/")`) to ensure cross-platform behavior (Windows uses `\`, Unix uses `/`)
-- When resolving placeholders in paths (e.g. `$workspace/AGENTS.md`), use `Path::join()` with the suffix instead of string replace; string replace can produce mixed separators on Windows
+- When resolving placeholders in paths (e.g. `$workspace/config/settings.json`), use `Path::join()` with the suffix instead of string replace; string replace can produce mixed separators on Windows
 - Leverage `std::io::Write` trait for flushing output buffers
 - Use `owo-colors` or similar crate for terminal output styling
 - Use platform-appropriate paths via `dirs` crate (prefer over `$HOME` env var)
@@ -407,8 +407,8 @@
 - Example:
 
   ```rust
-  println!("{} Creating backup in {}", "→".blue(), backup_dir.display().to_string().yellow());
-  eprintln!("{} Failed to download {}: {}", "✗".red(), url, error.to_string().red());
+  println!("{} Saving snapshot in {}", "→".blue(), snapshot_dir.display().to_string().yellow());
+  eprintln!("{} Failed to fetch {}: {}", "✗".red(), url, error.to_string().red());
   ```
 
 **Version and Edition:**
