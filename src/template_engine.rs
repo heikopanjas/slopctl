@@ -428,8 +428,8 @@ impl<'a> TemplateEngine<'a>
     /// Install non-agent-specific skills using smart multi-target distribution or explicit targets.
     #[allow(clippy::too_many_arguments)]
     fn install_non_agent_skills(
-        &self, skills: &[bom::SkillDefinition], target_dirs: &[PathBuf], options_agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog,
-        workspace: &Path, userprofile: &Path, temp_path: &Path, lang: &str, agent: &str, local_cache_only: bool, files_to_copy: &mut Vec<ResolvedFile>
+        &self, skills: &[bom::SkillDefinition], target_dirs: &[PathBuf], options_agent: Option<&str>, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path,
+        userprofile: &Path, temp_path: &Path, lang: &str, agent: &str, local_cache_only: bool, files_to_copy: &mut Vec<ResolvedFile>
     ) -> Result<()>
     {
         let default_dir = target_dirs.first().cloned().unwrap_or_else(|| self.resolve_placeholder(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, userprofile));
@@ -455,15 +455,7 @@ impl<'a> TemplateEngine<'a>
                 }
                 else
                 {
-                    self.install_skills(
-                        std::iter::once((skill.derive_name(), skill.source.as_str())),
-                        &dir,
-                        temp_path,
-                        lang,
-                        agent,
-                        local_cache_only,
-                        files_to_copy
-                    )?;
+                    self.install_skills(std::iter::once((skill.derive_name(), skill.source.as_str())), &dir, temp_path, lang, agent, local_cache_only, files_to_copy)?;
                 }
             }
         }
@@ -505,15 +497,7 @@ impl<'a> TemplateEngine<'a>
                     }
                     else
                     {
-                        self.install_skills(
-                            pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())),
-                            &dir,
-                            temp_path,
-                            lang,
-                            agent,
-                            local_cache_only,
-                            files_to_copy
-                        )?;
+                        self.install_skills(pairs.iter().map(|(n, s)| (n.as_str(), s.as_str())), &dir, temp_path, lang, agent, local_cache_only, files_to_copy)?;
                     }
                 }
             }
@@ -525,8 +509,8 @@ impl<'a> TemplateEngine<'a>
     /// Hydrate language skills for already-installed languages into a native-only agent directory.
     #[allow(clippy::too_many_arguments)]
     fn hydrate_language_skills_for_native_agent(
-        &self, agent_name: &str, native_skill_dir: &Path, config: &TemplateConfig, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path,
-        userprofile: &Path, existing_tracker: &FileTracker, temp_path: &Path, files_to_copy: &mut Vec<ResolvedFile>
+        &self, agent_name: &str, native_skill_dir: &Path, config: &TemplateConfig, agent_catalog: &agent_defaults::AgentCatalog, workspace: &Path, userprofile: &Path,
+        existing_tracker: &FileTracker, temp_path: &Path, files_to_copy: &mut Vec<ResolvedFile>
     ) -> Result<()>
     {
         let target_dirs = [native_skill_dir.to_path_buf()];
@@ -890,18 +874,8 @@ impl<'a> TemplateEngine<'a>
                     if filtered.is_empty() == false
                     {
                         self.install_partial_non_agent_skills(
-                            &filtered,
-                            partial.skills,
-                            &non_agent_skill_dirs,
-                            options.agent,
-                            &agent_catalog,
-                            &workspace,
-                            &userprofile,
-                            temp_path,
-                            lang,
-                            AGENT_ALL,
-                            local_cache_only,
-                            &mut files_to_copy
+                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL,
+                            local_cache_only, &mut files_to_copy
                         )?;
                     }
                 }
@@ -913,18 +887,8 @@ impl<'a> TemplateEngine<'a>
                     if filtered.is_empty() == false
                     {
                         self.install_partial_non_agent_skills(
-                            &filtered,
-                            partial.skills,
-                            &non_agent_skill_dirs,
-                            options.agent,
-                            &agent_catalog,
-                            &workspace,
-                            &userprofile,
-                            temp_path,
-                            LANG_NONE,
-                            AGENT_ALL,
-                            local_cache_only,
-                            &mut files_to_copy
+                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, LANG_NONE,
+                            AGENT_ALL, local_cache_only, &mut files_to_copy
                         )?;
                     }
                 }
@@ -1041,7 +1005,12 @@ impl<'a> TemplateEngine<'a>
                     if source_path.exists()
                     {
                         let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
-                        files_to_copy.push(ResolvedFile { source: source_path, target: target_path, lang: Vec::new(), agent: Self::owner_list(agent_name, AGENT_ALL) });
+                        files_to_copy.push(ResolvedFile {
+                            source: source_path,
+                            target: target_path,
+                            lang:   Vec::new(),
+                            agent:  Self::owner_list(agent_name, AGENT_ALL)
+                        });
                     }
                 }
 
@@ -1093,16 +1062,7 @@ impl<'a> TemplateEngine<'a>
                 if lang_skills.is_empty() == false
                 {
                     self.install_non_agent_skills(
-                        &lang_skills,
-                        &non_agent_skill_dirs,
-                        options.agent,
-                        &agent_catalog,
-                        &workspace,
-                        &userprofile,
-                        temp_path,
-                        lang,
-                        AGENT_ALL,
-                        local_cache_only,
+                        &lang_skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL, local_cache_only,
                         &mut files_to_copy
                     )?;
                 }
@@ -1134,7 +1094,9 @@ impl<'a> TemplateEngine<'a>
                 let Some(ref tracker) = existing_tracker &&
                 tracker.get_installed_languages().is_empty() == false
             {
-                self.hydrate_language_skills_for_native_agent(agent_name, native_dir, &config, &agent_catalog, &workspace, &userprofile, tracker, temp_path, &mut files_to_copy)?;
+                self.hydrate_language_skills_for_native_agent(
+                    agent_name, native_dir, &config, &agent_catalog, &workspace, &userprofile, tracker, temp_path, &mut files_to_copy
+                )?;
             }
         }
 
