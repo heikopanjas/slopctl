@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-06-21 (v21.1.8)
+**Last updated:** 2026-07-06 (v21.5.0)
 
 <!-- {mission} -->
 
@@ -12,7 +12,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
-- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads
+- **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
 - **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
@@ -94,7 +94,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always require explicit human confirmation before commits
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
-- GitHub tokens for API access are read from environment only, never stored in config files
+- GitHub API access is unauthenticated (no tokens or credentials); unauthenticated limits apply (~60 REST requests/hour per IP, plus raw.githubusercontent.com throttling)
 - Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
@@ -819,6 +819,73 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-06 (v21.5.0, GitHub rate-limit mitigation)
+
+- Replaced recursive GitHub Contents API skill downloads with **one tarball fetch per repository** during `templates --update` and URL-based `init` skill installs; tarball extraction uses pure-Rust `flate2` + `tar` (macOS/Linux/Windows, no shell `tar`)
+- Added shared `reqwest` HTTP client with 429/503 retry and `Retry-After` backoff; raw file downloads throttled to reduce burst 429s; download failures now propagate instead of being silently skipped
+- Added `RepoTarballCache` for per-run deduplication of tarball downloads; `discover_skills_in_dir()` walks extracted trees locally for `SKILL.md`
+- Corrected Security section: GitHub access is unauthenticated (no tokens); removed inaccurate "GitHub tokens read from environment" line
+- Added regression tests: retry after 429, tarball extract, local skill discovery, tarball-based cache without Contents API listing
+- Version bump: 21.4.0 to 21.5.0 (MINOR — new download strategy + retry behavior)
+
+### 2026-07-06 (v21.4.0, scoped cache-only partial update)
+
+- `slopctl update` now reads only from the local global template cache; it no longer discovers or downloads skills from GitHub during resolve
+- Partial update resolves only the selected `--file` / `--skill` targets instead of the full installed language skill set (eliminates misleading install output and spurious GitHub traffic)
+- `templates --update` now caches URL-based skills into `skills/<name>/` under the global template directory (previously URL skills were skipped and fetched only at `init` time)
+- Added `PartialSelectors` and `local_cache_only` to `UpdateOptions`; `resolve_all_files()` branches on partial scope in `src/template_engine.rs`
+- Added `collect_url_skill_sources()` and `download_url_skill_to_cache()` in `src/download_manager.rs`
+- Added 4 regression tests in `partial_update.rs` (skill-only scope, lang file untouched, missing cache error, no GitHub hooks) plus `collect_url_skill_sources` test
+- Version bump: 21.3.3 to 21.4.0 (MINOR — update behavior change + templates URL skill caching)
+
+### 2026-07-06 (v21.3.3, restore require! in Rust template)
+
+- Restored the `require!` macro usage and definition block in `skills/rust-coding-conventions/SKILL.md` and legacy `rust-coding-conventions.md`
+- Rationale: `require!` is an intentional project convention for top-of-function preconditions without verbose `if` guards
+- Version bump: 21.3.2 to 21.3.3 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.2, de-brand C/C++/Rust template examples)
+
+- Removed remaining cross-project artifacts from C, C++, and Rust coding-convention template examples
+- C: replaced the KString-shaped Foo string tutorial (SSO, encoding bits, `InvalidFoo`) with a simple opaque-handle API using generic flag words
+- C++: replaced media-domain examples (`Episode`, `MediaType`, episode Doxygen) with neutral `Record`/`ContentType` placeholders
+- Rust: removed slopctl-shaped examples (`require!`, `max_width = 167` in conventions doc, backup/cache dirs, `$workspace/AGENTS.md` path example, GitHub test name); kept generic `FooStore`/`foo-cli` vocabulary
+- Applied edits to shipped skills and legacy root mirrors; bumped skill frontmatter versions to 1.1 (C/C++/Rust conventions)
+- Verified with `templates --verify` and `cargo test`; content-only change, no source or behavior changes
+- Version bump: 21.3.1 to 21.3.2 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.1, de-brand Swift template examples)
+
+- Removed cross-project artifacts from Swift coding-convention template examples so installed templates read as project-neutral
+- Replaced DoomKit/TheDrowning branding and environmental-monitoring domain names (Covid*, Weather*, radiation units, Berlin coordinates, etc.) with ultra-generic Foo/Bar-style placeholders in `skills/swift-coding-conventions/SKILL.md` and the legacy root `swift-coding-conventions.md` mirror
+- Renamed bundled example types consistently: `FooManager`, `FooSensor`, `FooPresenter`, `BarController`, `RemoteDataService`, `NetworkMonitor`, `Logger`, and related identifiers; kept Apple SDK imports (`WeatherKit`, `CoreLocation`, etc.) unchanged
+- Bumped shipped skill frontmatter `metadata.version` from 2.1 to 2.2
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (371 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.3.0 to 21.3.1 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.0, skill refresh stale file pruning)
+
+- Enhanced `slopctl update --skill <name>` to prune slopctl-tracked skill files that were removed upstream from the template source
+- After resolving the new source file set for each requested skill, any tracked skill file whose target is absent from the new set is deleted from disk and removed from the FileTracker
+- User-added untracked files inside the skill directory are preserved; only slopctl-managed tracked files are pruned
+- A locally modified stale tracked file is blocked unless `--force` is given, matching the overwrite guard for refreshed targets
+- Dry-run output includes a separate "would be removed (stale)" section for pruned files
+- Added `collect_stale_skill_files()` helper in `src/template_manager/partial_update.rs`; added 4 regression tests (upstream removal, untracked preservation, modified stale requires force, dry-run)
+- Version bump: 21.2.0 to 21.3.0 (MINOR — new cleanup behavior on skill refresh)
+
+### 2026-07-06 (v21.2.0, partial update command)
+
+- Added a new `update` subcommand that refreshes individual template files (`--file <path>`) or skills (`--skill <name>`) from the global catalog, instead of reinstalling a language's whole set
+- Motivation: users frequently need to bring a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) up to date without touching the rest of the installed language set
+- Selectors are repeatable; at least one `--file` or `--skill` is required
+- Scope defaults to the installed language (FileTracker) and detected agents; overridable via `--lang`/`--agent`. Selected targets are overwritten directly; a customized or untracked target is skipped unless `--force` is given
+- `AGENTS.md` is rejected as a `--file` target (it is fragment-merged, carried in `ResolvedFiles.context`, not `files`); users are pointed to `merge`/`init`
+- Implementation reuses `TemplateEngine::resolve_all_files()` for correct routing (native vs cross-client skill dirs, includes, shared groups); it resolves once per effective agent and unions candidates by target path, keeping each `ResolvedFiles` alive so GitHub-downloaded temp sources survive until copy
+- New `src/template_manager/partial_update.rs` with `TemplateManager::update_partial`; added `Commands::Update` in `src/cli.rs` and its dispatch arm in `src/main.rs`
+- Added 6 unit tests using synthetic fixtures (bogus agent, Rust++ language): file refresh, skill refresh, force guard, unknown selector, dry-run, AGENTS.md rejection
+- Known limitation: a skill refresh copies current source files over; files removed upstream from a skill are not deleted
+- Version bump: 21.1.8 to 21.2.0 (MINOR — new subcommand)
 
 ### 2026-06-21 (v21.1.8, de-brand template example code)
 

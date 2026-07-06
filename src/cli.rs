@@ -206,6 +206,33 @@ pub enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
+    /// Refresh individual template files or skills from the global catalog
+    Update
+    {
+        /// Workspace file path to refresh (repeatable)
+        #[arg(long)]
+        file: Vec<String>,
+
+        /// Skill name to refresh (repeatable)
+        #[arg(short, long)]
+        skill: Vec<String>,
+
+        /// Programming language or framework scope (defaults to the installed language)
+        #[arg(short, long)]
+        lang: Option<String>,
+
+        /// AI coding agent scope (defaults to detected agents)
+        #[arg(short, long)]
+        agent: Option<String>,
+
+        /// Overwrite locally customized or untracked files
+        #[arg(short, long, default_value = "false")]
+        force: bool,
+
+        /// Preview changes without applying them
+        #[arg(short = 'n', long, default_value = "false")]
+        dry_run: bool
+    },
     /// Manage global model defaults catalog
     Models
     {

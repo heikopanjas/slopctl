@@ -419,6 +419,8 @@ slopctl templates --update --verify --list
 
 **Note:** Run `templates --update` first to download templates before using `init` to set up a project.
 
+**GitHub rate limits:** slopctl does not use GitHub authentication tokens. Unauthenticated access is subject to GitHub limits (~60 REST API requests/hour per IP, plus throttling on `raw.githubusercontent.com`). During `templates --update`, URL-based skill repositories are fetched with **one tarball download per repository** instead of recursive Contents API listing. HTTP 429/503 responses are retried with backoff. If limits are still exceeded, wait and retry `slopctl templates --update`. Use `update` to refresh workspace files from the local cache without additional network calls.
+
 ### `agents` - Manage Global Agent Defaults Catalog
 
 Download, update, verify, or browse the global agent defaults catalog. This catalog defines agent filesystem conventions such as prompt directories, skill directories, workspace detection markers, and whether an agent reads `.agents/skills/`.
@@ -502,7 +504,7 @@ slopctl init --lang rust --dry-run
 - If global templates do not exist, automatically downloads them from the default repository
 - Detects template version from templates.yml
 - **Must specify at least one** of `--lang` or `--agent`
-- **GitHub URL sources**: Any `source` field in templates.yml can be a full GitHub URL (downloaded on-the-fly)
+- **GitHub URL sources**: Any `source` field in templates.yml can be a full GitHub URL (cached by `templates --update` or fetched via tarball during `init`)
 - **With `--agent` only** (no `--lang`): Creates AGENTS.md with mission, principles, integration (no language files); preserves existing language if previously installed; installs agent-associated skills from templates.yml; creates agent-declared directories (e.g. `.cursor/plans`)
 - **With `--lang`**: Creates single AGENTS.md plus language config files; installs language-associated skills (own + inherited from shared groups) from templates.yml to cross-client directory; optional `--agent` adds agent prompts and agent skills
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
@@ -771,6 +773,42 @@ slopctl merge --list-models                      # List available models from th
 
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 
+### `update` - Refresh Individual Files or Skills
+
+Refresh one or more individual template files or skills from the **local global template cache** without reinstalling a language's entire file set. This is useful when only a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) needs to be brought up to date.
+
+Run `slopctl templates --update` first to refresh the global catalog (including URL-based skills cached under `skills/<name>/`). The `update` command never fetches from GitHub or other remote sources; it copies only the selected targets from that cache into the workspace.
+
+Selected files and skills are routed to the same workspace locations as `init`. The scope defaults to the installed language (from the FileTracker) and the agents detected in the workspace; override with `--lang`/`--agent`. Selected targets are overwritten directly. A locally customized or untracked target is skipped with an error unless `--force` is given.
+
+When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
+
+This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs a language's *complete* set).
+
+**Usage:**
+
+```bash
+slopctl templates --update                            # Refresh global cache first
+slopctl update --skill rust-coding-conventions      # Refresh a single skill
+slopctl update --file .rustfmt.toml                 # Refresh a single file
+slopctl update --skill git-workflow --file .gitattributes  # Refresh several at once
+slopctl update --file .editorconfig --lang rust     # Override the language scope
+slopctl update --skill init-session --agent cursor  # Override the agent scope
+slopctl update --file .rustfmt.toml --force         # Overwrite a customized file
+slopctl update --skill git-workflow --dry-run       # Preview without writing
+```
+
+**Options:**
+
+- `--file <path>` - Workspace file path to refresh (repeatable)
+- `--skill` / `-s <name>` - Skill name to refresh (repeatable)
+- `--lang` / `-l` - Language scope override (defaults to the installed language)
+- `--agent` / `-a` - AI coding agent scope override (defaults to detected agents)
+- `--force` / `-f` - Overwrite locally customized or untracked files
+- `--dry-run` / `-n` - Preview changes without applying them
+
+At least one `--file` or `--skill` must be provided. `AGENTS.md` cannot be refreshed as a single file (it is fragment-merged); use `merge` or `init` instead.
+
 ### `config` - Manage Configuration
 
 Manage persistent configuration settings using Git-style dotted keys.
@@ -951,7 +989,7 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 - **Shared group skills** (`shared.<name>.skills`): propagated to any language that includes the shared group via `includes`; same routing rules as language skills
 - **Language include skills**: skills from an included *language* are also propagated depth-first (e.g. `swiftui` including `swift` inherits `swift`'s skills); cycle detection prevents infinite recursion. See the [`includes` section](#includes-composable-languages-and-shared-groups) for full details.
 - **Top-level skills** (`skills`): use the smart default — cross-client `.agents/skills/` for cross-client agents, native dir for native-only agents; optional `target: '$userprofile'` installs globally (e.g. `~/.codex/skills`)
-- GitHub skills are downloaded on-the-fly via the GitHub Contents API (no local cache)
+- GitHub skills are cached during `templates --update` via one tarball download per repository (not per file); `init` uses the same tarball path for URL-based skills not yet cached
 - Skills are tracked with the `"skill"` category in the file tracker for modification detection
 - The `templates --list` command shows available skills (including agent and language skill counts); `status` shows installed skills
 - Removing an agent (`slopctl remove --agent <name>`) also removes its skills
@@ -1464,7 +1502,7 @@ Omitting `--lang` gives you AGENTS.md with mission, principles, and integration 
 Run `slopctl init --agent <new-agent>`. slopctl detects the existing language from the file tracker and uses it (e.g. switching from Cursor to Claude keeps your Rust setup).
 
 **What are Agent Skills?**
-[Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills are defined in `templates.yml` (per-agent, per-language, shared group, or top-level). They can point to local template directories or full GitHub URLs, are downloaded on-the-fly when needed, and are tracked like other template files.
+[Agent Skills](https://agentskills.io) are an open format for giving agents specialized capabilities via SKILL.md files. Skills are defined in `templates.yml` (per-agent, per-language, shared group, or top-level). They can point to local template directories or full GitHub URLs; URL-based skills are cached under `skills/<name>/` during `templates --update` and tracked like other template files.
 
 **How do I install a skill?**
 Add it to the relevant `skills:` section in `templates.yml`, then run `slopctl templates --update` and `slopctl init --lang <lang>` or `slopctl init --agent <agent>`. Language skills install with their language, agent skills install with their agent, and top-level skills install with any init run.

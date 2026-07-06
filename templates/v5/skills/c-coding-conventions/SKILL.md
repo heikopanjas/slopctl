@@ -4,7 +4,7 @@ description: C coding conventions covering naming, const-correctness, memory man
 license: MIT
 metadata:
   author: Heiko Panjas
-  version: "1.0"
+  version: "1.1"
 ---
 
 # C Coding Conventions
@@ -43,8 +43,8 @@ It covers naming, const-correctness, memory management, header organization, and
 - Apply `const` to pointer targets, not just pointers: `const char*` not `char* const`
 - Use `const` to document intent and prevent accidental modification
 - Examples:
-  - ✅ Correct: `Foo FooCreate(const char* pStr, const size_t Size);`
-  - ✅ Correct: `int FooCompare(const Foo a, const Foo b);`
+  - ✅ Correct: `Foo* FooCreate(const char* pName, const size_t NameLength);`
+  - ✅ Correct: `int FooCompare(const Foo* pLeft, const Foo* pRight);`
   - ❌ Incorrect: `Foo FooCreate(char* pStr, size_t Size);`
 - Const correctness improves maintainability and compiler optimization
 
@@ -76,7 +76,7 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Secure: Requires explicit size
-  Foo FooCreate(const char* pStr, const size_t Size);
+  Foo* FooCreate(const char* pName, const size_t NameLength);
 
   // Less secure: Uses strlen() internally (provide for convenience only)
   Foo FooCreateFromCStr(const char* pStr);
@@ -103,9 +103,9 @@ It covers naming, const-correctness, memory management, header organization, and
 - **Local variables**: PascalCase (e.g., `MyVariable`, `StringLength`, `BufferSize`)
 - **Function parameters**: PascalCase (e.g., `InputString`, `MaxLength`)
 - **Pointer variables**: PascalCase with `p` prefix (e.g., `pData`, `pBuffer`, `pString`)
-- **Type names**: PascalCase (e.g., `Foo`, `FooEncoding`)
-- **Enum constants**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_ENCODING_UTF8`)
-- **Macro definitions**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_MAX_SHORT_LENGTH`)
+- **Type names**: PascalCase (e.g., `Foo`, `FooStatus`)
+- **Enum constants**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_STATUS_OK`)
+- **Macro definitions**: UPPER_SNAKE_CASE with prefix (e.g., `FOO_MAX_NAME_LENGTH`)
 - **Static functions**: Prefix with project abbreviation (e.g., `F_` for Foo internals)
 
 **Type Definitions:**
@@ -120,8 +120,9 @@ It covers naming, const-correctness, memory management, header organization, and
 
   // In implementation file
   struct Foo {
-      uint32_t size;
-      // ... implementation details
+      char*    pData;
+      size_t   length;
+      uint32_t flags;
   };
   ```
 
@@ -136,11 +137,9 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   typedef enum {
-      FOO_ENCODING_UTF8     = 0,  // Default UTF-8 encoding
-      FOO_ENCODING_UTF16LE  = 1,  // UTF-16 Little Endian
-      FOO_ENCODING_UTF16BE  = 2,  // UTF-16 Big Endian
-      FOO_ENCODING_ANSI     = 3   // ANSI/Windows-1252 (legacy)
-  } FooEncoding;
+      FOO_STATUS_OK    = 0,
+      FOO_STATUS_ERROR = 1
+  } FooStatus;
   ```
 
 - Add comments for each enum value explaining its purpose
@@ -178,12 +177,12 @@ It covers naming, const-correctness, memory management, header organization, and
   ```c
   // Validate input parameters
   if (NULL == pStr || 0 == Size) {
-      return InvalidFoo();  // Return sentinel value
+      return NULL;  // Return sentinel value
   }
 
   // Check for overflow
   if (Size > MAX_VALID_SIZE) {
-      return InvalidFoo();
+      return NULL;
   }
   ```
 
@@ -198,20 +197,21 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example structure:
 
   ```c
-  Foo FooCreate(const char* pStr, const size_t Size)
+  Foo* FooCreate(const char* pName, const size_t NameLength)
   {
       // 1. Validate parameters
-      if (NULL == pStr || 0 == Size) {
-          return InvalidFoo();
+      if (NULL == pName || 0 == NameLength) {
+          return NULL;
       }
 
-      // 2. Handle short string case
-      if (Size <= FOO_MAX_SHORT_LENGTH) {
-          return CreateShortString(pStr, Size);
+      // 2. Allocate and initialize handle
+      Foo* pFoo = (Foo*)calloc(1, sizeof(Foo));
+      if (NULL == pFoo) {
+          return NULL;
       }
 
-      // 3. Handle long string case
-      return CreateLongString(pStr, Size);
+      // 3. Copy name bytes and return ownership to caller
+      return pFoo;
   }
   ```
 
@@ -230,15 +230,16 @@ It covers naming, const-correctness, memory management, header organization, and
   #include <stdbool.h>
 
   // Macros and constants
-  #define FOO_MAX_SHORT_LENGTH 12
+  #define FOO_MAX_NAME_LENGTH 256
 
   // Type definitions
   typedef struct Foo Foo;
-  typedef enum { /* ... */ } FooEncoding;
+  typedef enum { /* ... */ } FooStatus;
 
   // Public API declarations
-  Foo FooCreate(const char* pStr, const size_t Size);
-  void FooDestroy(const Foo foo);
+  Foo* FooCreate(const char* pName, const size_t NameLength);
+  void FooDestroy(Foo* pFoo);
+  int FooCompare(const Foo* pLeft, const Foo* pRight);
 
   #endif // FOO_H
   ```
@@ -254,15 +255,16 @@ It covers naming, const-correctness, memory management, header organization, and
   #include "Foo.h"
 
   // Private macros
-  #define FOO_SIZE_MASK 0x3FFFFFFF
+  #define FOO_FLAG_ACTIVE 0x00000001u
+  #define FOO_FLAG_DIRTY  0x00000002u
 
   // Private helper functions
-  static inline size_t GetSizeFromField(uint32_t SizeField) {
-      return SizeField & FOO_SIZE_MASK;
+  static inline bool F_IsActive(const Foo* pFoo) {
+      return (0 != (pFoo->flags & FOO_FLAG_ACTIVE));
   }
 
   // Public API implementations
-  Foo FooCreate(const char* pStr, const size_t Size) {
+  Foo* FooCreate(const char* pName, const size_t NameLength) {
       // ... implementation
   }
   ```
@@ -276,11 +278,10 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  // Extract 30-bit size from combined size/encoding field
-  // Upper 2 bits store encoding, lower 30 bits store size
-  static inline size_t GetSizeFromField(uint32_t SizeField)
+  // Check whether the handle is marked active before reuse
+  static inline bool F_IsActive(const Foo* pFoo)
   {
-      return SizeField & FOO_SIZE_MASK;
+      return (NULL != pFoo) && (0 != (pFoo->flags & FOO_FLAG_ACTIVE));
   }
   ```
 
@@ -296,12 +297,12 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   // Function: opening brace on next line
-  Foo FooCreate(const char* pStr, const size_t Size)
+  Foo* FooCreate(const char* pName, const size_t NameLength)
   {
       // Control structure: opening brace on next line
       if (NULL == pStr)
       {
-          return InvalidFoo();
+          return NULL;
       }
 
       for (size_t i = 0; i < Size; i++)
@@ -309,7 +310,7 @@ It covers naming, const-correctness, memory management, header organization, and
           // Process character
       }
 
-      return Result;
+      return pFoo;
   }
   ```
 
@@ -324,18 +325,16 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  // Size field layout: 30 bits size + 2 bits encoding (32 bits total)
-  #define FOO_SIZE_MASK         0x3FFFFFFF  // Lower 30 bits
-  #define FOO_ENCODING_MASK     0xC0000000  // Upper 2 bits
-  #define FOO_ENCODING_SHIFT    30
+  // Flag word layout stored in Foo.flags
+  #define FOO_FLAG_ACTIVE 0x00000001u
+  #define FOO_FLAG_DIRTY  0x00000002u
 
-  // Extract components
-  static inline size_t GetSizeFromField(uint32_t SizeField) {
-      return SizeField & FOO_SIZE_MASK;
+  static inline bool F_HasFlag(uint32_t Flags, uint32_t FlagMask) {
+      return (0 != (Flags & FlagMask));
   }
 
-  static inline FooEncoding GetEncodingFromField(uint32_t SizeField) {
-      return (FooEncoding)((SizeField & FOO_ENCODING_MASK) >> FOO_ENCODING_SHIFT);
+  static inline uint32_t F_SetFlag(uint32_t Flags, uint32_t FlagMask) {
+      return Flags | FlagMask;
   }
   ```
 
@@ -376,10 +375,10 @@ It covers naming, const-correctness, memory management, header organization, and
   ```c
   #include <assert.h>
 
-  // Verify structure size matches specification
-  static_assert(sizeof(Foo) == 16, "Foo must be exactly 16 bytes");
+  // Verify pointer size assumptions on target platform
+  static_assert(sizeof(void*) >= 4, "Pointer size must be at least 32 bits");
 
-  // Verify bit field sizes
+  // Verify flag word sizes
   static_assert(sizeof(uint32_t) * 8 >= 32, "uint32_t must be at least 32 bits");
   ```
 
@@ -393,9 +392,9 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  static inline bool F_IsShortString(Foo foo)
+  static inline bool F_IsActive(const Foo* pFoo)
   {
-      return GetSizeFromField(foo.size) <= FOO_MAX_SHORT_LENGTH;
+      return (NULL != pFoo) && (0 != (pFoo->flags & FOO_FLAG_ACTIVE));
   }
   ```
 
@@ -410,18 +409,18 @@ It covers naming, const-correctness, memory management, header organization, and
 - Example:
 
   ```c
-  // Pass by value for 16-byte struct (fits in registers)
-  int FooCompare(const Foo a, const Foo b)
+  int FooCompare(const Foo* pLeft, const Foo* pRight)
   {
-      // Fast path: compare sizes first
-      size_t SizeA = GetSizeFromField(a.size);
-      size_t SizeB = GetSizeFromField(b.size);
-
-      if (SizeA != SizeB) {
-          return (SizeA > SizeB) ? 1 : -1;
+      if (NULL == pLeft || NULL == pRight) {
+          return 0;
       }
 
-      // ... rest of comparison
+      if (pLeft->length != pRight->length) {
+          return (pLeft->length > pRight->length) ? 1 : -1;
+      }
+
+      // ... byte-wise comparison of pLeft->pData and pRight->pData
+      return 0;
   }
   ```
 
@@ -442,17 +441,16 @@ It covers naming, const-correctness, memory management, header organization, and
 
   ```c
   /**
-   * Creates a new Foo from a byte array with explicit size.
+   * Creates a new Foo handle from a name buffer with explicit length.
    *
-   * @param pStr Pointer to character data (not necessarily null-terminated)
-   * @param Size Number of bytes in the string
-   * @return New Foo instance, or invalid Foo on allocation failure
+   * @param pName Pointer to name bytes (not necessarily null-terminated)
+   * @param NameLength Number of bytes in the name
+   * @return New Foo handle, or NULL on allocation failure
    *
    * @note Caller is responsible for calling FooDestroy() when done
-   * @note Uses UTF-8 encoding by default
-   * @note Size must not exceed maximum supported size (2^30 - 1 bytes)
+   * @note NameLength must not exceed FOO_MAX_NAME_LENGTH
    */
-  Foo FooCreate(const char* pStr, const size_t Size);
+  Foo* FooCreate(const char* pName, const size_t NameLength);
   ```
 
 - Keep documentation concise but complete

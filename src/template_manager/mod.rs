@@ -5,6 +5,7 @@ mod doctor;
 mod list;
 mod merge;
 mod models;
+mod partial_update;
 mod remove;
 mod smart;
 mod update;

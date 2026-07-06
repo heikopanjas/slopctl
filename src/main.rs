@@ -527,7 +527,15 @@ fn main()
                 None
             };
 
-            let options = UpdateOptions { lang: lang.as_deref(), agent: agent.as_deref(), mission: resolved_mission.as_deref(), force, dry_run };
+            let options = UpdateOptions {
+                lang: lang.as_deref(),
+                agent: agent.as_deref(),
+                mission: resolved_mission.as_deref(),
+                force,
+                dry_run,
+                partial: None,
+                local_cache_only: false
+            };
 
             {
                 if manager.has_global_templates() == false
@@ -796,6 +804,18 @@ fn main()
                 println!("{} AI-assisted merge of customized files", "→".blue());
             }
             manager.merge(&merge_options, dry_run, preview, verbose)
+        }
+        | Commands::Update { file, skill, lang, agent, force, dry_run } =>
+        {
+            if file.is_empty() == true && skill.is_empty() == true
+            {
+                eprintln!("{} Must specify at least one --file or --skill", "✗".red());
+                eprintln!("{} Examples: slopctl update --skill rust-coding-conventions", "→".blue());
+                eprintln!("{}          slopctl update --file .rustfmt.toml", "→".blue());
+                std::process::exit(1);
+            }
+
+            manager.update_partial(&file, &skill, lang.as_deref(), agent.as_deref(), force, dry_run)
         }
         | Commands::Models { update, list, verify, from, dry_run } =>
         {

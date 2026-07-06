@@ -103,7 +103,15 @@ impl TemplateManager
     {
         let engine = TemplateEngine::new(&self.config_dir);
 
-        let update_options = UpdateOptions { lang: options.lang, agent: options.agent, mission: options.mission, force: false, dry_run: false };
+        let update_options = UpdateOptions {
+            lang:             options.lang,
+            agent:            options.agent,
+            mission:          options.mission,
+            force:            false,
+            dry_run:          false,
+            partial:          None,
+            local_cache_only: false
+        };
 
         let content_map = engine.build_target_content_map(&update_options)?;
 
