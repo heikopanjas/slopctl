@@ -687,7 +687,7 @@ To browse the available template catalog, use `slopctl templates --list`.
   - AGENTS.md existence and customization status
   - Which agents are currently installed
   - Installed language (from FileTracker metadata)
-  - Installed skills (grouped by name)
+  - Installed skills (grouped by name from FileTracker metadata)
 - **Managed Files:** List of all slopctl managed files in current directory (with `--verbose`)
 
 **Example output:**

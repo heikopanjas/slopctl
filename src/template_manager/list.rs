@@ -1,6 +1,9 @@
 //! Template list command
 
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf}
+};
 
 use owo_colors::OwoColorize;
 
@@ -20,13 +23,33 @@ impl TemplateManager
         Ok(agent_defaults::detect_all_installed_agents_from_catalog(&catalog, workspace))
     }
 
+    /// Returns installed skill names from existing FileTracker entries.
+    fn tracked_skill_names(file_tracker: &FileTracker, workspace: &Path) -> BTreeSet<String>
+    {
+        file_tracker
+            .get_entries_by_category("skill")
+            .into_iter()
+            .filter_map(|(path, _)| {
+                let absolute = workspace.join(&path);
+                if absolute.exists() == true
+                {
+                    Self::extract_skill_name_from_path(&path)
+                }
+                else
+                {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Show workspace status
     ///
     /// Displays the current state of slopctl in the project:
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
-    /// - Installed skills (filesystem scan of agent skill dirs + FileTracker fallback)
+    /// - Installed skills (from FileTracker ownership records)
     /// - All slopctl managed files in current directory (verbose only)
     ///
     /// # Arguments
@@ -130,41 +153,7 @@ impl TemplateManager
             println!("  {} No languages installed", "○".yellow());
         }
 
-        // Detect installed skills by scanning workspace-scoped agent skill directories on disk,
-        // then merge in FileTracker entries for skills outside standard directories.
-        // Userprofile-based dirs are excluded from scanning; FileTracker below still
-        // picks up any userprofile skills that slopctl installed.
-        let userprofile = dirs::home_dir().unwrap_or_default();
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
-
-        let mut skill_names: BTreeSet<String> = BTreeSet::new();
-
-        for dir in &skill_search_dirs
-        {
-            if dir.exists() == true &&
-                let Ok(entries) = fs::read_dir(dir)
-            {
-                for entry in entries.flatten()
-                {
-                    if entry.path().is_dir() == true &&
-                        let Some(name) = entry.file_name().to_str()
-                    {
-                        skill_names.insert(name.to_string());
-                    }
-                }
-            }
-        }
-
-        let skill_entries = file_tracker.get_entries_by_category("skill");
-        for (path, _) in &skill_entries
-        {
-            if path.exists() == true &&
-                let Some(name) = Self::extract_skill_name_from_path(path)
-            {
-                skill_names.insert(name);
-            }
-        }
+        let skill_names = Self::tracked_skill_names(&file_tracker, &current_dir);
 
         if skill_names.is_empty() == false
         {
@@ -411,6 +400,26 @@ impl TemplateManager
 mod tests
 {
     use super::TemplateManager;
+    use crate::file_tracker::{AGENT_ALL, FileTracker};
+
+    #[test]
+    fn test_tracked_skill_names_ignores_untracked_empty_directories() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let empty_skill = workspace.path().join(".agents/skills/fake-stale-skill");
+        let tracked_skill = workspace.path().join(".agents/skills/fake-active-skill/SKILL.md");
+        std::fs::create_dir_all(&empty_skill)?;
+        std::fs::create_dir_all(tracked_skill.parent().ok_or_else(|| anyhow::anyhow!("missing skill parent"))?)?;
+        std::fs::write(&tracked_skill, "# Fake Active Skill")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&tracked_skill, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+
+        let names = TemplateManager::tracked_skill_names(&tracker, workspace.path());
+
+        assert_eq!(names, ["fake-active-skill".to_string()].into_iter().collect());
+        Ok(())
+    }
 
     #[test]
     fn test_installed_agent_names_detects_marker_only_agent() -> anyhow::Result<()>

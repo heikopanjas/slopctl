@@ -112,6 +112,7 @@ impl TemplateManager
                         {
                             if entry.path().is_dir() == true
                             {
+                                dirs_to_cleanup.push(entry.path());
                                 let mut skill_files = Vec::new();
                                 let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                 for f in skill_files
@@ -134,6 +135,10 @@ impl TemplateManager
                     let abs_path = current_dir.join(&rel_path);
                     if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, agent_name) == true && files_to_remove.contains(&abs_path) == false
                     {
+                        if let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                        {
+                            dirs_to_cleanup.push(skill_root);
+                        }
                         files_to_remove.push(abs_path);
                     }
                 }
@@ -161,6 +166,7 @@ impl TemplateManager
                             {
                                 if entry.path().is_dir() == true
                                 {
+                                    dirs_to_cleanup.push(entry.path());
                                     let mut skill_files = Vec::new();
                                     let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                     for f in skill_files
@@ -232,6 +238,7 @@ impl TemplateManager
                         {
                             if entry.path().is_dir() == true
                             {
+                                dirs_to_cleanup.push(entry.path());
                                 let mut skill_files = Vec::new();
                                 let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                 for f in skill_files
@@ -253,6 +260,10 @@ impl TemplateManager
                     let abs_path = current_dir.join(&rel_path);
                     if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                     {
+                        if let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                        {
+                            dirs_to_cleanup.push(skill_root);
+                        }
                         files_to_remove.push(abs_path);
                     }
                 }
@@ -303,6 +314,7 @@ impl TemplateManager
                             let candidate = search_dir.join(skill_name);
                             if candidate.is_dir() == true
                             {
+                                dirs_to_cleanup.push(candidate.clone());
                                 let mut skill_files = Vec::new();
                                 collect_files_recursive(&candidate, &mut skill_files)?;
                                 for f in skill_files
@@ -335,6 +347,11 @@ impl TemplateManager
                 let abs_path = current_dir.join(&rel_path);
                 if meta.has_lang(lang_name) == true && meta.category != "main" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                 {
+                    if meta.category == "skill" &&
+                        let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                    {
+                        dirs_to_cleanup.push(skill_root);
+                    }
                     files_to_remove.push(abs_path);
                 }
             }
@@ -344,10 +361,13 @@ impl TemplateManager
 
         files_to_remove.sort();
         files_to_remove.dedup();
+        dirs_to_cleanup.sort_by(|left, right| right.components().count().cmp(&left.components().count()).then_with(|| left.cmp(right)));
+        dirs_to_cleanup.dedup();
+        dirs_to_cleanup.retain(|dir| dir.exists() == true);
 
         let description = description_parts.join(", ");
 
-        if files_to_remove.is_empty() == true
+        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true
         {
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
@@ -963,6 +983,9 @@ mod tests
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# Fake Remote Skill")?;
+        let nested_file = skill_dir.join("references/guides/topic.md");
+        fs::create_dir_all(nested_file.parent().ok_or_else(|| anyhow::anyhow!("missing nested skill parent"))?)?;
+        fs::write(&nested_file, "# Topic")?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -971,6 +994,30 @@ mod tests
         manager.remove(None, Some("Rust++"), true, false)?;
 
         assert!(skill_file.exists() == false, "untracked URL skill must be removed using the source path's skill name");
+        assert!(nested_file.exists() == false);
+        assert!(skill_dir.exists() == false, "empty skill root must be removed after its nested files");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_removes_empty_url_skill_root() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
+        fs::create_dir_all(&skill_dir)?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(None, Some("Rust++"), true, false)?;
+
+        assert!(skill_dir.exists() == false, "empty skill root must be removed even when it contains no files");
         Ok(())
     }
 

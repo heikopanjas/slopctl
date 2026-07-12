@@ -179,6 +179,12 @@ impl TemplateManager
 
         None
     }
+
+    /// Returns the `skills/<name>` root directory containing a skill path.
+    pub(crate) fn skill_root_from_path(path: &Path) -> Option<PathBuf>
+    {
+        path.ancestors().find(|candidate| candidate.parent().and_then(Path::file_name) == Some(OsStr::new("skills"))).map(Path::to_path_buf)
+    }
 }
 
 /// Serializes tests that call `std::env::set_current_dir` (process-global state).
@@ -268,5 +274,19 @@ mod tests
     {
         let path = PathBuf::from("/project/.bogus/skills");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
+    }
+
+    #[test]
+    fn test_skill_root_from_nested_path()
+    {
+        let path = PathBuf::from("/project/.bogus/skills/my-skill/references/topic.md");
+        assert_eq!(TemplateManager::skill_root_from_path(&path), Some(PathBuf::from("/project/.bogus/skills/my-skill")));
+    }
+
+    #[test]
+    fn test_skill_root_from_non_skill_path()
+    {
+        let path = PathBuf::from("/project/.bogus/commands/my-prompt.md");
+        assert_eq!(TemplateManager::skill_root_from_path(&path), None);
     }
 }
