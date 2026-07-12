@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v22.1.1)
+**Last updated:** 2026-07-12 (v22.1.2)
 
 <!-- {mission} -->
 
@@ -828,6 +828,15 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-12 (v22.1.2, complete language removal)
+
+- Made FileTracker ownership authoritative for `remove --lang`: every existing tracked non-main file owned by the selected language is now considered, even when the language still exists in the current catalog or a file was removed from its definition
+- Catalog discovery remains supplementary so untracked language files and skill files can still be removed
+- Pointed the external Swift concurrency, testing, and SwiftUI sources at their concrete skill directories so the derived source name matches the installed directory (`swift-concurrency-pro`, `swift-testing-pro`, and `swiftui-pro`)
+- Added regressions for stale tracked files, shared-owner release, URL skill discovery, and a complete remove-then-init language switch
+- Cleared strict all-target Clippy warnings in the GitHub retry test path and template verification tests
+- Version bump: 22.1.1 to 22.1.2 (PATCH — language removal bug fix)
 
 ### 2026-07-06 (v22.1.1, rustfmt pin update)
 

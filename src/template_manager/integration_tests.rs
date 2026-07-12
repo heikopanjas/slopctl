@@ -493,14 +493,21 @@ fn test_remove_lang_then_init_different_lang_succeeds() -> anyhow::Result<()>
 
     fixture.init(Some("fake"), Some("Rust++"))?;
     assert!(workspace.path().join(".rpp.toml").exists() == true);
+    assert!(workspace.path().join(".gitignore").exists() == true);
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true);
 
     fixture.remove_lang("Rust++")?;
     assert!(workspace.path().join(".rpp.toml").exists() == false);
+    assert!(workspace.path().join(".gitignore").exists() == false);
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == false);
     assert!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language().is_none() == true);
 
     // Now a different language must be accepted
     fixture.init(Some("fake"), Some("CppScript"))?;
     assert!(workspace.path().join(".cppscript-format").exists() == true, "new language file must appear");
+    assert!(workspace.path().join(".gitignore").exists() == true, "new language's shared file must appear");
+    assert!(workspace.path().join(".agents/skills/cmake-build-commands/SKILL.md").exists() == true, "included language skill must appear");
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == false, "removed language skill must stay absent");
     assert_eq!(FileTracker::new(&std::env::current_dir()?)?.get_installed_language(), Some("CppScript".to_string()));
 
     Ok(())

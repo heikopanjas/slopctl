@@ -530,7 +530,7 @@ mod tests
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
         let mut issues: Vec<String> = Vec::new();
 
         manager.verify_local_integrity(&config, &mut issues);
@@ -549,7 +549,7 @@ mod tests
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
         let mut issues: Vec<String> = Vec::new();
 
         manager.verify_local_integrity(&config, &mut issues);
@@ -603,7 +603,7 @@ mod tests
         let yaml = "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus:\n    instructions:\n      - source: \
                     instructions.md\n        target: '$workspace/.bogus/instructions.md'\nlanguages: {}\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
         assert!(issues.is_empty() == true);
@@ -621,7 +621,7 @@ mod tests
             "      - source: cppscript-editor-config.ini\n        target: '$workspace/.editorconfig'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
 
@@ -640,7 +640,7 @@ mod tests
             "      - source: rpp-editor-config-alt.ini\n        target: '$workspace/.editorconfig'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
 
@@ -664,7 +664,7 @@ mod tests
             "      - source: rpp.md\n        target: '$instructions'\n", "      - source: rpp-style.md\n        target: '$instructions'\n"
         );
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
-        let config = crate::template_engine::load_template_config(&data_dir.path().to_path_buf())?;
+        let config = crate::template_engine::load_template_config(data_dir.path())?;
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
         assert!(issues.is_empty() == true, "instructions targets must not be flagged: {:?}", issues);
