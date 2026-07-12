@@ -266,8 +266,8 @@ impl TemplateManager
         }
 
         // Collect language disk files when --lang is requested.
-        // Tries templates.yml first; falls back to FileTracker when the
-        // language entry was removed after installation.
+        // The current catalog discovers untracked files, while installation
+        // records remain authoritative for every tracked language-owned file.
         if has_lang_target == true
         {
             let lang_name = lang.unwrap();
@@ -326,20 +326,6 @@ impl TemplateManager
             if found_in_config == false
             {
                 println!("{} Language '{}' not in templates.yml, using installation records", "→".blue(), lang_name.yellow());
-                let file_tracker = FileTracker::new(&current_dir)?;
-                let all_entries = file_tracker.get_entries();
-                for (rel_path, meta) in all_entries
-                {
-                    let abs_path = current_dir.join(&rel_path);
-                    if meta.has_lang(lang_name) == true &&
-                        meta.category != "main" &&
-                        meta.category != "skill" &&
-                        abs_path.exists() == true &&
-                        files_to_remove.contains(&abs_path) == false
-                    {
-                        files_to_remove.push(abs_path);
-                    }
-                }
             }
 
             let file_tracker = FileTracker::new(&current_dir)?;
@@ -347,7 +333,7 @@ impl TemplateManager
             for (rel_path, meta) in all_entries
             {
                 let abs_path = current_dir.join(&rel_path);
-                if meta.has_lang(lang_name) == true && meta.category == "skill" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
+                if meta.has_lang(lang_name) == true && meta.category != "main" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                 {
                     files_to_remove.push(abs_path);
                 }
@@ -845,6 +831,64 @@ mod tests
     }
 
     #[test]
+    fn test_remove_lang_removes_tracked_stale_file_when_language_exists() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let stale_file = workspace.path().join(".rpp-legacy.toml");
+        fs::write(&stale_file, "legacy = true")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&stale_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(None, Some("Rust++"), true, false)?;
+
+        assert!(stale_file.exists() == false, "tracked stale language file must be removed even when the language remains in the catalog");
+        assert!(FileTracker::new(workspace.path())?.get_metadata(&stale_file).is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_releases_shared_file_owner_and_keeps_file() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let shared_file = workspace.path().join(".gitignore");
+        fs::write(&shared_file, "target/\n")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "CppScript".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(None, Some("Rust++"), true, false)?;
+
+        assert!(shared_file.exists() == true, "shared file must remain for its other language owner");
+        let tracker_after = FileTracker::new(workspace.path())?;
+        let metadata = tracker_after.get_metadata(&shared_file).ok_or_else(|| anyhow::anyhow!("missing shared file metadata"))?;
+        assert_eq!(metadata.lang, vec!["CppScript".to_string()]);
+        assert_eq!(metadata.ref_count, 1);
+        Ok(())
+    }
+
+    #[test]
     fn test_remove_lang_fallback_removes_language_skills_but_keeps_main() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
@@ -903,6 +947,30 @@ mod tests
 
         assert!(result.is_ok() == true);
         assert!(skill_file.exists() == false);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_discovers_untracked_url_skill_by_source_path_name() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+
+        let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
+        fs::create_dir_all(&skill_dir)?;
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "# Fake Remote Skill")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(None, Some("Rust++"), true, false)?;
+
+        assert!(skill_file.exists() == false, "untracked URL skill must be removed using the source path's skill name");
         Ok(())
     }
 
