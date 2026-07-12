@@ -37,7 +37,7 @@ enum FileClass
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, lang: String, agent: String, display: String
+        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, display: String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -53,8 +53,8 @@ enum FileClass
         template_content: String,
         user_content:     String,
         user_changelog:   Option<String>,
-        lang:             String,
-        agent:            String,
+        lang:             Vec<String>,
+        agent:            Vec<String>,
         display:          String,
         /// True when this file is the main AGENTS.md; enables skill-aware merging
         is_main:          bool
@@ -183,7 +183,7 @@ impl TemplateManager
 
                         let sha = FileTracker::calculate_sha256(target)?;
                         let category = categorize_path(target, options);
-                        file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
+                        file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -330,7 +330,7 @@ impl TemplateManager
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
                                     let category = categorize_path(target, options);
-                                    file_tracker.record_installation(target, sha, template_version, lang.clone(), agent.clone(), category);
+                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
                                 }
                             }
                         }
@@ -740,14 +740,11 @@ mod tests
     use std::collections::HashMap;
 
     use super::*;
-    use crate::{
-        file_tracker::{AGENT_ALL, LANG_NONE},
-        template_engine::normalize_path
-    };
+    use crate::template_engine::normalize_path;
 
     fn rc(content: &str) -> ResolvedContent
     {
-        ResolvedContent { content: content.to_string(), lang: LANG_NONE.to_string(), agent: AGENT_ALL.to_string() }
+        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new() }
     }
 
     #[test]
@@ -1066,9 +1063,9 @@ mod tests
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, ResolvedContent { content: "c".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
-        map.insert(file_a, ResolvedContent { content: "a".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
-        map.insert(file_b, ResolvedContent { content: "b".into(), lang: LANG_NONE.into(), agent: AGENT_ALL.into() });
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new() });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new() });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new() });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified

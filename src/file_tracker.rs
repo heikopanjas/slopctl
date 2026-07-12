@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     io::Read,
     path::{Path, PathBuf}
@@ -8,10 +8,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Sentinel value for `FileMetadata.lang` when the file is language-agnostic
+/// Legacy sentinel for language-agnostic ownership.
 pub const LANG_NONE: &str = "none";
 
-/// Sentinel value for `FileMetadata.agent` when the file is agent-agnostic
+/// Legacy sentinel for agent-agnostic ownership.
 pub const AGENT_ALL: &str = "all";
 
 /// Metadata about an installed template file
@@ -21,9 +21,114 @@ pub struct FileMetadata
     pub original_sha:     String,
     pub template_version: u32,
     pub installed_date:   String,
-    pub lang:             String,
-    pub agent:            String,
+    #[serde(default)]
+    pub lang:             Vec<String>,
+    #[serde(default)]
+    pub agent:            Vec<String>,
+    #[serde(default)]
+    pub ref_count:        usize,
     pub category:         String
+}
+
+impl FileMetadata
+{
+    /// Keep owner arrays sorted, unique, and reflected in `ref_count`.
+    fn normalize_ownership(&mut self)
+    {
+        Self::normalize_owner_list(&mut self.lang, LANG_NONE);
+        Self::normalize_owner_list(&mut self.agent, AGENT_ALL);
+        self.ref_count = self.lang.len() + self.agent.len();
+    }
+
+    /// Remove empty and legacy sentinel values, then sort and deduplicate.
+    fn normalize_owner_list(owners: &mut Vec<String>, sentinel: &str)
+    {
+        let mut normalized = BTreeSet::new();
+        for owner in owners.iter()
+        {
+            if owner.is_empty() == false && owner != sentinel
+            {
+                normalized.insert(owner.clone());
+            }
+        }
+        *owners = normalized.into_iter().collect();
+    }
+
+    /// Returns true when this entry is owned by the given language.
+    pub fn has_lang(&self, lang: &str) -> bool
+    {
+        self.lang.iter().any(|owner| owner == lang)
+    }
+
+    /// Returns true when this entry is owned by the given agent.
+    pub fn has_agent(&self, agent: &str) -> bool
+    {
+        self.agent.iter().any(|owner| owner == agent)
+    }
+
+    /// Returns true if the provided scalar owner values would add a new owner.
+    pub fn would_add_owners(&self, lang: &str, agent: &str) -> bool
+    {
+        (lang != LANG_NONE && self.has_lang(lang) == false) || (agent != AGENT_ALL && self.has_agent(agent) == false)
+    }
+
+    /// Returns true if any owner in the provided arrays would add a new owner.
+    pub fn would_add_owner_lists(&self, langs: &[String], agents: &[String]) -> bool
+    {
+        langs.iter().any(|lang| lang != LANG_NONE && self.has_lang(lang) == false) || agents.iter().any(|agent| agent != AGENT_ALL && self.has_agent(agent) == false)
+    }
+
+    /// Returns true when no language or agent references this entry.
+    pub fn is_unreferenced(&self) -> bool
+    {
+        self.ref_count == 0
+    }
+
+    /// Add a unique language owner, incrementing `ref_count` only on change.
+    fn add_lang(&mut self, lang: &str)
+    {
+        if lang != LANG_NONE && self.has_lang(lang) == false
+        {
+            self.lang.push(lang.to_string());
+            self.normalize_ownership();
+        }
+    }
+
+    /// Add a unique agent owner, incrementing `ref_count` only on change.
+    fn add_agent(&mut self, agent: &str)
+    {
+        if agent != AGENT_ALL && self.has_agent(agent) == false
+        {
+            self.agent.push(agent.to_string());
+            self.normalize_ownership();
+        }
+    }
+
+    /// Release a language owner, decrementing `ref_count` only on change.
+    fn release_lang(&mut self, lang: &str) -> bool
+    {
+        let before = self.lang.len();
+        self.lang.retain(|owner| owner != lang);
+        let changed = before != self.lang.len();
+        if changed == true
+        {
+            self.normalize_ownership();
+        }
+        changed
+    }
+
+    /// Release an agent owner, decrementing `ref_count` only on change.
+    fn release_agent(&mut self, agent: &str) -> bool
+    {
+        let before = self.agent.len();
+        self.agent.retain(|owner| owner != agent);
+        let changed = before != self.agent.len();
+        if changed == true
+        {
+            self.normalize_ownership();
+        }
+        changed
+    }
 }
 
 /// Status of a tracked file
@@ -107,7 +212,7 @@ impl FileTracker
         let slopctl_dir = workspace.join(SLOPCTL_DIR);
         let metadata_path = slopctl_dir.join(TRACKER_FILE);
 
-        let metadata = if metadata_path.exists() == true
+        let mut metadata: HashMap<String, FileMetadata> = if metadata_path.exists() == true
         {
             let contents = fs::read_to_string(&metadata_path)?;
             serde_yaml::from_str(&contents).unwrap_or_else(|_| HashMap::new())
@@ -116,6 +221,10 @@ impl FileTracker
         {
             HashMap::new()
         };
+        for meta in metadata.values_mut()
+        {
+            meta.normalize_ownership();
+        }
 
         Ok(Self { workspace: workspace.to_path_buf(), metadata_path, metadata })
     }
@@ -156,15 +265,52 @@ impl FileTracker
     /// * `file_path` - Path to the installed file (absolute or relative to workspace)
     /// * `original_sha` - SHA-256 of the file at install time
     /// * `template_version` - Template format version used
-    /// * `lang` - Language name or `LANG_NONE` for language-agnostic files
-    /// * `agent` - Agent name or `AGENT_ALL` for agent-agnostic files
+    /// * `lang` - Language owner or `LANG_NONE` when there is no language owner
+    /// * `agent` - Agent owner or `AGENT_ALL` when there is no agent owner
     /// * `category` - Category tag (e.g. "main", "agent", "language", "skill")
     pub fn record_installation(&mut self, file_path: &Path, original_sha: String, template_version: u32, lang: String, agent: String, category: String)
+    {
+        self.record_installation_with_owners(file_path, original_sha, template_version, &[lang], &[agent], category);
+    }
+
+    /// Record a file installation with one or more language and agent owners.
+    pub fn record_installation_with_owners(
+        &mut self, file_path: &Path, original_sha: String, template_version: u32, langs: &[String], agents: &[String], category: String
+    )
     {
         let now = chrono::Utc::now().to_rfc3339();
         let relative_key = self.to_relative_key(file_path);
 
-        self.metadata.insert(relative_key, FileMetadata { original_sha, template_version, installed_date: now, lang, agent, category });
+        if let Some(metadata) = self.metadata.get_mut(&relative_key)
+        {
+            metadata.original_sha = original_sha;
+            metadata.template_version = template_version;
+            metadata.installed_date = now;
+            metadata.category = category;
+            for lang in langs
+            {
+                metadata.add_lang(lang);
+            }
+            for agent in agents
+            {
+                metadata.add_agent(agent);
+            }
+            metadata.normalize_ownership();
+        }
+        else
+        {
+            let mut metadata = FileMetadata { original_sha, template_version, installed_date: now, lang: Vec::new(), agent: Vec::new(), ref_count: 0, category };
+            for lang in langs
+            {
+                metadata.add_lang(lang);
+            }
+            for agent in agents
+            {
+                metadata.add_agent(agent);
+            }
+            metadata.normalize_ownership();
+            self.metadata.insert(relative_key, metadata);
+        }
     }
 
     /// Check the modification status of a file
@@ -211,20 +357,27 @@ impl FileTracker
         self.metadata.get(&relative_key)
     }
 
-    /// Returns the installed language for this workspace
+    /// Returns the installed languages for this workspace
     ///
-    /// Scans all tracked entries for one with a real language value (not `LANG_NONE`).
-    pub fn get_installed_language(&self) -> Option<String>
+    /// Scans tracked entries and returns every language owner in sorted order.
+    pub fn get_installed_languages(&self) -> Vec<String>
     {
+        let mut languages = BTreeSet::new();
         for meta in self.metadata.values()
         {
-            if meta.lang != LANG_NONE
+            for lang in &meta.lang
             {
-                return Some(meta.lang.clone());
+                languages.insert(lang.clone());
             }
         }
 
-        None
+        languages.into_iter().collect()
+    }
+
+    /// Returns one installed language for compatibility with older call sites.
+    pub fn get_installed_language(&self) -> Option<String>
+    {
+        self.get_installed_languages().into_iter().next()
     }
 
     /// Returns all tracked file entries
@@ -246,11 +399,11 @@ impl FileTracker
         self.metadata.iter().filter(|(_path_str, meta)| meta.category == category).map(|(path_str, meta)| (PathBuf::from(path_str), meta)).collect()
     }
 
-    /// Reset the `lang` field to `LANG_NONE` for all entries whose `lang` and `category` match
+    /// Release a language owner for all entries whose `lang` and `category` match
     ///
-    /// Used after `remove --lang` to clear the language attribution from files that are
+    /// Used after `remove --lang` to clear language ownership from files that are
     /// intentionally kept on disk (e.g. AGENTS.md, `category: "main"`), so that
-    /// `get_installed_language()` no longer reports the language as installed.
+    /// `get_installed_languages()` no longer reports the language as installed.
     ///
     /// # Arguments
     ///
@@ -260,11 +413,43 @@ impl FileTracker
     {
         for meta in self.metadata.values_mut()
         {
-            if meta.lang == lang && meta.category == category
+            if meta.category == category
             {
-                meta.lang = LANG_NONE.to_string();
+                meta.release_lang(lang);
             }
         }
+    }
+
+    /// Release an agent owner for all entries whose category matches.
+    pub fn clear_agent_for_category(&mut self, agent: &str, category: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            if meta.category == category
+            {
+                meta.release_agent(agent);
+            }
+        }
+    }
+
+    /// Release a language owner from a tracked file.
+    pub fn release_lang(&mut self, file_path: &Path, lang: &str) -> bool
+    {
+        let relative_key = self.to_relative_key(file_path);
+        self.metadata.get_mut(&relative_key).map(|meta| meta.release_lang(lang)).unwrap_or(false)
+    }
+
+    /// Release an agent owner from a tracked file.
+    pub fn release_agent(&mut self, file_path: &Path, agent: &str) -> bool
+    {
+        let relative_key = self.to_relative_key(file_path);
+        self.metadata.get_mut(&relative_key).map(|meta| meta.release_agent(agent)).unwrap_or(false)
+    }
+
+    /// Returns true when a tracked file has no remaining owners.
+    pub fn is_unreferenced(&self, file_path: &Path) -> bool
+    {
+        self.get_metadata(file_path).map(|meta| meta.is_unreferenced()).unwrap_or(true)
     }
 
     /// Adopt existing slopctl-managed files that are not yet tracked
@@ -403,14 +588,19 @@ impl FileTracker
         let sha = Self::calculate_sha256(file_path)?;
         let now = chrono::Utc::now().to_rfc3339();
 
-        self.metadata.insert(key, FileMetadata {
+        let mut metadata = FileMetadata {
             original_sha:     sha,
             template_version: 0,
             installed_date:   now,
-            lang:             lang.to_string(),
-            agent:            agent.to_string(),
+            lang:             Vec::new(),
+            agent:            Vec::new(),
+            ref_count:        0,
             category:         category.to_string()
-        });
+        };
+        metadata.add_lang(lang);
+        metadata.add_agent(agent);
+        metadata.normalize_ownership();
+        self.metadata.insert(key, metadata);
 
         Ok(1)
     }
@@ -487,14 +677,21 @@ impl FileTracker
                     continue;
                 };
 
-                self.metadata.insert(relative, FileMetadata {
+                let mut metadata = FileMetadata {
                     original_sha:     legacy.original_sha.clone(),
                     template_version: legacy.template_version,
                     installed_date:   legacy.installed_date.clone(),
-                    lang:             legacy.lang.clone().unwrap_or_else(|| LANG_NONE.to_string()),
-                    agent:            AGENT_ALL.to_string(),
+                    lang:             Vec::new(),
+                    agent:            Vec::new(),
+                    ref_count:        0,
                     category:         legacy.category.clone()
-                });
+                };
+                if let Some(lang) = &legacy.lang
+                {
+                    metadata.add_lang(lang);
+                }
+                metadata.normalize_ownership();
+                self.metadata.insert(relative, metadata);
 
                 migrated_keys.push(abs_path.clone());
                 count += 1;
@@ -627,6 +824,72 @@ agents:
     }
 
     #[test]
+    fn test_record_installation_merges_unique_owners_and_ref_count() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let shared_file = workspace.join(".gitignore");
+        fs::write(&shared_file, b"target/\n")?;
+
+        let mut tracker = FileTracker::new(workspace)?;
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "CppScript".into(), AGENT_ALL.into(), "language".into());
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+
+        let metadata = tracker.get_metadata(&shared_file).ok_or_else(|| anyhow::anyhow!("missing metadata"))?;
+        assert_eq!(metadata.lang, vec!["CppScript".to_string(), "Rust++".to_string()]);
+        assert!(metadata.agent.is_empty() == true);
+        assert_eq!(metadata.ref_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_release_owner_decrements_ref_count_and_keeps_other_owner() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let shared_file = workspace.join(".agents/skills/git-workflow/SKILL.md");
+        fs::create_dir_all(shared_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&shared_file, b"# skill\n")?;
+
+        let mut tracker = FileTracker::new(workspace)?;
+        tracker.record_installation(&shared_file, "sha1".into(), 5, "Rust++".into(), "fake".into(), "skill".into());
+
+        assert!(tracker.release_agent(&shared_file, "fake") == true);
+        let metadata = tracker.get_metadata(&shared_file).ok_or_else(|| anyhow::anyhow!("missing metadata"))?;
+        assert_eq!(metadata.lang, vec!["Rust++".to_string()]);
+        assert!(metadata.agent.is_empty() == true);
+        assert_eq!(metadata.ref_count, 1);
+        assert!(metadata.is_unreferenced() == false);
+
+        assert!(tracker.release_lang(&shared_file, "Rust++") == true);
+        let metadata = tracker.get_metadata(&shared_file).ok_or_else(|| anyhow::anyhow!("missing metadata"))?;
+        assert!(metadata.lang.is_empty() == true);
+        assert!(metadata.agent.is_empty() == true);
+        assert_eq!(metadata.ref_count, 0);
+        assert!(metadata.is_unreferenced() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_scalar_tracker_yaml_loads_empty() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let slopctl_dir = workspace.join(SLOPCTL_DIR);
+        fs::create_dir_all(&slopctl_dir)?;
+        fs::write(
+            slopctl_dir.join(TRACKER_FILE),
+            "AGENTS.md:\n  original_sha: sha1\n  template_version: 5\n  installed_date: 2026-01-01T00:00:00+00:00\n  lang: Rust++\n  agent: all\n  category: main\n"
+        )?;
+
+        let tracker = FileTracker::new(workspace)?;
+
+        assert!(tracker.get_entries().is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
     fn test_save_and_load() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
@@ -644,6 +907,10 @@ agents:
         {
             let tracker = FileTracker::new(workspace)?;
             assert_eq!(tracker.metadata.len(), 1);
+            let metadata = tracker.get_metadata(&workspace.join("test.txt")).ok_or_else(|| anyhow::anyhow!("missing metadata"))?;
+            assert!(metadata.lang.is_empty() == true);
+            assert!(metadata.agent.is_empty() == true);
+            assert_eq!(metadata.ref_count, 0);
         }
 
         Ok(())

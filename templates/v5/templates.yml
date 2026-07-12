@@ -149,15 +149,15 @@ languages:
         target: '$workspace'
       - source: 'skills/swift-build-commands'
         target: '$workspace'
-      - source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill'
+      - source: 'https://github.com/twostraws/Swift-Concurrency-Agent-Skill/tree/main/swift-concurrency-pro'
         target: '$workspace'
-      - source: 'https://github.com/twostraws/Swift-Testing-Agent-Skill'
+      - source: 'https://github.com/twostraws/Swift-Testing-Agent-Skill/tree/main/swift-testing-pro'
         target: '$workspace'
 
   swiftui:
     includes: [swift]
     skills:
-      - source: 'https://github.com/twostraws/SwiftUI-Agent-Skill'
+      - source: 'https://github.com/twostraws/SwiftUI-Agent-Skill/tree/main/swiftui-pro'
         target: '$workspace'
 
 # Integration templates for specific tools/workflows

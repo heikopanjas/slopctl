@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-06 (v21.5.0)
+**Last updated:** 2026-07-12 (v22.1.2)
 
 <!-- {mission} -->
 
@@ -87,6 +87,14 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always use `--dry-run` to verify CLI behavior before writing destructive tests
 - Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
 - One public struct or major component per source file; shared helpers go in `utils.rs`
+
+### File Tracker Ownership
+
+- Tracker entries use `lang: Vec<String>` and `agent: Vec<String>` owner arrays, plus a stored `ref_count`
+- `ref_count` must always equal `lang.len() + agent.len()`; add/remove operations increment or decrement only when a unique owner is added or released
+- Legacy scalar tracker values (`lang: none`, `agent: all`) are obsolete; old `.slopctl/tracker.yml` files are not migrated and workspaces should recreate tracker state fresh
+- Shared ownership only applies to identical files, such as shared `.gitignore`, formatter config files, and skill files; if the incoming template SHA differs from the tracked SHA, `init` must fail preflight and point users to merge instead of incrementing `ref_count`
+- `AGENTS.md` is a special main file: ownership can be tracked, but normal `remove --lang` and `remove --agent` must not delete it
 
 ### Security & Safety
 
@@ -362,6 +370,7 @@ Load the `rust-build-commands` skill when building or running the project.
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
+  - `required_version = "1.9.0"` - Match the pinned nightly rustfmt component
   - `tab_spaces = 4` - Standard indentation
   - `imports_granularity = "Crate"` - Group imports by crate
   - `group_imports = "StdExternalCrate"` - Organize imports logically
@@ -820,6 +829,21 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 
 ## Recent Updates & Decisions
 
+### 2026-07-12 (v22.1.2, complete language removal)
+
+- Made FileTracker ownership authoritative for `remove --lang`: every existing tracked non-main file owned by the selected language is now considered, even when the language still exists in the current catalog or a file was removed from its definition
+- Catalog discovery remains supplementary so untracked language files and skill files can still be removed
+- Pointed the external Swift concurrency, testing, and SwiftUI sources at their concrete skill directories so the derived source name matches the installed directory (`swift-concurrency-pro`, `swift-testing-pro`, and `swiftui-pro`)
+- Added regressions for stale tracked files, shared-owner release, URL skill discovery, and a complete remove-then-init language switch
+- Cleared strict all-target Clippy warnings in the GitHub retry test path and template verification tests
+- Version bump: 22.1.1 to 22.1.2 (PATCH — language removal bug fix)
+
+### 2026-07-06 (v22.1.1, rustfmt pin update)
+
+- Updated `.rustfmt.toml` `required_version` from `1.8.0` to `1.9.0` to match the active nightly rustfmt component
+- Rationale: `cargo fmt --check` rejects mismatched rustfmt versions before checking files, so the pin must track the project toolchain
+- Version bump: 22.1.0 to 22.1.1 (PATCH — tooling configuration fix)
+
 ### 2026-07-06 (v21.5.0, GitHub rate-limit mitigation)
 
 - Replaced recursive GitHub Contents API skill downloads with **one tarball fetch per repository** during `templates --update` and URL-based `init` skill installs; tarball extraction uses pure-Rust `flate2` + `tar` (macOS/Linux/Windows, no shell `tar`)
@@ -899,6 +923,33 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 - Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
 - Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
 - Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
+
+### 2026-06-13 (v22.1.0, agent-aware skill distribution replaces adoption)
+
+- Replaced broad `.agents/skills/` → native-agent adoption with deterministic skill distribution based on installed agents
+- Language and top-level skills with omitted target or bare `target: '$workspace'` now install to all required directories: `.agents/skills/` when cross-client agents are present (or no agents), plus one copy per native-only agent skill dir when native-only agents are present
+- `init --agent <native-only>` after a language install now hydrates language skills from templates into the agent's native skill dir instead of copying arbitrary files from `.agents/skills/`
+- Explicit `target: '$userprofile'` and full path targets remain single-target overrides
+- Added `non_agent_skill_target_dirs`, `install_non_agent_skills`, and `hydrate_language_skills_for_native_agent` in `src/template_engine.rs`
+- Removed obsolete adoption block and `target_already_scheduled` helper
+- Version bump: 22.0.1 → 22.1.0 (MINOR — new distribution/hydration behavior, fully backwards compatible for typical single-agent workflows)
+
+### 2026-06-13 (v22.0.1, fix remove --agent leaving lang skills in agent dir)
+
+- Fixed `remove --agent <name>` not deleting language skills that were installed into the agent's native skill directory (e.g. `.claude/skills/`), causing the agent marker directory to remain non-empty and `slopctl status` to still report the agent as installed after removal
+- Root cause: native-only agents (e.g. Claude, Vibe) receive language skills in their native skill dir instead of `.agents/skills/`; the tracker records these with `lang: [<lang>]` and `agent: []` (no agent owner); `release_agent(file, "claude")` was a no-op, so `is_unreferenced()` stayed `false` and the file was kept with "still referenced"
+- Fix: in the removal loop, added `in_agent_dir` flag — when `true` (file's path matches the agent's directory tree via `path_belongs_to_agent`), force-delete the file regardless of `is_unreferenced`; physical location in the agent's directory is sufficient reason for removal
+- Added regression test `test_remove_agent_removes_lang_skills_in_agent_skill_dir` (was reproducing the bug before the fix)
+- Version bump: 22.0.0 → 22.0.1 (PATCH — bug fix)
+
+### 2026-06-13 (v22.0.0, tracker owner arrays and ref counts)
+
+- **BREAKING**: changed `FileMetadata.lang` and `FileMetadata.agent` from scalar strings to unique owner arrays, and added a stored `ref_count` that must equal `lang.len() + agent.len()`
+- Removed the single-language `init` guard; `init` can now add another language when shared targets such as `.gitignore` or skill files are byte-identical to the tracked template
+- Installation preflight now treats tracked identical files as shared ownership refreshes, while differing template content remains a conflict that must go through merge instead of incrementing `ref_count`
+- `remove --lang` and `remove --agent` now release ownership first and only delete non-main files when no language or agent owners remain
+- Existing scalar `.slopctl/tracker.yml` files are intentionally not migrated; users must recreate tracker state fresh
+- Version bump: 21.1.7 → 22.0.0 (MAJOR — breaking tracker schema and multi-language init behavior)
 
 ### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
 

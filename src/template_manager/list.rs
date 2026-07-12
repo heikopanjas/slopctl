@@ -119,14 +119,15 @@ impl TemplateManager
             println!("  {} No agents installed", "○".yellow());
         }
 
-        // Installed language (from FileTracker metadata)
-        if let Some(lang) = file_tracker.get_installed_language()
+        // Installed languages (from FileTracker ownership metadata)
+        let installed_languages = file_tracker.get_installed_languages();
+        if installed_languages.is_empty() == false
         {
-            println!("  {} Installed language: {}", "✓".green(), lang.green());
+            println!("  {} Installed languages: {}", "✓".green(), installed_languages.join(", ").green());
         }
         else
         {
-            println!("  {} No language installed", "○".yellow());
+            println!("  {} No languages installed", "○".yellow());
         }
 
         // Detect installed skills by scanning workspace-scoped agent skill directories on disk,
