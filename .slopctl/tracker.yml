@@ -1,105 +1,119 @@
-.claude/skills/git-workflow/SKILL.md:
-  original_sha: f664bd947eb5b5c0f71d56a2d32393a4b24827c0c4b12bc0dd470eff7227d2b3
+.editorconfig:
+  original_sha: 2cdf8de1f750e1c41bb875838dc70caa8dc99b06def6caff7a61bbcb201d59fb
   template_version: 5
-  installed_date: 2026-04-25T11:08:16.961870+00:00
-  lang: none
-  agent: all
+  installed_date: 2026-06-13T10:06:45.413438+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: language
+.claude/skills/rust-coding-conventions/SKILL.md:
+  original_sha: 3a6a1ac345538d8a6bb9cfff1033801f601f4f3b8a65a1694214b9ba8883aba4
+  template_version: 5
+  installed_date: 2026-06-13T10:07:49.764291+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: skill
+.rustfmt.toml:
+  original_sha: 3cd36b434eef756854beec4e5dfc59f52f06fee47dfd6e20f264caa6ed50a113
+  template_version: 5
+  installed_date: 2026-06-13T10:06:45.413293+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: language
+.agents/skills/semantic-versioning/SKILL.md:
+  original_sha: def35d0dbd880443f63d53f0081368bd7daa9c768f39e728862216f4de716413
+  template_version: 5
+  installed_date: 2026-06-13T10:07:54.096736+00:00
+  lang:
+  - rust
+  agent:
+  - codex
+  - cursor
+  ref_count: 3
   category: skill
 .cursor/commands/init-session.md:
   original_sha: 21f4305fa05b0a465480784c61b7236343f613cd364236c3e9ca23e81d57ea53
-  template_version: 0
-  installed_date: 2026-04-19T16:05:42.374553+00:00
-  lang: none
-  agent: cursor
-  category: command
-.rustfmt.toml:
-  original_sha: e869010a8aecbf4eea29e7a4ee95d5e0f76865913be29497d106e4a33f168c34
   template_version: 5
-  installed_date: 2026-04-19T16:32:20.909095+00:00
-  lang: rust
-  agent: all
-  category: language
+  installed_date: 2026-06-13T10:06:45.413882+00:00
+  lang: []
+  agent:
+  - cursor
+  ref_count: 1
+  category: agent
+.gitignore:
+  original_sha: a38caa829ecdc7fdc18ad40bdb9d7e3da08b93cd712a558aabf524ac6e36037e
+  template_version: 5
+  installed_date: 2026-06-13T10:06:45.413569+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: integration
 AGENTS.md:
-  original_sha: 8e7ed67a36c49f1ece8c6deb9a61efca1e01d58c0698cb66453dd212a9a5b5e5
-  template_version: 5
-  installed_date: 2026-05-01T11:35:34.446818+00:00
-  lang: none
-  agent: all
+  original_sha: 60a9d4006a7402ba35adea64c3322663eda68b80abcc3cff70aea94b4db3b881
+  template_version: 0
+  installed_date: 2026-06-13T10:05:24.845028+00:00
+  lang: []
+  agent: []
+  ref_count: 0
   category: main
-CLAUDE.md:
-  original_sha: e63af7a5c3d4f5725dc90737c339b302c77eaddeeaa0c791a2b0947f41d69083
+.claude/skills/rust-build-commands/SKILL.md:
+  original_sha: 0f9f73b10a919afc81f5dfe6b782ee28bd802583eada5a9b7a5b1b7c1391449d
   template_version: 5
-  installed_date: 2026-04-25T11:09:20.982472+00:00
-  lang: none
-  agent: claude
-  category: language
+  installed_date: 2026-06-13T10:07:49.764485+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: skill
 .agents/skills/rust-build-commands/SKILL.md:
-  original_sha: dea7d809af33ef34c5700736fda29b58f31d564266646ffda85d4f3d24c748d5
+  original_sha: 0f9f73b10a919afc81f5dfe6b782ee28bd802583eada5a9b7a5b1b7c1391449d
   template_version: 5
-  installed_date: 2026-04-19T16:32:13.652913+00:00
-  lang: rust
-  agent: all
+  installed_date: 2026-06-13T10:06:45.414346+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
   category: skill
-.github/skills/semantic-versioning/SKILL.md:
-  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
+.gitattributes:
+  original_sha: b06645d6d1fca42aa742230b5ea0875ba8b996198073db1872402a9ca7ac6356
   template_version: 5
-  installed_date: 2026-05-01T11:33:11.236625+00:00
-  lang: none
-  agent: all
-  category: skill
+  installed_date: 2026-06-13T10:07:54.096386+00:00
+  lang: []
+  agent: []
+  ref_count: 0
+  category: integration
 .agents/skills/git-workflow/SKILL.md:
-  original_sha: f664bd947eb5b5c0f71d56a2d32393a4b24827c0c4b12bc0dd470eff7227d2b3
+  original_sha: e725af4da5ee10630112f6bab5177dae1622346c43f5dc71cefc38495fa95c20
   template_version: 5
-  installed_date: 2026-04-19T16:32:13.652681+00:00
-  lang: none
-  agent: all
+  installed_date: 2026-06-13T10:07:54.096730+00:00
+  lang:
+  - rust
+  agent:
+  - codex
+  - cursor
+  ref_count: 3
   category: skill
-.github/prompts/init-session.prompt.md:
-  original_sha: 44e08a0ddf49895b4ab13a4263f8f3b03e3f07118fd5ffcba7491ef42e977f32
+.codex/skills/init-session/SKILL.md:
+  original_sha: df779e6360670dedacfe2cd09eca77a222d28e52be7eca814d648789d534f995
   template_version: 5
-  installed_date: 2026-05-01T11:33:11.236344+00:00
-  lang: none
-  agent: copilot
-  category: integration
-.github/copilot-instructions.md:
-  original_sha: e63af7a5c3d4f5725dc90737c339b302c77eaddeeaa0c791a2b0947f41d69083
-  template_version: 5
-  installed_date: 2026-05-01T11:33:11.236198+00:00
-  lang: none
-  agent: copilot
-  category: integration
-.agents/skills/semantic-versioning/SKILL.md:
-  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
-  template_version: 5
-  installed_date: 2026-04-19T16:32:13.653446+00:00
-  lang: none
-  agent: all
-  category: skill
-.claude/skills/semantic-versioning/SKILL.md:
-  original_sha: 1dafed38ef2647b30a990117fdfd868502a8a52e52360ce5038b8f256163fade
-  template_version: 5
-  installed_date: 2026-04-25T11:08:16.962064+00:00
-  lang: none
-  agent: all
+  installed_date: 2026-06-13T10:07:54.096723+00:00
+  lang: []
+  agent:
+  - codex
+  ref_count: 1
   category: skill
 .agents/skills/rust-coding-conventions/SKILL.md:
-  original_sha: 8ee985725d7288f8dd471c2975352b2e5e687e0d95a655f2a01a01a60283e2d2
+  original_sha: 3a6a1ac345538d8a6bb9cfff1033801f601f4f3b8a65a1694214b9ba8883aba4
   template_version: 5
-  installed_date: 2026-04-19T16:32:13.653246+00:00
-  lang: rust
-  agent: all
+  installed_date: 2026-06-13T10:06:45.414170+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
   category: skill
-.github/skills/git-workflow/SKILL.md:
-  original_sha: f664bd947eb5b5c0f71d56a2d32393a4b24827c0c4b12bc0dd470eff7227d2b3
-  template_version: 5
-  installed_date: 2026-05-01T11:33:11.236511+00:00
-  lang: none
-  agent: all
-  category: skill
-.claude/commands/init-session.md:
-  original_sha: 4cabd84a1befddd96da29dd88a672976db8ad0078aaf3004eb531eb1ebbb4c03
-  template_version: 5
-  installed_date: 2026-04-25T11:08:16.961623+00:00
-  lang: none
-  agent: claude
-  category: agent

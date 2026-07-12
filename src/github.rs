@@ -113,7 +113,7 @@ fn get_bytes_with_retry(url: &str, accept: Option<&str>) -> Result<Vec<u8>>
                 continue;
             }
 
-            if status >= 200 && status < 300
+            if (200..300).contains(&status) == true
             {
                 return Ok(b"mock-http-success".to_vec());
             }

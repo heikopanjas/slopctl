@@ -10,7 +10,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
-    file_tracker::{AGENT_ALL, FileStatus, FileTracker},
+    file_tracker::{FileStatus, FileTracker},
     template_engine::{self, PartialSelectors, ResolvedFile, ResolvedFiles, TemplateEngine, UpdateOptions, normalize_path}
 };
 
@@ -251,7 +251,7 @@ impl TemplateManager
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
             let category = categorize_target(target, &entry.agent);
-            file_tracker.record_installation(target, sha, config.version, entry.lang.clone(), entry.agent.clone(), category);
+            file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, category);
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale
@@ -309,7 +309,7 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
 }
 
 /// Determines the tracking category for a refreshed target
-fn categorize_target(target: &Path, agent: &str) -> String
+fn categorize_target(target: &Path, agent: &[String]) -> String
 {
     if skill_name_of(target).is_some() == true
     {
@@ -319,7 +319,7 @@ fn categorize_target(target: &Path, agent: &str) -> String
     {
         "integration".to_string()
     }
-    else if agent != AGENT_ALL
+    else if agent.is_empty() == false
     {
         "agent".to_string()
     }
