@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-12 (v22.1.2)
+**Last updated:** 2026-07-12 (v22.1.3)
 
 <!-- {mission} -->
 
@@ -828,6 +828,14 @@ The development environment uses **PowerShell on Windows**. All shell commands e
 ---<!-- {changelog} -->
 
 ## Recent Updates & Decisions
+
+### 2026-07-12 (v22.1.3, tracker-backed skill status)
+
+- Changed `slopctl status` to derive installed skills exclusively from existing FileTracker skill entries instead of treating every directory under an agent skill path as installed
+- Empty or manually created untracked skill directories no longer produce phantom installed-skill status
+- `remove` now records discovered skill roots for a final empty-directory cleanup pass after deleting their files, including URL-based skills with nested content
+- Added regressions for tracker-only skill status and empty remote-skill root cleanup
+- Version bump: 22.1.2 to 22.1.3 (PATCH — status and cleanup bug fixes)
 
 ### 2026-07-12 (v22.1.2, complete language removal)
 
