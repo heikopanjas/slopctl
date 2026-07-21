@@ -2,6 +2,7 @@
 ## Commit Protocol (CRITICAL)
 
 - **NEVER commit automatically** - always wait for explicit confirmation
+- **NO co-authorship by coding agents** - never add `Co-Authored-By` trailers, `Generated with` footers, or any other attribution naming an AI coding agent
 
 Whenever asked to commit changes:
 
@@ -47,6 +48,11 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 - Explain what and why, not how
 - Use bullet points (`-`) for multiple items with lowercase text after bullet
 - Keep it concise
+
+**Footer Rules:**
+
+- Use the footer only for issue references (`#123`) or `BREAKING CHANGE:` notes
+- **Never add co-authorship or attribution for coding agents**: no `Co-Authored-By` trailers, no `Generated with` lines, no AI tool names
 
 **Special Character Safety:**
 
