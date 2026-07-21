@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Create templates archive
-        run: zip -r slopctl-templates.zip templates/
+        run: zip -r slopctl-templates.zip templates/ LICENSE
 
       - name: Upload templates as artifact
         uses: actions/upload-artifact@v6
@@ -136,12 +136,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/release/slopctl.exe, slopctl-templates.zip -DestinationPath slopctl-${{ matrix.os }}.zip
+          Compress-Archive -Path target/release/slopctl.exe, slopctl-templates.zip, LICENSE -DestinationPath slopctl-${{ matrix.os }}.zip
 
       - name: Bundle binary with templates (Unix)
         if: matrix.os != 'windows-latest'
         run: |
-          zip -j slopctl-${{ matrix.os }}.zip target/release/slopctl slopctl-templates.zip
+          zip -j slopctl-${{ matrix.os }}.zip target/release/slopctl slopctl-templates.zip LICENSE
 
       - name: Upload bundled artifact
         uses: actions/upload-artifact@v6
