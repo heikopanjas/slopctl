@@ -4,6 +4,12 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-07-22 (v22.5.4, fix duplicate managed files in status)
+
+- `slopctl status --verbose` no longer lists AGENTS.md (and agent files) twice; candidates from the BoM ('./x'), FileTracker ('x'), and the absolute AGENTS.md path are now canonicalized before deduplication so different spellings of the same file collapse to one entry
+- extracted the collection into `collect_managed_files` and canonicalized the workspace dir for display stripping so symlinked workspaces still show relative paths
+- version bump: 22.5.3 to 22.5.4 (PATCH - status output bug fix)
+
 ### 2026-07-22 (v22.5.3, local template update validation and feedback)
 
 - `templates --update --from <local path>` now validates that the source contains a parseable templates.yml before touching the cache (mirroring the URL path) and prints a completion line with the copied file count; previously it ended silently after "Copying templates from local path", which read as a no-op

@@ -2,6 +2,7 @@
 
 use std::{
     collections::BTreeSet,
+    fs,
     path::{Path, PathBuf}
 };
 
@@ -41,6 +42,48 @@ impl TemplateManager
                 }
             })
             .collect()
+    }
+
+    /// Collects the deduplicated set of slopctl-managed workspace files
+    ///
+    /// Merges candidates from the Bill of Materials, the FileTracker, and the main
+    /// AGENTS.md path. Every candidate is canonicalized before deduplication so the
+    /// same file collected from different sources (BoM `./x`, tracker `x`, absolute
+    /// AGENTS.md) collapses to a single entry rather than surviving as distinct
+    /// spellings. Only files that exist on disk are included; the result is sorted.
+    fn collect_managed_files(current_dir: &Path, config_file: &Path, file_tracker: &FileTracker, agents_md_path: &Path) -> Vec<PathBuf>
+    {
+        let mut managed_files: Vec<PathBuf> = Vec::new();
+
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(config_file)
+        {
+            for agent_name in bom.get_agent_names()
+            {
+                if let Some(files) = bom.get_agent_files(&agent_name)
+                {
+                    managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
+                }
+            }
+        }
+
+        for (path, _) in file_tracker.get_entries()
+        {
+            if path.exists() == true
+            {
+                managed_files.push(path);
+            }
+        }
+
+        if agents_md_path.exists() == true
+        {
+            managed_files.push(agents_md_path.to_path_buf());
+        }
+
+        let mut normalized: Vec<PathBuf> = managed_files.iter().map(|file| template_engine::normalize_path(&current_dir.join(file))).collect();
+        normalized.sort();
+        normalized.dedup();
+        normalized
     }
 
     /// Show workspace status
@@ -170,45 +213,18 @@ impl TemplateManager
 
         if verbose == true
         {
-            let mut managed_files: Vec<PathBuf> = Vec::new();
-
-            if config_file.exists() == true &&
-                let Ok(bom) = BillOfMaterials::from_config(&config_file)
-            {
-                for agent_name in bom.get_agent_names()
-                {
-                    if let Some(files) = bom.get_agent_files(&agent_name)
-                    {
-                        managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
-                    }
-                }
-            }
-
-            let all_tracked = file_tracker.get_entries();
-            for (path, _) in all_tracked
-            {
-                if path.exists() == true
-                {
-                    managed_files.push(path);
-                }
-            }
-
-            if agents_md_path.exists() == true
-            {
-                managed_files.push(agents_md_path);
-            }
+            let managed_files = Self::collect_managed_files(&current_dir, &config_file, &file_tracker, &agents_md_path);
 
             println!();
 
-            managed_files.sort();
-            managed_files.dedup();
+            let canonical_dir = fs::canonicalize(&current_dir).unwrap_or_else(|_| current_dir.clone());
 
             if managed_files.is_empty() == false
             {
                 println!("{}", "Managed Files:".bold());
                 for file in &managed_files
                 {
-                    let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
+                    let display_path = file.strip_prefix(&canonical_dir).unwrap_or(file);
                     println!("  • {}", display_path.display().to_string().yellow());
                 }
             }
@@ -399,8 +415,51 @@ impl TemplateManager
 #[cfg(test)]
 mod tests
 {
+    use std::path::PathBuf;
+
     use super::TemplateManager;
-    use crate::file_tracker::{AGENT_ALL, FileTracker};
+    use crate::file_tracker::{AGENT_ALL, FileTracker, LANG_NONE};
+
+    #[test]
+    fn test_collect_managed_files_dedups_across_sources() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+
+        // templates.yml whose agent BoM yields a './'-prefixed workspace path.
+        std::fs::write(
+            config_dir.path().join("templates.yml"),
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus:\n    prompts:\n      - source: bogus/init.md\n        \
+             target: '$workspace/.bogus/commands/init.md'\nlanguages: {}\n"
+        )?;
+
+        // AGENTS.md and the agent file exist on disk and are tracked (relative keys).
+        let agents_md = workspace.path().join("AGENTS.md");
+        std::fs::write(&agents_md, "# Project\n")?;
+        let agent_file = workspace.path().join(".bogus/commands/init.md");
+        std::fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        std::fs::write(&agent_file, "# init\n")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&agent_file, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        // agents_md_path is passed as an absolute path, matching list_workspace.
+        let collected = TemplateManager::collect_managed_files(workspace.path(), &config_dir.path().join("templates.yml"), &tracker, &agents_md);
+
+        let canonical_dir = std::fs::canonicalize(workspace.path())?;
+        let relative: Vec<PathBuf> = collected.iter().map(|p| p.strip_prefix(&canonical_dir).unwrap_or(p).to_path_buf()).collect();
+
+        let agents_md_count = relative.iter().filter(|p| p.as_os_str() == "AGENTS.md").count();
+        assert_eq!(agents_md_count, 1, "AGENTS.md must appear exactly once, got {:?}", relative);
+
+        let mut deduped = relative.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(deduped.len(), relative.len(), "managed files must contain no duplicate spellings: {:?}", relative);
+
+        Ok(())
+    }
 
     #[test]
     fn test_tracked_skill_names_ignores_untracked_empty_directories() -> anyhow::Result<()>
