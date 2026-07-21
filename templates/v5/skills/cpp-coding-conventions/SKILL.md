@@ -4,7 +4,7 @@ description: C++ coding conventions covering RAII, naming, class design, modern 
 license: MIT
 metadata:
   author: Heiko Panjas
-  version: "1.1"
+  version: "1.2"
 ---
 
 # C++ Coding Conventions
@@ -332,6 +332,93 @@ It covers RAII, naming, class structure, modern C++ features, documentation, and
       // Implementation doesn't use eventType
   }
   ```
+
+**Guard-Clause Macros:**
+
+- Use `Require(condition)` only for a true caller precondition in a `void` function.
+- Use `RequireReturn(condition, fallback)` only for a true caller precondition in a non-`void` function.
+- **The macro call must be the first executable statement in the function body.** No declarations, assignments,
+  logging, calculations, calls, or other executable code may precede it.
+- Do not use either macro for normal branching, optional input, search misses, parsing failures, or ordinary control
+  flow. Use an explicit branch and a result variable instead.
+- These macros silently return from the enclosing function; they are not assertion or exception-based contract
+  enforcement.
+- Define multi-statement macros with `do { ... } while (false)`.
+- Conditions must be side-effect free and are evaluated exactly once. `fallback` must be valid for the enclosing return
+  type and is evaluated only when the condition is false.
+- Use the macros only at a function's top-level guard path. Do not use them in place of ordinary branching or RAII
+  cleanup.
+- Macros are global preprocessor symbols. Do not use names that conflict with functions or test helpers visible in the
+  same translation unit.
+
+  ```cpp
+  // Good
+  void Process(const bool isValid)
+  {
+      Require(isValid);
+      
+      ProcessValidatedInput();
+  }
+
+  // Bad
+  void Process(const bool isValid)
+  {
+      if(true == isValid)
+      {
+          ProcessValidatedInput();
+      }
+  }
+
+  // Good
+  [[nodiscard]] int ReadValue(const bool isValid)
+  {
+      RequireReturn(isValid, 0);
+      
+      return ReadValidatedValue();
+  }
+
+  // Bad
+  [[nodiscard]] int ReadValue(const bool isValid)
+  {
+      if(false == isValid)
+      {
+          return 0;
+      }
+      
+      return ReadValidatedValue();
+  }
+```
+
+**Single Return for Non-Void Functions:**
+
+- Each non-`void` function must contain exactly one explicit `return` statement at the end of its normal execution
+  path.
+- The only exception is an intentional `RequireReturn` guard. A function using it must not contain another early
+  `return` statement.
+- Use a result variable when normal control flow needs to select between values.
+
+  ```cpp
+  // Good: Single return at and of function
+  [[nodiscard]] int SelectValue(const bool useDefault)
+  {
+      int result = 42;
+      if (true == useDefault)
+      {
+          result = 0;
+      }
+      return result;
+  }
+
+  // Bad: Multiple returns from function
+  [[nodiscard]] int SelectValue(const bool useDefault)
+  {
+      if (true == useDefault)
+      {
+          return 0;
+      }
+      return 42;
+  }
+```
 
 **Type Definitions and Aliases:**
 
