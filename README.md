@@ -99,8 +99,9 @@ With `--lang rust` this will:
 1. Copy main AGENTS.md template to your project
 2. Merge skill hint fragments into AGENTS.md (tells agents about available coding skills)
 3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore)
-4. Install language skills (rust-coding-conventions, rust-build-commands) to `.agents/skills/`
-5. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode)
+4. Create `UPDATES.md`, the append-only "Recent Updates & Decisions" log (entries below its changelog marker are preserved on re-init and merge)
+5. Install language skills (rust-coding-conventions, rust-build-commands) to `.agents/skills/`
+6. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode)
 
 Without `--lang`, you get AGENTS.md with mission, principles, and integration (e.g. git) only—no language-specific files.
 
@@ -237,33 +238,30 @@ If templates are updated upstream:
 # Update global templates
 slopctl templates --update
 
-# Then reinitialize the project (will skip customized AGENTS.md unless --force)
-slopctl init --lang rust
+# Then refresh the workspace from the updated cache
+slopctl update
 ```
 
 slopctl will:
 
-- Check if AGENTS.md has been customized (template marker removed)
-- Skip customized AGENTS.md unless `--force` is used
+- Restore missing files and refresh unmodified ones
+- Skip locally modified files (use `slopctl merge` to combine them, or `--force` to overwrite)
+- Leave AGENTS.md untouched (`slopctl merge` is its update path)
+
+Re-running `slopctl init` with an already-installed language/agent is rejected with guidance; `init` is for installing something new.
 
 ### Common Scenarios
 
 **Scenario: Modified AGENTS.md locally**
 
-```bash
-$ slopctl init --lang rust
-! Local AGENTS.md has been customized and will be skipped
-→ Other files will still be updated
-→ Use --force to overwrite AGENTS.md
-```
-
-**Solution:** Review changes, commit them, then use `--force`:
+A customized AGENTS.md is never overwritten by `update`. Use `slopctl merge` for an AI-assisted combination with the latest template, or force a reinstall:
 
 ```bash
 git diff AGENTS.md              # Review changes
 git add AGENTS.md
 git commit -m "docs: customize project instructions"
-slopctl init --lang rust --force
+slopctl merge                   # AI-assisted merge (recommended)
+slopctl init --lang rust --force   # Or: overwrite with fresh templates
 ```
 
 **Scenario: Clean up project templates**
@@ -617,9 +615,9 @@ slopctl doctor [--fix] [--dry-run] [--verbose] [--smart]
 
 **What `--fix` repairs:**
 
-- **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `slopctl init` to reinstall.
-- **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `slopctl init` afterward for a full re-merge with language sections.
-- **Modified** — No automatic fix; shown as informational. Use `slopctl init --force` to overwrite if intended.
+- **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `slopctl update` to restore the file.
+- **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `slopctl merge` afterward for a full re-merge with language sections.
+- **Modified** — No automatic fix; shown as informational. Use `slopctl merge` to combine, or `slopctl update --force` to overwrite if intended.
 
 **Examples:**
 
@@ -773,22 +771,25 @@ slopctl merge --list-models                      # List available models from th
 
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
 
-### `update` - Refresh Individual Files or Skills
+### `update` - Refresh Installed Templates
 
-Refresh one or more individual template files or skills from the **local global template cache** without reinstalling a language's entire file set. This is useful when only a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) needs to be brought up to date.
+Refresh installed templates from the **local global template cache**. Without selectors, `slopctl update` refreshes the whole workspace: every installed language and detected agent is resolved, missing or deleted tracked files are restored, unmodified files are brought up to the cached template state, and locally modified or untracked files are skipped with a report (use `--force` to overwrite them). With `--file`/`--skill` selectors it refreshes only the selected targets.
 
 Run `slopctl templates --update` first to refresh the global catalog (including URL-based skills cached under `skills/<name>/`). The `update` command never fetches from GitHub or other remote sources; it copies only the selected targets from that cache into the workspace.
 
-Selected files and skills are routed to the same workspace locations as `init`. The scope defaults to the installed language (from the FileTracker) and the agents detected in the workspace; override with `--lang`/`--agent`. Selected targets are overwritten directly. A locally customized or untracked target is skipped with an error unless `--force` is given.
+Files and skills are routed to the same workspace locations as `init`. The scope defaults to the installed languages (from the FileTracker) and the agents detected in the workspace; override with `--lang`/`--agent`. Explicitly selected targets are overwritten directly, but a customized or untracked selected target is an error unless `--force` is given; in full-workspace mode such files are skipped with a report instead.
 
 When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
 
-This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs a language's *complete* set).
+This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs something *new*: a language or an agent). `AGENTS.md` is never refreshed by `update`; use `merge`.
 
 **Usage:**
 
 ```bash
 slopctl templates --update                            # Refresh global cache first
+slopctl update                                      # Refresh the whole workspace
+slopctl update --dry-run                            # Preview the full refresh
+slopctl update --force                              # Also overwrite customized files
 slopctl update --skill rust-coding-conventions      # Refresh a single skill
 slopctl update --file .rustfmt.toml                 # Refresh a single file
 slopctl update --skill git-workflow --file .gitattributes  # Refresh several at once
@@ -807,7 +808,7 @@ slopctl update --skill git-workflow --dry-run       # Preview without writing
 - `--force` / `-f` - Overwrite locally customized or untracked files
 - `--dry-run` / `-n` - Preview changes without applying them
 
-At least one `--file` or `--skill` must be provided. `AGENTS.md` cannot be refreshed as a single file (it is fragment-merged); use `merge` or `init` instead.
+Without `--file`/`--skill` the whole workspace is refreshed. `AGENTS.md` is excluded in both modes (it is fragment-merged); use `merge` to update it.
 
 ### `config` - Manage Configuration
 
@@ -912,9 +913,9 @@ All templates in this repository enforce these critical rules:
 
 - **Never auto-commit** – Explicit human request required before any commit
 - **Conventional commits** – Standardized commit message format (max 500 chars)
-- **Change logging** – Maintain "Recent Updates & Decisions" log with timestamps
+- **Change logging** – Maintain the append-only "Recent Updates & Decisions" log in `UPDATES.md` (see the `recent-updates` skill)
 - **Single source of truth** – Update only `AGENTS.md`, not reference files
-- **Structured updates** – Preserve file structure: header → timestamp → content → log
+- **Structured updates** – Preserve file structure: header → timestamp → content; history lives in `UPDATES.md`
 - **No secrets** – Never add credentials, API keys, or sensitive data
 
 ## Supported Agents

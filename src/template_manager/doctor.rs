@@ -323,7 +323,9 @@ impl TemplateManager
                 }
                 | FileStatus::Modified =>
                 {
-                    if metadata.category == "main"
+                    // Main files and changelog-marker files are expected to diverge from their
+                    // template (user-owned content), so modifications are not an issue.
+                    if metadata.category == "main" || template_engine::file_contains_changelog_marker(&path) == true
                     {
                         if verbose == true
                         {
@@ -488,5 +490,27 @@ mod tests
         let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
         assert!(issues.len() == 1);
         assert!(matches!(issues[0].kind, IssueKind::UnmergedTemplate) == true);
+    }
+
+    #[test]
+    fn test_modified_changelog_marker_file_not_flagged()
+    {
+        let dir = make_temp_dir();
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+
+        // Tracked with a stale SHA so the file reads as Modified; the changelog
+        // marker means the divergence is expected user-owned log content.
+        let target = workspace.join("UPDATES.md");
+        let content = format!("# Log\n\n{}\n\n### 2025-01-01 (v0.1.0, entry)\n", template_engine::CHANGELOG_MARKER);
+        fs::write(&target, &content).unwrap();
+
+        let mut tracker = FileTracker::new(&workspace).unwrap();
+        tracker.record_installation(&target, "stale-sha".into(), 4, LANG_NONE.into(), AGENT_ALL.into(), "integration".into());
+        tracker.save().unwrap();
+
+        let tracker2 = FileTracker::new(&workspace).unwrap();
+        let issues = TemplateManager::collect_issues(&tracker2, &workspace, false).unwrap();
+        assert!(issues.is_empty() == true, "modified changelog-marker file must not be flagged as an issue");
     }
 }

@@ -172,6 +172,12 @@ integration:
     files:
       - source: semantic-versioning-summary.md
         target: '$instructions'
+  updates:
+    files:
+      - source: UPDATES.md
+        target: '$workspace/UPDATES.md'
+      - source: recent-updates-summary.md
+        target: '$instructions'
 
 # General templates that apply to all projects
 principles:
@@ -197,4 +203,6 @@ skills:
   - source: 'skills/git-workflow'
     target: '$workspace'
   - source: 'skills/semantic-versioning'
+    target: '$workspace'
+  - source: 'skills/recent-updates'
     target: '$workspace'

@@ -34,8 +34,9 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 
 - Maintain the "Last updated" timestamp at the top
 - Add content to the relevant section (Project Overview, Coding Standards, etc.)
-- Add entries to the "Recent Updates & Decisions" log at the bottom with:
+- Log every change in the "Recent Updates & Decisions" log in `UPDATES.md` with:
   - Date (with time if multiple updates per day)
   - Brief description
   - Reasoning for the change
-- Preserve this structure: title header → timestamp → main instructions → "Recent Updates & Decisions" section
+- New log entries go directly below the changelog marker in `UPDATES.md`, newest first; load the `recent-updates` skill for the full rules
+- Preserve the AGENTS.md structure: title header → timestamp → main instructions

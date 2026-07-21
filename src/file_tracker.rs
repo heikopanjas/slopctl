@@ -380,6 +380,24 @@ impl FileTracker
         self.get_installed_languages().into_iter().next()
     }
 
+    /// Returns the installed agents for this workspace
+    ///
+    /// Scans tracked entries and returns every agent owner in sorted order.
+    /// Unlike marker-directory detection, this reflects only what slopctl installed.
+    pub fn get_installed_agents(&self) -> Vec<String>
+    {
+        let mut agents = BTreeSet::new();
+        for meta in self.metadata.values()
+        {
+            for agent in &meta.agent
+            {
+                agents.insert(agent.clone());
+            }
+        }
+
+        agents.into_iter().collect()
+    }
+
     /// Returns all tracked file entries
     ///
     /// Each entry is a `(PathBuf, &FileMetadata)` tuple where the path is
@@ -976,6 +994,35 @@ agents:
 
         let none = tracker.get_entries_by_category("nonexistent");
         assert_eq!(none.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_installed_agents_returns_unique_sorted_owners() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let file_a = workspace.join("a.md");
+        fs::write(&file_a, b"a")?;
+        tracker.record_installation(&file_a, "sha1".into(), 5, LANG_NONE.into(), "fake".into(), "agent".into());
+
+        let file_b = workspace.join("b.md");
+        fs::write(&file_b, b"b")?;
+        tracker.record_installation(&file_b, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        let file_c = workspace.join("c.md");
+        fs::write(&file_c, b"c")?;
+        tracker.record_installation(&file_c, "sha3".into(), 5, "Rust++".into(), "bogus".into(), "language".into());
+
+        // Sentinel-owned files contribute no agent owner.
+        let file_d = workspace.join("d.md");
+        fs::write(&file_d, b"d")?;
+        tracker.record_installation(&file_d, "sha4".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "integration".into());
+
+        assert_eq!(tracker.get_installed_agents(), vec!["bogus".to_string(), "fake".to_string()]);
 
         Ok(())
     }

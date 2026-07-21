@@ -10,6 +10,8 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
+    agent_defaults::AgentCatalog,
+    bom::TemplateConfig,
     file_tracker::{FileStatus, FileTracker},
     template_engine::{self, PartialSelectors, ResolvedFile, ResolvedFiles, TemplateEngine, UpdateOptions, normalize_path}
 };
@@ -70,35 +72,7 @@ impl TemplateManager
             | None => tracker.get_installed_language().filter(|l| config.languages.contains_key(l))
         };
 
-        // Resolve agent scope: explicit override must exist; otherwise use detected
-        // agents that are present in the catalog. Falls back to a single agent-less pass.
-        let effective_agents: Vec<Option<String>> = match agent
-        {
-            | Some(a) =>
-            {
-                require!(
-                    config.agents.contains_key(a) == true,
-                    Err(anyhow::anyhow!("Agent '{}' not found in templates.yml.\nAvailable agents: {}", a, sorted_keys(config.agents.keys())))
-                );
-                vec![Some(a.to_string())]
-            }
-            | None =>
-            {
-                let detected: Vec<Option<String>> = agent_defaults::detect_all_installed_agents_from_catalog(&agent_catalog, &workspace)
-                    .into_iter()
-                    .filter(|name| config.agents.contains_key(name))
-                    .map(Some)
-                    .collect();
-                if detected.is_empty() == true
-                {
-                    vec![None]
-                }
-                else
-                {
-                    detected
-                }
-            }
-        };
+        let effective_agents = effective_agent_scope(agent, &config, &agent_catalog, &workspace)?;
 
         // Build partial selectors and resolve only matching targets from the local cache.
         let file_selectors: HashSet<String> = files.iter().cloned().collect();
@@ -250,8 +224,7 @@ impl TemplateManager
         {
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
-            let category = categorize_target(target, &entry.agent);
-            file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, category);
+            file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale
@@ -267,6 +240,262 @@ impl TemplateManager
 
         println!("{} Refresh complete.", "✓".green());
         Ok(())
+    }
+
+    /// Refreshes the whole workspace from the global catalog
+    ///
+    /// Invoked by `slopctl update` without `--file`/`--skill` selectors. Resolves the
+    /// full template set for every installed language and detected agent (overridable
+    /// via `lang`/`agent`), then brings the workspace up to the cached template state:
+    /// missing and deleted files are restored, unmodified files are overwritten, and
+    /// locally modified or untracked files are skipped with a report unless `force`
+    /// is set. Tracked skill files removed upstream are pruned; user-added files are
+    /// preserved. AGENTS.md is never refreshed here; `slopctl merge` is its update path.
+    ///
+    /// # Arguments
+    ///
+    /// * `lang` - Language scope override (defaults to all installed languages)
+    /// * `agent` - Agent scope override (defaults to detected agents)
+    /// * `force` - Also overwrite customized or untracked files
+    /// * `dry_run` - Preview changes without applying them
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if global templates are missing, a scope override is unknown,
+    /// or file I/O fails
+    pub fn update_full(&self, lang: Option<&str>, agent: Option<&str>, force: bool, dry_run: bool) -> Result<()>
+    {
+        require!(
+            self.has_global_templates() == true,
+            Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
+        );
+
+        let workspace = std::env::current_dir()?;
+        let _ = self.try_migrate_tracker(&workspace);
+
+        let config = template_engine::load_template_config(&self.config_dir)?;
+        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let tracker = FileTracker::new(&workspace)?;
+
+        // Language scope: explicit override must exist; otherwise refresh every
+        // installed language that is still present in the catalog.
+        let effective_langs: Vec<Option<String>> = match lang
+        {
+            | Some(l) =>
+            {
+                require!(
+                    config.languages.contains_key(l) == true,
+                    Err(anyhow::anyhow!("Language '{}' not found in templates.yml.\nAvailable languages: {}", l, sorted_keys(config.languages.keys())))
+                );
+                vec![Some(l.to_string())]
+            }
+            | None =>
+            {
+                let installed: Vec<Option<String>> = tracker.get_installed_languages().into_iter().filter(|l| config.languages.contains_key(l)).map(Some).collect();
+                if installed.is_empty() == true
+                {
+                    vec![None]
+                }
+                else
+                {
+                    installed
+                }
+            }
+        };
+
+        let effective_agents = effective_agent_scope(agent, &config, &agent_catalog, &workspace)?;
+
+        // Resolve the full template set per (language, agent) combination and union
+        // the candidates. AGENTS.md never appears here; it is carried in the resolved
+        // context and updated only through 'slopctl merge'.
+        let engine = TemplateEngine::new(&self.config_dir);
+        let mut resolved_sets: Vec<ResolvedFiles> = Vec::with_capacity(effective_langs.len() * effective_agents.len());
+        for lang_opt in &effective_langs
+        {
+            for agent_opt in &effective_agents
+            {
+                let options =
+                    UpdateOptions { lang: lang_opt.as_deref(), agent: agent_opt.as_deref(), mission: None, force, dry_run, partial: None, local_cache_only: true };
+                resolved_sets.push(engine.resolve_all_files(&options)?);
+            }
+        }
+
+        let mut candidates: BTreeMap<PathBuf, &ResolvedFile> = BTreeMap::new();
+        for set in &resolved_sets
+        {
+            for entry in &set.files
+            {
+                candidates.insert(normalize_path(&entry.target), entry);
+            }
+        }
+
+        // Prune tracked files of still-resolved skills that were removed upstream.
+        // Skills that left the catalog entirely are untouched; 'remove' owns that case.
+        let resolved_skill_names: Vec<String> = candidates.keys().filter_map(|target| skill_name_of(target)).collect::<BTreeSet<String>>().into_iter().collect();
+        let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates);
+
+        // Classify: refresh unmodified/missing/deleted targets, skip modified or
+        // untracked ones (kept with a report; --force overwrites), drop up-to-date copies.
+        let mut to_refresh: Vec<(&PathBuf, &ResolvedFile)> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+        let mut up_to_date = 0usize;
+        for (target, entry) in &candidates
+        {
+            if target.exists() == false
+            {
+                to_refresh.push((target, entry));
+            }
+            else
+            {
+                match tracker.check_modification(target)?
+                {
+                    | FileStatus::Unmodified | FileStatus::Deleted =>
+                    {
+                        if FileTracker::calculate_sha256(&entry.source)? == FileTracker::calculate_sha256(target)?
+                        {
+                            up_to_date += 1;
+                        }
+                        else
+                        {
+                            to_refresh.push((target, entry));
+                        }
+                    }
+                    | FileStatus::Modified | FileStatus::NotTracked =>
+                    {
+                        if force == true
+                        {
+                            to_refresh.push((target, entry));
+                        }
+                        else
+                        {
+                            skipped.push(display_path(target, &workspace));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Modified stale files are kept unless forced; user edits are not slopctl's to delete.
+        let mut stale_to_remove: Vec<&PathBuf> = Vec::new();
+        for target in &stale
+        {
+            if force == false && tracker.check_modification(target)? == FileStatus::Modified
+            {
+                skipped.push(display_path(target, &workspace));
+            }
+            else
+            {
+                stale_to_remove.push(target);
+            }
+        }
+
+        if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
+        {
+            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len());
+            report_skipped(&skipped);
+            println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
+            return Ok(());
+        }
+
+        if dry_run == true
+        {
+            println!("{} Files that would be refreshed:", "→".blue());
+            for (target, _) in &to_refresh
+            {
+                let display = display_path(target, &workspace);
+                if target.exists() == true
+                {
+                    println!("  {} {} (would be overwritten)", "●".yellow(), display.yellow());
+                }
+                else
+                {
+                    println!("  {} {} (would be created)", "●".green(), display.green());
+                }
+            }
+            for path in &skipped
+            {
+                println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), path);
+            }
+            if stale_to_remove.is_empty() == false
+            {
+                println!("\n{} Files that would be removed (stale):", "→".blue());
+                for target in &stale_to_remove
+                {
+                    println!("  {} {} (would be removed)", "●".red(), display_path(target, &workspace).red());
+                }
+            }
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+
+        let mut file_tracker = FileTracker::new(&workspace)?;
+        println!("{} Refreshing workspace templates", "→".blue());
+        for (target, entry) in &to_refresh
+        {
+            crate::utils::copy_file_with_mkdir(&entry.source, target)?;
+            let sha = FileTracker::calculate_sha256(target)?;
+            file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
+            println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
+        }
+        for target in &stale_to_remove
+        {
+            if target.exists() == true
+            {
+                crate::utils::remove_file_and_cleanup_parents(target)?;
+            }
+            file_tracker.remove_entry(target);
+            println!("  {} {} (removed stale)", "✓".green(), display_path(target, &workspace).red());
+        }
+        file_tracker.save()?;
+
+        report_skipped(&skipped);
+        println!("{} Refreshed {} file(s); {} already up to date", "✓".green(), to_refresh.len(), up_to_date);
+        println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
+        Ok(())
+    }
+}
+
+/// Resolves the effective agent scope for update commands
+///
+/// An explicit override must exist in the catalog; otherwise detected agents present
+/// in the catalog are used, falling back to a single agent-less pass.
+fn effective_agent_scope(agent: Option<&str>, config: &TemplateConfig, agent_catalog: &AgentCatalog, workspace: &Path) -> Result<Vec<Option<String>>>
+{
+    match agent
+    {
+        | Some(a) =>
+        {
+            require!(
+                config.agents.contains_key(a) == true,
+                Err(anyhow::anyhow!("Agent '{}' not found in templates.yml.\nAvailable agents: {}", a, sorted_keys(config.agents.keys())))
+            );
+            Ok(vec![Some(a.to_string())])
+        }
+        | None =>
+        {
+            let detected: Vec<Option<String>> = agent_defaults::detect_all_installed_agents_from_catalog(agent_catalog, workspace)
+                .into_iter()
+                .filter(|name| config.agents.contains_key(name))
+                .map(Some)
+                .collect();
+            if detected.is_empty() == true
+            {
+                Ok(vec![None])
+            }
+            else
+            {
+                Ok(detected)
+            }
+        }
+    }
+}
+
+/// Prints the skipped-files report shared by the up-to-date and refresh paths
+fn report_skipped(skipped: &[String])
+{
+    for path in skipped
+    {
+        println!("  {} {} (skipped - local modifications preserved; use 'slopctl merge' or --force)", "○".yellow(), path.yellow());
     }
 }
 
@@ -306,27 +535,6 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
     stale.sort();
     stale.dedup();
     stale
-}
-
-/// Determines the tracking category for a refreshed target
-fn categorize_target(target: &Path, agent: &[String]) -> String
-{
-    if skill_name_of(target).is_some() == true
-    {
-        "skill".to_string()
-    }
-    else if target.to_string_lossy().contains(".git") == true
-    {
-        "integration".to_string()
-    }
-    else if agent.is_empty() == false
-    {
-        "agent".to_string()
-    }
-    else
-    {
-        "language".to_string()
-    }
 }
 
 /// Renders a target path relative to the workspace for display
@@ -734,6 +942,168 @@ mod tests
         let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
         manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, false)?;
         let _ = std::env::set_current_dir(std::env::temp_dir());
+        Ok(())
+    }
+
+    // -- update_full --
+
+    #[test]
+    fn test_update_full_refreshes_unmodified_files() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_full(Some("Rust++"), None, false, false)?;
+        let target = workspace.path().join(".rpp.toml");
+        assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n");
+
+        // Upstream template change: an unmodified installed file is refreshed.
+        fs::write(config_dir.path().join("rpp-format.toml"), "max_width = 140\n")?;
+        let result = manager.update_full(Some("Rust++"), None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert_eq!(fs::read_to_string(&target)?, "max_width = 140\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_skips_modified_file_without_error() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_full(Some("Rust++"), None, false, false)?;
+
+        let target = workspace.path().join(".rpp.toml");
+        fs::write(&target, "max_width = 99\n")?;
+        fs::write(config_dir.path().join("rpp-format.toml"), "max_width = 140\n")?;
+
+        let result = manager.update_full(Some("Rust++"), None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert_eq!(fs::read_to_string(&target)?, "max_width = 99\n", "modified file must be kept without an error");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_force_overwrites_modified_file() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_full(Some("Rust++"), None, false, false)?;
+
+        let target = workspace.path().join(".rpp.toml");
+        fs::write(&target, "max_width = 99\n")?;
+
+        let result = manager.update_full(Some("Rust++"), None, true, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n", "with --force the template must overwrite the modified file");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_restores_deleted_file() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_full(Some("Rust++"), None, false, false)?;
+
+        let target = workspace.path().join(".rpp.toml");
+        fs::remove_file(&target)?;
+
+        let result = manager.update_full(Some("Rust++"), None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert!(target.exists() == true, "deleted tracked file must be restored");
+        assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_prunes_stale_skill_file() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.update_full(None, None, false, false)?;
+
+        let hook = workspace.path().join(".agents/skills/git-workflow/scripts/hook.sh");
+        assert!(hook.exists() == true, "hook must be installed initially");
+
+        // Upstream removed the hook from the skill; full update prunes the tracked copy.
+        fs::remove_file(config_dir.path().join("skills/git-workflow/scripts/hook.sh"))?;
+        let result = manager.update_full(None, None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert!(hook.exists() == false, "upstream-removed tracked skill file must be pruned");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_dry_run_writes_nothing() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.update_full(Some("Rust++"), None, false, true);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        result?;
+        assert!(workspace.path().join(".rpp.toml").exists() == false, "dry run must not create files");
+        assert!(workspace.path().join(".agents").exists() == false, "dry run must not create skill dirs");
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_full_local_cache_only_no_github_hook() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let _hook = crate::github::set_test_hooks(
+            Box::new(|_| panic!("update must not call GitHub list_directory_contents")),
+            Box::new(|_| panic!("update must not call GitHub download_file"))
+        );
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.update_full(Some("Rust++"), None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+        result?;
         Ok(())
     }
 }

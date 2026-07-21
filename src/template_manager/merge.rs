@@ -14,7 +14,7 @@ use crate::{
     EffectiveConfig, Result,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
-    template_engine::{self, ResolvedContent, TemplateEngine, UpdateOptions}
+    template_engine::{self, CHANGELOG_MARKER, ResolvedContent, TemplateEngine, UpdateOptions}
 };
 
 /// User-supplied overrides that control which templates are considered during merge
@@ -28,16 +28,13 @@ pub struct MergeOptions<'a>
     pub mission: Option<&'a str>
 }
 
-/// Marker that separates template-managed content from user-owned changelog
-const CHANGELOG_MARKER: &str = "<!-- {changelog} -->";
-
 /// Classification of a file in the target-source map
 enum FileClass
 {
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, display: String
+        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, category: String, display: String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -55,6 +52,7 @@ enum FileClass
         user_changelog:   Option<String>,
         lang:             Vec<String>,
         agent:            Vec<String>,
+        category:         String,
         display:          String,
         /// True when this file is the main AGENTS.md; enables skill-aware merging
         is_main:          bool
@@ -74,8 +72,8 @@ You are a file merge assistant that combines user-customized configuration files
 5. Do NOT add commentary, explanations, or merge markers. Output ONLY the merged file content, ready to save.
 6. If the template introduces a new section that the user's file does not have, insert it in a natural location that matches the template's ordering.
 7. Do NOT remove any user content unless it directly contradicts a template change (in which case prefer the template's factual updates but keep user customizations).
-8. CRITICAL: Changelog, history, and log sections (such as 'Recent Updates & Decisions') must be preserved IN FULL. Every single entry must appear in the output \
-     exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or condensed.
+8. CRITICAL: Changelog, history, and log sections (such as the 'Recent Updates & Decisions' entries in UPDATES.md) must be preserved IN FULL. Every single entry must \
+     appear in the output exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or condensed.
 9. SKILL DEDUPLICATION: When the user message contains an <available_skills> block, each entry inside it is the canonical source for the topic it covers. If any \
      guidance, conventions, build commands, coding rules, or other instructions in <current_file> are already covered by a skill, REMOVE the duplicated content from \
      the merged output and rely on the skill instead. You may keep a brief one-line reference naming the skill, but do not retain duplicated prose. This rule does \
@@ -166,7 +164,7 @@ impl TemplateManager
         {
             match entry
             {
-                | FileClass::New { target, content, lang, agent, display } =>
+                | FileClass::New { target, content, lang, agent, category, display } =>
                 {
                     if dry_run == true
                     {
@@ -182,8 +180,7 @@ impl TemplateManager
                         println!("  {} Created {}", "✓".green(), display.green());
 
                         let sha = FileTracker::calculate_sha256(target)?;
-                        let category = categorize_path(target, options);
-                        file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
+                        file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -193,7 +190,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display, is_main } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, display, is_main } =>
                 {
                     if dry_run == true
                     {
@@ -329,8 +326,7 @@ impl TemplateManager
                                 {
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
-                                    let category = categorize_path(target, options);
-                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
+                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
                                 }
                             }
                         }
@@ -462,6 +458,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 content: template_content.clone(),
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
+                category: resolved.category.clone(),
                 display
             });
         }
@@ -486,6 +483,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                         user_changelog: Some(user_lower.to_string()),
                         lang: resolved.lang.clone(),
                         agent: resolved.agent.clone(),
+                        category: resolved.category.clone(),
                         display,
                         is_main
                     });
@@ -500,6 +498,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                     user_changelog: None,
                     lang: resolved.lang.clone(),
                     agent: resolved.agent.clone(),
+                    category: resolved.category.clone(),
                     display,
                     is_main
                 });
@@ -514,6 +513,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 user_changelog: None,
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
+                category: resolved.category.clone(),
                 display,
                 is_main
             });
@@ -533,39 +533,6 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
     });
 
     classified
-}
-
-/// Determines the tracking category for a target file path
-fn categorize_path(target: &Path, options: &MergeOptions) -> String
-{
-    let target_str = target.to_string_lossy();
-    if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
-    {
-        "skill".to_string()
-    }
-    else if target_str.contains(".git")
-    {
-        "integration".to_string()
-    }
-    else if target_str.contains("AGENTS.md")
-    {
-        "main".to_string()
-    }
-    else if let Some(name) = options.agent
-    {
-        if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
-        {
-            "agent".to_string()
-        }
-        else
-        {
-            "language".to_string()
-        }
-    }
-    else
-    {
-        "language".to_string()
-    }
 }
 
 /// Prints the outgoing chat messages to stdout for verbose mode
@@ -744,7 +711,7 @@ mod tests
 
     fn rc(content: &str) -> ResolvedContent
     {
-        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new() }
+        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() }
     }
 
     #[test]
@@ -1009,41 +976,6 @@ mod tests
     }
 
     #[test]
-    fn test_categorize_path_main()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/AGENTS.md"), &options), "main");
-    }
-
-    #[test]
-    fn test_categorize_path_skill()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.bogus/skills/my-skill/SKILL.md"), &options), "skill");
-    }
-
-    #[test]
-    fn test_categorize_path_integration()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.gitignore"), &options), "integration");
-    }
-
-    #[test]
-    fn test_categorize_path_agent()
-    {
-        let options = MergeOptions { lang: None, agent: Some("bogus"), mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.bogus/instructions.md"), &options), "agent");
-    }
-
-    #[test]
-    fn test_categorize_path_language()
-    {
-        let options = MergeOptions { lang: Some("Rust++"), agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.rpp.toml"), &options), "language");
-    }
-
-    #[test]
     fn test_plural()
     {
         assert_eq!(plural(0), "s");
@@ -1063,9 +995,9 @@ mod tests
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new() });
-        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new() });
-        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new() });
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified
