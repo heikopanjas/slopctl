@@ -135,6 +135,13 @@ impl TemplateManager
             {
                 selected.insert(resolved, entry);
             }
+            else if let Some(skill_name) = skill_name_of(&resolved)
+            {
+                // Skills are refreshed as whole units so upstream-removed files get pruned.
+                return Err(anyhow::anyhow!(
+                    "'{}' is part of skill '{}' and cannot be refreshed as a single file. Use 'slopctl update --skill {}' instead.", requested, skill_name, skill_name
+                ));
+            }
             else
             {
                 unmatched.push(format!("file '{}'", requested));
@@ -769,6 +776,26 @@ mod tests
         let message = result.unwrap_err().to_string();
         assert!(message.contains("AGENTS.md") == true);
         assert!(message.contains("merge") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_partial_file_inside_skill_suggests_skill_flag() -> anyhow::Result<()>
+    {
+        let _guard = cwd_test_guard();
+        let config_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        setup_config(config_dir.path())?;
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.update_partial(&[".agents/skills/git-workflow/SKILL.md".to_string()], &[], None, None, false, false);
+        let _ = std::env::set_current_dir(std::env::temp_dir());
+
+        assert!(result.is_err() == true);
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("part of skill 'git-workflow'") == true, "error must name the owning skill: {}", message);
+        assert!(message.contains("--skill git-workflow") == true, "error must suggest the skill selector: {}", message);
         Ok(())
     }
 
