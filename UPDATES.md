@@ -4,6 +4,17 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-07-22 (v22.5.0, native-only agent audit fixes)
+
+- audit of the native-only agent measures (Claude Code, Vibe: `reads_cross_client_skills: false`) found ownership leaks, unsafe path matching, and scoping issues; this release fixes the correctness and scoping tiers
+- `remove --agent`/`remove --lang` now release the removed owner across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`); previously a native-only agent kept ownership of shared `.agents/skills/` copies forever, so `get_installed_agents()` still listed it and the no-op init guard wrongly rejected re-adding the agent
+- replaced `path_belongs_to_agent` substring matching with `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); a workspace path containing a component equal to an agent name could previously force-delete shared cross-client files during `remove --agent`
+- replaced the category-plus-path removal fallback with an owner-based sweep over tracked entries solely owned by the agent (catalog-free, absolute paths, no heuristics)
+- `update` no longer creates agent instruction or prompt files for agents detected only via their marker directory (e.g. `.claude/` created by Claude Code itself); marker presence still drives skill distribution
+- `merge` without `--agent` now unions the resolved content across all detected agents so every agent's native files participate; previously only a single agent was resolved and the `MergeOptions` doc claimed a fallback that did not exist
+- deferred (documented for future work): per-target-dir skill ownership so native-dir copies are owned by their agent, symmetric init hydration when adding a cross-client agent to a native-only workspace, and a doctor check for orphaned owners
+- version bump: 22.4.0 to 22.5.0 (MINOR - update/merge behavior changes plus bug fixes)
+
 ### 2026-07-21 (v22.4.0, explicit update path and no-op re-init guard)
 
 - bare `slopctl update` (no `--file`/`--skill`) now performs a full workspace refresh: resolves every installed language and detected agent from the local cache, restores missing/deleted tracked files, overwrites unmodified ones, skips locally modified or untracked files with a report (`--force` overwrites), and prunes tracked skill files removed upstream; AGENTS.md is excluded and `merge` remains its update path

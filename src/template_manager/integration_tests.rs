@@ -1305,6 +1305,131 @@ fn test_merge_dry_run_after_updates_append_succeeds() -> anyhow::Result<()>
     Ok(())
 }
 
+// ── Native-only agent ownership and path-matching regressions ────────────────
+
+#[test]
+fn test_remove_native_agent_then_reinit_succeeds() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // Mixed workspace: cross-client fake first, then native-only bogus.
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    assert!(tracker.get_installed_agents().iter().any(|agent| agent == "bogus") == false, "removed agent must not linger as an owner anywhere in the tracker");
+
+    // Re-adding the agent must not be rejected by the no-op init guard.
+    fixture.init(Some("bogus"), None)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_native_agent_releases_owner_on_cross_client_copies() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    let shared = cwd.join(".agents/skills/git-workflow/SKILL.md");
+    assert!(shared.exists() == true, "shared cross-client skill must survive native-agent removal");
+    let meta = tracker.get_metadata(&shared).expect("shared skill must stay tracked");
+    assert!(meta.has_agent("bogus") == false, "cross-client copy must not keep the removed agent as owner");
+    assert!(meta.has_agent("fake") == true, "remaining agent ownership must be preserved");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_agent_ignores_agent_named_ancestor_dir() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let parent = tempfile::TempDir::new()?;
+
+    // The workspace lives under a directory component equal to the agent name;
+    // location-based force-deletion must not treat shared files as agent-owned.
+    let workspace = parent.path().join("bogus").join("ws");
+    fs::create_dir_all(&workspace)?;
+    std::env::set_current_dir(&workspace)?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let shared_lang_skill = workspace.join(".agents/skills/rpp-coding-conventions/SKILL.md");
+    assert!(shared_lang_skill.exists() == true, "shared language skill outside the agent dirs must survive remove --agent");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_never_installed_agent_files() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // The agent app created its own marker dir; slopctl never installed the agent.
+    fs::create_dir_all(workspace.path().join(".fake"))?;
+    fixture.init(None, Some("Rust++"))?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == false, "update must not create agent files for a marker-only agent");
+    assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true, "skill distribution stays marker-based");
+
+    Ok(())
+}
+
+#[test]
+fn test_merge_recreates_prompt_files_for_all_detected_agents() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+    fixture.init(Some("fake"), None)?;
+
+    let bogus_file = workspace.path().join(".bogus/instructions.md");
+    let fake_file = workspace.path().join(".fake/commands/init-session.md");
+    fs::remove_file(&bogus_file)?;
+    fs::remove_file(&fake_file)?;
+
+    // Deleted files classify as New (no LLM needed); the hook guards against any
+    // unexpected divergence reaching a real provider.
+    let _hook = crate::llm::set_chat_test_hook(Box::new(|_msgs| {
+        Ok(crate::llm::ChatResponse { content: String::new(), input_tokens: None, output_tokens: None, stop_reason: Some("end_turn".to_string()) })
+    }));
+
+    let options = crate::MergeOptions { lang: None, agent: None, mission: None };
+    fixture.manager().merge(&options, false, false, false)?;
+
+    assert!(bogus_file.exists() == true, "merge without --agent must recreate the first agent's file");
+    assert!(fake_file.exists() == true, "merge without --agent must recreate the second agent's file");
+
+    Ok(())
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Returns `true` if any `SKILL.md` exists recursively under `dir`.

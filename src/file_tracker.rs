@@ -450,6 +450,34 @@ impl FileTracker
         }
     }
 
+    /// Release a language owner from every tracked entry.
+    ///
+    /// Removing a language must release its ownership tracker-wide, not only on
+    /// files queued for deletion, so `get_installed_languages()` stays truthful
+    /// even for entries whose files were deleted manually or live outside the
+    /// removal sweep.
+    pub fn clear_lang_owner(&mut self, lang: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            meta.release_lang(lang);
+        }
+    }
+
+    /// Release an agent owner from every tracked entry.
+    ///
+    /// Removing an agent must release its ownership tracker-wide; native-only
+    /// agents (e.g. Claude) also own shared cross-client copies that are never
+    /// queued for deletion, and a leaked owner would make `get_installed_agents()`
+    /// report the agent as still installed.
+    pub fn clear_agent_owner(&mut self, agent: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            meta.release_agent(agent);
+        }
+    }
+
     /// Release a language owner from a tracked file.
     pub fn release_lang(&mut self, file_path: &Path, lang: &str) -> bool
     {
@@ -994,6 +1022,54 @@ agents:
 
         let none = tracker.get_entries_by_category("nonexistent");
         assert_eq!(none.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_agent_owner_releases_across_categories() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let agent_file = workspace.join("a.md");
+        fs::write(&agent_file, b"a")?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        let skill_file = workspace.join("s.md");
+        fs::write(&skill_file, b"s")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 5, LANG_NONE.into(), "fake".into(), "skill".into());
+
+        tracker.clear_agent_owner("bogus");
+
+        assert!(tracker.get_installed_agents().iter().any(|agent| agent == "bogus") == false, "owner must be released in every category");
+        let meta = tracker.get_metadata(&skill_file).expect("entry must remain");
+        assert!(meta.has_agent("fake") == true, "other owners must be preserved");
+        assert_eq!(meta.ref_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_lang_owner_releases_across_categories() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let lang_file = workspace.join("l.md");
+        fs::write(&lang_file, b"l")?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+
+        let skill_file = workspace.join("s.md");
+        fs::write(&skill_file, b"s")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+
+        tracker.clear_lang_owner("Rust++");
+
+        assert!(tracker.get_installed_languages().is_empty() == true, "language owner must be released in every category");
 
         Ok(())
     }

@@ -22,7 +22,7 @@ pub struct MergeOptions<'a>
 {
     /// Language/framework override (falls back to installed language from tracker)
     pub lang:    Option<&'a str>,
-    /// Agent override (falls back to installed agents detected in workspace)
+    /// Agent override; when omitted, all agents detected in the workspace are included
     pub agent:   Option<&'a str>,
     /// Mission statement to use when generating the fresh template for comparison
     pub mission: Option<&'a str>
@@ -111,10 +111,31 @@ impl TemplateManager
             local_cache_only: false
         };
 
-        let content_map = engine.build_target_content_map(&update_options)?;
-
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
+
+        // Without --agent, union the resolved content across all detected agents so
+        // every agent's instruction and prompt files participate in the merge.
+        let content_map = if options.agent.is_some() == true
+        {
+            engine.build_target_content_map(&update_options)?
+        }
+        else
+        {
+            let config = template_engine::load_template_config(&self.config_dir)?;
+            let agent_catalog = crate::agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+            let effective_agents = super::partial_update::effective_agent_scope(None, &config, &agent_catalog, &workspace)?;
+            let mut map = HashMap::new();
+            for agent_opt in &effective_agents
+            {
+                let per_agent_options = UpdateOptions { agent: agent_opt.as_deref(), ..update_options };
+                for (target, resolved) in engine.build_target_content_map(&per_agent_options)?
+                {
+                    map.entry(target).or_insert(resolved);
+                }
+            }
+            map
+        };
         let classified = classify_files(&content_map, &workspace);
         let skills = collect_skills(&content_map);
 

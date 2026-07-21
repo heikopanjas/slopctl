@@ -343,7 +343,13 @@ impl TemplateManager
         {
             if target.exists() == false
             {
-                to_refresh.push((target, entry));
+                // Agent files are created only for slopctl-installed agents: marker
+                // detection alone (the agent app created its own marker dir) must not
+                // conjure prompt or instruction files the user never installed.
+                if entry.category != "agent" || tracker.get_metadata(target).is_some() == true
+                {
+                    to_refresh.push((target, entry));
+                }
             }
             else
             {
@@ -459,7 +465,7 @@ impl TemplateManager
 ///
 /// An explicit override must exist in the catalog; otherwise detected agents present
 /// in the catalog are used, falling back to a single agent-less pass.
-fn effective_agent_scope(agent: Option<&str>, config: &TemplateConfig, agent_catalog: &AgentCatalog, workspace: &Path) -> Result<Vec<Option<String>>>
+pub(super) fn effective_agent_scope(agent: Option<&str>, config: &TemplateConfig, agent_catalog: &AgentCatalog, workspace: &Path) -> Result<Vec<Option<String>>>
 {
     match agent
     {

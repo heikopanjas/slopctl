@@ -769,7 +769,7 @@ slopctl merge --list-models                      # List available models from th
 
 **Provider priority:** config `merge.provider` > environment auto-detect > error. Set with `slopctl config --set merge.provider <name>` or via API key env vars.
 
-**Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source.
+**Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source. Without `--agent`, all agents detected in the workspace are included, so every agent's instruction and prompt files participate.
 
 ### `update` - Refresh Installed Templates
 
@@ -808,7 +808,7 @@ slopctl update --skill git-workflow --dry-run       # Preview without writing
 - `--force` / `-f` - Overwrite locally customized or untracked files
 - `--dry-run` / `-n` - Preview changes without applying them
 
-Without `--file`/`--skill` the whole workspace is refreshed. `AGENTS.md` is excluded in both modes (it is fragment-merged); use `merge` to update it.
+Without `--file`/`--skill` the whole workspace is refreshed. `AGENTS.md` is excluded in both modes (it is fragment-merged); use `merge` to update it. Agent instruction and prompt files are created only for agents that slopctl installed; an agent detected merely through its marker directory receives skills but no agent files.
 
 ### `config` - Manage Configuration
 
