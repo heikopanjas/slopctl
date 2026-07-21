@@ -13,10 +13,32 @@ use crate::{
     agent_defaults::resolve_placeholder_path,
     bom,
     bom::BillOfMaterials,
-    file_tracker::FileTracker,
+    file_tracker::{FileStatus, FileTracker},
     template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
+
+/// Files selected for purge plus the preservation decisions for user-owned content
+struct PurgeTargets
+{
+    files:             Vec<PathBuf>,
+    agents_md_skipped: bool,
+    agents_md_path:    PathBuf,
+    changelog_skipped: Vec<PathBuf>
+}
+
+/// Splits removal candidates into (preserved changelog files, deletable files)
+///
+/// A candidate is preserved when it is tracked, locally modified, and carries the
+/// changelog marker: its divergence is user-owned log history that must survive
+/// remove and purge operations.
+fn split_changelog_preserved(file_tracker: &FileTracker, candidates: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>)
+{
+    candidates.into_iter().partition(|file| {
+        file_tracker.check_modification(file).map(|status| status == FileStatus::Modified).unwrap_or(false) == true &&
+            template_engine::file_contains_changelog_marker(file) == true
+    })
+}
 
 impl TemplateManager
 {
@@ -361,13 +383,24 @@ impl TemplateManager
 
         files_to_remove.sort();
         files_to_remove.dedup();
+
+        // Preserve user-owned changelog files regardless of how they were collected:
+        // their local modifications are append-only log history, not stale template state.
+        let changelog_kept;
+        {
+            let file_tracker = FileTracker::new(&current_dir)?;
+            let (kept, deletable) = split_changelog_preserved(&file_tracker, files_to_remove);
+            files_to_remove = deletable;
+            changelog_kept = kept;
+        }
+
         dirs_to_cleanup.sort_by(|left, right| right.components().count().cmp(&left.components().count()).then_with(|| left.cmp(right)));
         dirs_to_cleanup.dedup();
         dirs_to_cleanup.retain(|dir| dir.exists() == true);
 
         let description = description_parts.join(", ");
 
-        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true
+        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true && changelog_kept.is_empty() == true
         {
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
@@ -380,6 +413,11 @@ impl TemplateManager
             for file in &files_to_remove
             {
                 println!("  {} {}", "●".red(), file.display());
+            }
+
+            for file in &changelog_kept
+            {
+                println!("  {} {} (kept - log entries preserved)", "○".yellow(), file.display());
             }
 
             for dir in &dirs_to_cleanup
@@ -455,6 +493,11 @@ impl TemplateManager
             }
         }
 
+        for file in &changelog_kept
+        {
+            println!("{} Kept {} (log entries preserved)", "→".blue(), file.display().to_string().yellow());
+        }
+
         // Main AGENTS.md stays on disk during normal remove operations, so release
         // ownership there explicitly even when it was not in the deletion candidate list.
         if has_lang_target == true
@@ -502,9 +545,9 @@ impl TemplateManager
         let current_dir = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&current_dir);
 
-        let (files_to_purge, agents_md_skipped, agents_md_path) = self.collect_purge_targets(&current_dir, force)?;
+        let PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped } = self.collect_purge_targets(&current_dir, force)?;
 
-        if files_to_purge.is_empty() == true && agents_md_skipped == false
+        if files_to_purge.is_empty() == true && agents_md_skipped == false && changelog_skipped.is_empty() == true
         {
             println!("{} No slopctl files found to purge", "→".blue());
             return Ok(());
@@ -522,6 +565,11 @@ impl TemplateManager
             if agents_md_skipped == true
             {
                 println!("  {} {} (skipped - customized, use --force)", "○".yellow(), agents_md_path.display());
+            }
+
+            for file in &changelog_skipped
+            {
+                println!("  {} {} (skipped - log entries preserved, use --force)", "○".yellow(), file.display());
             }
 
             println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -571,6 +619,11 @@ impl TemplateManager
             println!("{} Use --force to delete it anyway", "→".yellow());
         }
 
+        for file in &changelog_skipped
+        {
+            println!("{} {} contains user log entries and was not deleted; use --force to delete it anyway", "→".yellow(), file.display());
+        }
+
         if purged_count == 0
         {
             println!("{} No slopctl files found to purge", "→".blue());
@@ -590,13 +643,14 @@ impl TemplateManager
     /// deduplicates them, then resolves the AGENTS.md handling: if AGENTS.md is
     /// customized and `force` is false it is removed from the list and
     /// `agents_md_skipped` is set; otherwise it is added if not already present.
-    ///
-    /// Returns `(files_to_purge, agents_md_skipped, agents_md_path)`.
+    /// Tracked, locally modified files carrying the changelog marker are likewise
+    /// moved to `changelog_skipped` unless `force` is true, so user-owned log
+    /// entries survive a purge.
     ///
     /// # Errors
     ///
     /// Returns an error if reading AGENTS.md fails.
-    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<(Vec<PathBuf>, bool, PathBuf)>
+    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<PurgeTargets>
     {
         let mut files_to_purge: Vec<PathBuf> = Vec::new();
 
@@ -684,7 +738,16 @@ impl TemplateManager
             }
         }
 
-        Ok((files_to_purge, agents_md_skipped, agents_md_path))
+        // Preserve user-owned changelog files: tracked, locally modified, marker present.
+        let mut changelog_skipped: Vec<PathBuf> = Vec::new();
+        if force == false
+        {
+            let (skipped, kept) = split_changelog_preserved(&file_tracker, files_to_purge);
+            files_to_purge = kept;
+            changelog_skipped = skipped;
+        }
+
+        Ok(PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped })
     }
 
     /// Check if a file path belongs to a specific agent's directory tree
@@ -704,11 +767,12 @@ mod tests
 {
     use std::{fs, path::PathBuf};
 
-    use super::TemplateManager;
+    use super::{PurgeTargets, TemplateManager};
     use crate::{
         agent_defaults::AGENT_DEFAULTS_FILE,
         bom::BillOfMaterials,
         file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
+        template_engine,
         template_manager::cwd_test_guard
     };
 
@@ -1197,16 +1261,68 @@ mod tests
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
 
-        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), false)?;
+        let PurgeTargets { files, agents_md_skipped: skipped, .. } = manager.collect_purge_targets(workspace.path(), false)?;
         assert!(skipped == true, "customized AGENTS.md should be flagged as skipped");
         let agents_md_canonical = fs::canonicalize(&agents_md)?;
         let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
         assert!(queued == false, "customized AGENTS.md must not appear in files_to_purge");
 
-        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), true)?;
+        let PurgeTargets { files, agents_md_skipped: skipped, .. } = manager.collect_purge_targets(workspace.path(), true)?;
         assert!(skipped == false);
         let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
         assert!(queued == true, "with --force AGENTS.md must be queued for deletion");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_skips_modified_changelog_marker_file() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        // Tracked with a stale SHA so the file reads as Modified; the marker
+        // means the local changes are user-owned log entries.
+        let updates = workspace.path().join("UPDATES.md");
+        fs::write(&updates, format!("# Log\n\n{}\n\n### 2026-01-01 (v1.0.0, entry)\n\n- user entry\n", template_engine::CHANGELOG_MARKER))?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&updates, "stale-sha".into(), 5, LANG_NONE.into(), "all".into(), "integration".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        let targets = manager.collect_purge_targets(workspace.path(), false)?;
+        assert!(targets.changelog_skipped.iter().any(|f| f.ends_with("UPDATES.md")) == true, "modified changelog file must be reported as skipped");
+        assert!(targets.files.iter().any(|f| f.ends_with("UPDATES.md")) == false, "skipped changelog file must not be queued for deletion");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_force_queues_modified_changelog_marker_file() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let updates = workspace.path().join("UPDATES.md");
+        fs::write(&updates, format!("# Log\n\n{}\n\n### 2026-01-01 (v1.0.0, entry)\n\n- user entry\n", template_engine::CHANGELOG_MARKER))?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&updates, "stale-sha".into(), 5, LANG_NONE.into(), "all".into(), "integration".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        let targets = manager.collect_purge_targets(workspace.path(), true)?;
+        assert!(targets.changelog_skipped.is_empty() == true, "with --force no changelog file is skipped");
+        assert!(targets.files.iter().any(|f| f.ends_with("UPDATES.md")) == true, "with --force the changelog file must be queued for deletion");
 
         Ok(())
     }

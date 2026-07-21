@@ -206,7 +206,7 @@ pub enum Commands
         #[arg(short, long, default_value = "false")]
         verbose: bool
     },
-    /// Refresh individual template files or skills from the global catalog
+    /// Refresh installed templates from the global catalog (whole workspace, or --file/--skill selections)
     Update
     {
         /// Workspace file path to refresh (repeatable)

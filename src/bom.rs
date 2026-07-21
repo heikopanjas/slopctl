@@ -1,7 +1,7 @@
 //! Bill of Materials (BoM) functionality for template file management
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf}
 };
@@ -139,8 +139,9 @@ pub struct TemplateConfig
     pub languages:   HashMap<String, LanguageConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub shared:      HashMap<String, SharedConfig>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub integration: HashMap<String, IntegrationConfig>,
+    // BTreeMap keeps '$instructions' fragment order deterministic across runs (HashMap iteration is randomized).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub integration: BTreeMap<String, IntegrationConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preamble:    Vec<FileMapping>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -442,7 +443,7 @@ mod tests
             agents:      HashMap::new(),
             languages:   HashMap::new(),
             shared:      HashMap::new(),
-            integration: HashMap::new(),
+            integration: BTreeMap::new(),
             preamble:    vec![],
             principles:  vec![],
             mission:     vec![],
@@ -475,6 +476,31 @@ mod tests
         let yaml = "version: 2\nlanguages: {}";
         let config: TemplateConfig = serde_yaml::from_str(yaml)?;
         assert_eq!(config.version, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_integration_groups_iterate_in_sorted_order() -> anyhow::Result<()>
+    {
+        let yaml = r#"
+languages: {}
+integration:
+  zeta:
+    files:
+      - source: z.md
+        target: '$instructions'
+  alpha:
+    files:
+      - source: a.md
+        target: '$instructions'
+  midway:
+    files:
+      - source: m.md
+        target: '$instructions'
+"#;
+        let config: TemplateConfig = serde_yaml::from_str(yaml)?;
+        let keys: Vec<&str> = config.integration.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["alpha", "midway", "zeta"], "integration groups must iterate in sorted key order");
         Ok(())
     }
 

@@ -8,7 +8,7 @@
 3. **Document Changes**: Update documentation when changing functionality
 4. **Code Review**: [Describe your code review process]
 5. **Date Changes**: Update the "Last updated" timestamp in this file when making changes
-6. **Log Updates**: Add entries to "Recent Updates & Decisions" section below
+6. **Log Updates**: Add entries to the "Recent Updates & Decisions" log in `UPDATES.md`
 
 ### Development Guidelines
 
@@ -42,5 +42,5 @@
 - Code comments: [when and how]
 - API documentation: [format and location]
 - README updates: [when required]
-- Changelog: [if maintained]
+- Changelog: maintained in `UPDATES.md` (see the `recent-updates` skill)
 
