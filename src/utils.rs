@@ -22,6 +22,10 @@ use crate::Result;
 /// * `src` - Source directory path
 /// * `dst` - Destination directory path
 ///
+/// # Returns
+///
+/// The number of files copied. macOS Finder junk (`.DS_Store`) is skipped.
+///
 /// # Errors
 ///
 /// Returns an error if:
@@ -38,30 +42,37 @@ use crate::Result;
 ///
 /// let src = Path::new("/path/to/source");
 /// let dst = Path::new("/path/to/dest");
-/// copy_dir_all(src, dst).expect("Failed to copy directory");
+/// let copied = copy_dir_all(src, dst).expect("Failed to copy directory");
+/// println!("copied {} file(s)", copied);
 /// ```
-pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<()>
+pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<usize>
 {
     fs::create_dir_all(dst)?;
 
+    let mut copied = 0usize;
     for entry in fs::read_dir(src)?
     {
         let entry = entry?;
         let path = entry.path();
         let file_name = entry.file_name();
-        let dst_path = dst.join(file_name);
 
-        if path.is_dir()
+        // Finder junk must not end up in template caches or workspaces.
+        if file_name.to_string_lossy() != ".DS_Store"
         {
-            copy_dir_all(&path, &dst_path)?;
-        }
-        else
-        {
-            fs::copy(&path, &dst_path)?;
+            let dst_path = dst.join(file_name);
+            if path.is_dir()
+            {
+                copied += copy_dir_all(&path, &dst_path)?;
+            }
+            else
+            {
+                fs::copy(&path, &dst_path)?;
+                copied += 1;
+            }
         }
     }
 
-    Ok(())
+    Ok(copied)
 }
 
 /// Copies a file from source to target, creating parent directories if needed
@@ -352,6 +363,28 @@ mod tests
     }
 
     #[test]
+    fn test_copy_dir_all_skips_ds_store() -> anyhow::Result<()>
+    {
+        let src = tempfile::TempDir::new()?;
+        let dst = tempfile::TempDir::new()?;
+
+        fs::create_dir_all(src.path().join("sub"))?;
+        fs::write(src.path().join("a.txt"), "a")?;
+        fs::write(src.path().join(".DS_Store"), "junk")?;
+        fs::write(src.path().join("sub/.DS_Store"), "junk")?;
+        fs::write(src.path().join("sub/b.txt"), "b")?;
+
+        let copied = copy_dir_all(src.path(), &dst.path().join("out"))?;
+
+        assert_eq!(copied, 2, "junk files must not be counted");
+        assert!(dst.path().join("out/.DS_Store").exists() == false, "top-level junk must not be copied");
+        assert!(dst.path().join("out/sub/.DS_Store").exists() == false, "nested junk must not be copied");
+        assert!(dst.path().join("out/sub/b.txt").exists() == true);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_copy_dir_all_nested() -> anyhow::Result<()>
     {
         let src = tempfile::TempDir::new()?;
@@ -362,8 +395,9 @@ mod tests
         fs::write(src.path().join("sub/mid.txt"), "mid")?;
         fs::write(src.path().join("sub/deep/leaf.txt"), "leaf")?;
 
-        copy_dir_all(src.path(), &dst.path().join("out"))?;
+        let copied = copy_dir_all(src.path(), &dst.path().join("out"))?;
 
+        assert_eq!(copied, 3, "copy must report the number of files copied");
         assert_eq!(fs::read_to_string(dst.path().join("out/top.txt"))?, "top");
         assert_eq!(fs::read_to_string(dst.path().join("out/sub/mid.txt"))?, "mid");
         assert_eq!(fs::read_to_string(dst.path().join("out/sub/deep/leaf.txt"))?, "leaf");

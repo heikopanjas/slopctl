@@ -103,9 +103,19 @@ impl TemplateManager
                 return Err(anyhow::anyhow!("Source path does not exist: {}", source));
             }
 
+            // Validate the catalog before touching the cache, mirroring the URL path.
+            let source_config = source_path.join("templates.yml");
+            if source_config.exists() == false
+            {
+                return Err(anyhow::anyhow!("Source path '{}' does not contain a templates.yml; a template source must include one", source));
+            }
+            serde_yaml::from_str::<crate::bom::TemplateConfig>(&fs::read_to_string(&source_config)?)
+                .map_err(|e| anyhow::anyhow!("Invalid templates.yml in source '{}': {}", source, e))?;
+
             println!("{} Copying templates from local path...", "→".blue());
             fs::create_dir_all(&self.config_dir)?;
-            copy_dir_all(source_path, &self.config_dir)?;
+            let copied = copy_dir_all(source_path, &self.config_dir)?;
+            println!("{} Copied {} template file(s) from {}", "✓".green(), copied, source_path.display().to_string().yellow());
         }
 
         Ok(())
@@ -240,6 +250,53 @@ pub(crate) fn cwd_test_guard() -> CwdTestGuard
 mod tests
 {
     use super::*;
+
+    #[test]
+    fn test_download_or_copy_templates_local_missing_templates_yml_errors() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("stray.md"), "# not a catalog\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.download_or_copy_templates(&source.path().to_string_lossy());
+
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("templates.yml") == true);
+        assert!(config_dir.path().join("stray.md").exists() == false, "nothing must be copied when validation fails");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_local_invalid_yaml_errors() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("templates.yml"), "languages: [not, a, map\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.download_or_copy_templates(&source.path().to_string_lossy());
+
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("Invalid templates.yml") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_local_valid_source_copies() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("templates.yml"), "version: 5\nlanguages: {}\n")?;
+        fs::write(source.path().join("AGENTS.md"), "# Template\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.download_or_copy_templates(&source.path().to_string_lossy())?;
+
+        assert!(config_dir.path().join("templates.yml").exists() == true);
+        assert!(config_dir.path().join("AGENTS.md").exists() == true);
+        Ok(())
+    }
 
     #[test]
     fn test_extract_skill_name_from_bogus_path()
