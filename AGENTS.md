@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-07-21 (v22.4.0)
+**Last updated:** 2026-07-22 (v22.5.0)
 
 <!-- {mission} -->
 
@@ -100,6 +100,9 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Tracker categories (`main`/`agent`/`language`/`skill`/`integration`) are recorded from the templates.yml section a file resolves from, carried on `ResolvedFile.category`; they must never be derived from path substrings
 - Init never hard-fails on a tracked modified file that adds no new owners: it plans `SkipModified` and keeps the local version; `merge` is the update path, `--force` overwrites. Owner-expanding conflicts and untracked collisions remain hard preflight errors
 - Command verb separation: `init` installs something new (a language or agent) and rejects a no-op re-init when everything requested is already tracker-installed (bypass with `--force`); bare `slopctl update` refreshes the whole workspace from the local cache (selectors narrow it); `merge` reconciles customized files. "Already installed" is determined from FileTracker owners (`get_installed_languages`/`get_installed_agents`), never from marker directories, because agents create their own markers
+- Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
+- Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
+- `update` never creates agent-category files for agents that were not slopctl-installed; marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
 
 ### Security & Safety
 

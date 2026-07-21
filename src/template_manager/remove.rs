@@ -71,6 +71,7 @@ impl TemplateManager
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
         let mut dirs_to_cleanup: Vec<PathBuf> = Vec::new();
+        let mut agent_dirs: Vec<PathBuf> = Vec::new();
 
         // Collect agent files when agent or --all is requested.
         // Tries BoM first (templates.yml); falls back to FileTracker when the
@@ -91,6 +92,8 @@ impl TemplateManager
 
             if let Some(agent_name) = agent
             {
+                agent_dirs = Self::agent_workspace_dirs(&agent_catalog, agent_name, &current_dir);
+
                 let found_in_bom = if let Some(ref bom) = bom &&
                     bom.has_agent(agent_name) == true
                 {
@@ -105,17 +108,29 @@ impl TemplateManager
                     false
                 };
 
-                if found_in_bom == false
+                // Supplement with tracked files owned solely by this agent. Ownership is
+                // authoritative and catalog-free, so this also covers agents removed from
+                // templates.yml after installation. Shared entries (other owners remain)
+                // are not deletion candidates; their ownership is released tracker-wide
+                // after the removal loop.
+                let mut owner_matches = 0usize;
+                for (rel_path, meta) in file_tracker.get_entries()
+                {
+                    let abs_path = current_dir.join(&rel_path);
+                    if meta.has_agent(agent_name) == true &&
+                        meta.agent.len() == 1 &&
+                        meta.lang.is_empty() == true &&
+                        meta.category != "main" &&
+                        abs_path.exists() == true &&
+                        files_to_remove.contains(&abs_path) == false
+                    {
+                        files_to_remove.push(abs_path);
+                        owner_matches += 1;
+                    }
+                }
+                if found_in_bom == false && owner_matches > 0
                 {
                     println!("{} Agent '{}' not in templates.yml, using installation records", "→".blue(), agent_name.yellow());
-                    let agent_entries = file_tracker.get_entries_by_category("agent");
-                    for (path, _) in agent_entries
-                    {
-                        if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true
-                        {
-                            files_to_remove.push(path);
-                        }
-                    }
                 }
 
                 // Collect skill files under this agent's skill dir via filesystem scan
@@ -155,7 +170,7 @@ impl TemplateManager
                 for (rel_path, _) in skill_entries
                 {
                     let abs_path = current_dir.join(&rel_path);
-                    if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, agent_name) == true && files_to_remove.contains(&abs_path) == false
+                    if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, &agent_dirs) == true && files_to_remove.contains(&abs_path) == false
                     {
                         if let Some(skill_root) = Self::skill_root_from_path(&abs_path)
                         {
@@ -468,7 +483,7 @@ impl TemplateManager
             // like Claude; the tracker records them as lang-owned, so is_unreferenced()
             // stays false. We force-delete by physical location so the agent directory
             // is fully cleaned up and status no longer reports the agent as installed.
-            let in_agent_dir = has_agent_target == true && agent.is_some_and(|a| Self::path_belongs_to_agent(file, a));
+            let in_agent_dir = has_agent_target == true && Self::path_belongs_to_agent(file, &agent_dirs) == true;
             let should_remove = remove_all == true || in_agent_dir == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
 
             if should_remove == true
@@ -503,12 +518,12 @@ impl TemplateManager
         if has_lang_target == true
         {
             let lang_name = lang.unwrap();
-            file_tracker.clear_lang_for_category(lang_name, "main");
+            file_tracker.clear_lang_owner(lang_name);
         }
         if has_agent_target == true
         {
             let agent_name = agent.unwrap();
-            file_tracker.clear_agent_for_category(agent_name, "main");
+            file_tracker.clear_agent_owner(agent_name);
         }
 
         file_tracker.save()?;
@@ -750,15 +765,42 @@ impl TemplateManager
         Ok(PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped })
     }
 
-    /// Check if a file path belongs to a specific agent's directory tree
+    /// Collects the workspace directories that belong to an agent
     ///
-    /// Matches paths containing the agent name in a directory component.
-    fn path_belongs_to_agent(path: &std::path::Path, agent_name: &str) -> bool
+    /// Returns the agent's marker directories plus its workspace-scoped skill and
+    /// prompt directories from the catalog. Agents absent from the catalog yield an
+    /// empty list; their files are removed via owner-based selection instead.
+    fn agent_workspace_dirs(catalog: &agent_defaults::AgentCatalog, agent_name: &str, workspace: &Path) -> Vec<PathBuf>
     {
-        let agent_dir_patterns = [format!(".{}/", agent_name), format!(".{}\\", agent_name), format!("/{}/", agent_name), format!("\\{}\\", agent_name)];
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let mut dirs_list = agent_defaults::get_workspace_marker_dirs_from_catalog(catalog, agent_name, workspace);
+        for raw in
+            [agent_defaults::get_skill_dir_from_catalog(catalog, agent_name), agent_defaults::get_prompt_dir_from_catalog(catalog, agent_name)].into_iter().flatten()
+        {
+            if raw.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+            {
+                let resolved = resolve_placeholder_path(raw, workspace, &userprofile);
+                if dirs_list.contains(&resolved) == false
+                {
+                    dirs_list.push(resolved);
+                }
+            }
+        }
+        dirs_list
+    }
 
-        let path_str = path.to_string_lossy();
-        agent_dir_patterns.iter().any(|pattern| path_str.contains(pattern))
+    /// Check if a file path lives inside one of the agent's workspace directories
+    ///
+    /// Matches by path prefix against the precomputed directory list (never by
+    /// substring), so path components elsewhere that happen to equal the agent
+    /// name cannot cause false positives.
+    fn path_belongs_to_agent(path: &std::path::Path, agent_dirs: &[PathBuf]) -> bool
+    {
+        let canonical_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        agent_dirs.iter().any(|dir| {
+            let canonical_dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+            path.starts_with(dir) == true || canonical_path.starts_with(&canonical_dir) == true
+        })
     }
 }
 
@@ -794,32 +836,46 @@ mod tests
         Ok(())
     }
 
+    fn bogus_agent_dirs() -> Vec<PathBuf>
+    {
+        vec![PathBuf::from("/home/user/project/.bogus"), PathBuf::from("/home/user/project/.bogus/skills")]
+    }
+
     #[test]
     fn test_path_belongs_to_bogus()
     {
         let path = PathBuf::from("/home/user/project/.bogus/skills/my-skill/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == true);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == true);
     }
 
     #[test]
-    fn test_path_belongs_to_fake()
+    fn test_path_does_not_belong_to_other_agent_dirs()
     {
         let path = PathBuf::from("/home/user/project/.fake/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == true);
-    }
-
-    #[test]
-    fn test_path_does_not_belong_to_wrong_agent()
-    {
-        let path = PathBuf::from("/home/user/project/.bogus/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == false);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == false);
     }
 
     #[test]
     fn test_path_no_agent_directory()
     {
         let path = PathBuf::from("/home/user/project/AGENTS.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == false);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == false);
+    }
+
+    #[test]
+    fn test_path_with_agent_named_ancestor_does_not_match()
+    {
+        // A path component equal to the agent name outside its dirs must not match.
+        let path = PathBuf::from("/home/bogus/project/.agents/skills/foo/SKILL.md");
+        let dirs = vec![PathBuf::from("/home/bogus/project/.bogus"), PathBuf::from("/home/bogus/project/.bogus/skills")];
+        assert!(TemplateManager::path_belongs_to_agent(&path, &dirs) == false);
+    }
+
+    #[test]
+    fn test_path_belongs_with_empty_dirs_is_false()
+    {
+        let path = PathBuf::from("/home/user/project/.bogus/skills/foo/SKILL.md");
+        assert!(TemplateManager::path_belongs_to_agent(&path, &[]) == false);
     }
 
     #[test]

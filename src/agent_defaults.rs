@@ -221,6 +221,12 @@ pub fn get_skill_dir_from_catalog<'a>(catalog: &'a AgentCatalog, agent: &str) ->
     get_catalog_entry(catalog, agent).map(|entry| entry.skill_dir.as_str())
 }
 
+/// Get the prompt installation directory for an agent from a specific catalog
+pub fn get_prompt_dir_from_catalog<'a>(catalog: &'a AgentCatalog, agent: &str) -> Option<&'a str>
+{
+    get_catalog_entry(catalog, agent).map(|entry| entry.prompt_dir.as_str())
+}
+
 /// Return whether an agent scans `.agents/skills/` according to a specific catalog
 pub fn reads_cross_client_skills_from_catalog(catalog: &AgentCatalog, agent: &str) -> bool
 {
