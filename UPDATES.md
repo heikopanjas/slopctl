@@ -4,6 +4,27 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-07-22 (v22.5.3, local template update validation and feedback)
+
+- `templates --update --from <local path>` now validates that the source contains a parseable templates.yml before touching the cache (mirroring the URL path) and prints a completion line with the copied file count; previously it ended silently after "Copying templates from local path", which read as a no-op
+- `copy_dir_all` returns the number of files copied and skips macOS Finder junk (.DS_Store) so it no longer lands in the template cache or workspaces
+- investigation note: relative local paths always worked; APFS clonefile preserves source mtimes, which made a successful copy look stale
+- version bump: 22.5.2 to 22.5.3 (PATCH - validation guard and output fix)
+
+### 2026-07-22 (v22.5.2, README overhaul)
+
+- brought README.md up to date with the recent feature work: UPDATES.md log and recent-updates skill in the walkthrough and file trees, full-workspace update semantics, the already-initialized init guard, skip-modified behavior, merge multi-agent union and changelog preservation, remove ownership release and UPDATES.md preservation, and the skill-file selector hint
+- added the missing `models` subcommand section (undocumented since v21.0.0) and the `models.uri`/`models.fallbackUri` config keys
+- removed stale content: CLAUDE.md and .cursorrules instruction-stub references (obsolete since v18.3.0), the removed `list-models` command in the config precedence list, outdated model id examples, and the v20.0.0 footer
+- documented the `preamble` templates.yml section and its insertion marker; corrected the status example to plural installed languages and the current agent/language catalogs; added flate2/tar to the technology stack
+- version bump: 22.5.1 to 22.5.2 (PATCH - documentation update)
+
+### 2026-07-22 (v22.5.1, skill-file selector hint)
+
+- `slopctl update --file <path>` now recognizes when the requested path lives inside a skill directory and errors with a targeted hint naming the owning skill and the correct `--skill <name>` invocation, instead of the generic "No template match" listing
+- rationale: skill files are intentionally not addressable via `--file` (skills refresh as whole units so upstream-removed files get pruned), but the old error did not explain that
+- version bump: 22.5.0 to 22.5.1 (PATCH - error message improvement)
+
 ### 2026-07-22 (v22.5.0, native-only agent audit fixes)
 
 - audit of the native-only agent measures (Claude Code, Vibe: `reads_cross_client_skills: false`) found ownership leaks, unsafe path matching, and scoping issues; this release fixes the correctness and scoping tiers

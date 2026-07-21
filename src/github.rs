@@ -380,7 +380,8 @@ pub fn copy_skill_tree(source: &Path, dest: &Path) -> Result<()>
         fs::remove_dir_all(dest)?;
     }
     fs::create_dir_all(dest.parent().unwrap_or(dest))?;
-    copy_dir_all(source, dest)
+    copy_dir_all(source, dest)?;
+    Ok(())
 }
 
 /// Extracts a repository tarball into `staging` and returns the repo root path
