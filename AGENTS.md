@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-13 (v22.5.5)
+**Last updated:** 2026-08-14 (v22.5.6)
 
 <!-- {mission} -->
 
@@ -88,6 +88,13 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Always use `--dry-run` to verify CLI behavior before writing destructive tests
 - Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
 - One public struct or major component per source file; shared helpers go in `utils.rs`
+
+### Toolchain Pinning
+
+- `rust-toolchain.toml` at the repo root pins the exact nightly (`channel = "nightly-YYYY-MM-DD"`) plus its `rustfmt`/`clippy` components; `rustup` and `dtolnay/rust-toolchain` in CI both read this file automatically, so local dev and CI always resolve to the identical toolchain build
+- CI workflows (`build.yml`, `release.yml`) must NOT pass an explicit `toolchain:` input to `dtolnay/rust-toolchain` — that would override the pinned file with a floating channel and reintroduce drift; only `components:` is passed explicitly
+- Do not use an unpinned `nightly` channel anywhere (CI matrix, local `rustup default`, etc.); a floating nightly silently changes the shipped `rustfmt` version over time and desyncs from `.rustfmt.toml`'s `required_version`, breaking `cargo fmt --check` in CI with no local warning
+- To bump the toolchain: update the `channel` date in `rust-toolchain.toml`, run `cargo fmt` locally to confirm the new `rustfmt` version, update `required_version` in `.rustfmt.toml` to match, and land both changes in the same commit
 
 ### File Tracker Ownership
 
@@ -378,7 +385,7 @@ Load the `rust-build-commands` skill when building or running the project.
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
-  - `required_version = "1.9.0"` - Match the pinned nightly rustfmt component
+  - `required_version = "1.10.0"` - Must match the rustfmt shipped by the toolchain pinned in `rust-toolchain.toml`; bump both files together in the same commit
   - `tab_spaces = 4` - Standard indentation
   - `imports_granularity = "Crate"` - Group imports by crate
   - `group_imports = "StdExternalCrate"` - Organize imports logically
