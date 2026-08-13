@@ -1051,7 +1051,7 @@ fn test_reinit_after_updates_append_preserves_entries() -> anyhow::Result<()>
 }
 
 #[test]
-fn test_reinit_force_overwrites_modified_updates_file() -> anyhow::Result<()>
+fn test_reinit_force_preserves_updates_log() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
     let fixture = IntegrationFixture::new()?;
@@ -1061,13 +1061,120 @@ fn test_reinit_force_overwrites_modified_updates_file() -> anyhow::Result<()>
     fixture.init(Some("bogus"), None)?;
 
     let updates = workspace.path().join("UPDATES.md");
-    let template_content = fs::read_to_string(&updates)?;
-    fs::write(&updates, format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", template_content))?;
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
 
-    // --force keeps today's overwrite semantics: the template wins.
+    // Changelog files are blocked like AGENTS.md: --force does not override this.
+    // 'slopctl merge' is the only command that may refresh the template half.
     fixture.init_force(Some("bogus"), None)?;
 
-    assert_eq!(fs::read_to_string(&updates)?, template_content, "with --force the template must overwrite the modified file");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "--force must not overwrite the changelog log");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Regression: after a merge re-records the tracker SHA, the file reads as
+    // Unmodified while still diverging from the template source. A second init
+    // (different agent) must not fall through to an unconditional overwrite.
+    fixture.init(Some("fake"), None)?;
+
+    assert_eq!(fs::read_to_string(&updates)?, appended, "post-merge log must survive a later init with no flag involved");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Same regression via 'slopctl update' (no lang/agent selectors), with and
+    // without --force: neither may touch a changelog-marker file's log.
+    fixture.manager().update_full(None, Some("bogus"), false, false)?;
+    assert_eq!(fs::read_to_string(&updates)?, appended, "plain update must not overwrite the post-merge log");
+
+    fixture.manager().update_full(None, Some("bogus"), true, false)?;
+    assert_eq!(fs::read_to_string(&updates)?, appended, "update --force must not overwrite the post-merge log");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_file_updates_md_is_rejected() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Mirrors the existing AGENTS.md single-file rejection: changelog-marker
+    // files are refreshed only via 'slopctl merge', never as a --file selector.
+    let err = fixture
+        .manager()
+        .update_partial(&["UPDATES.md".to_string()], &[], None, Some("bogus"), false, false)
+        .expect_err("UPDATES.md must be rejected as a --file selector");
+    let message = err.to_string();
+    assert!(message.contains("UPDATES.md") == true, "error must name the rejected file: {}", message);
+    assert!(message.contains("slopctl merge") == true, "error must point to merge: {}", message);
+
+    let updates = workspace.path().join("UPDATES.md");
+    let original = fs::read_to_string(&updates)?;
+    let err_force =
+        fixture.manager().update_partial(&["UPDATES.md".to_string()], &[], None, Some("bogus"), true, false).expect_err("--force must not bypass the rejection");
+    assert!(err_force.to_string().contains("slopctl merge") == true);
+    assert_eq!(fs::read_to_string(&updates)?, original, "rejected selector must not touch the file");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_all_preserves_unmodified_per_tracker_updates_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Regression: split_changelog_preserved used to key on FileStatus::Modified,
+    // which never fires once the tracker SHA matches the on-disk content.
+    fixture.remove_all()?;
+
+    assert!(updates.exists() == true, "UPDATES.md must survive remove --all even when Unmodified per tracker");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "post-merge log must be untouched");
 
     Ok(())
 }
@@ -1431,6 +1538,23 @@ fn test_merge_recreates_prompt_files_for_all_detected_agents() -> anyhow::Result
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Re-records `target`'s tracker entry to match its current on-disk content.
+///
+/// Mirrors what `slopctl merge` does after splicing a changelog-marker file's
+/// template half: the tracker's `original_sha` is updated to the post-merge
+/// content, so the file reads as `FileStatus::Unmodified` even though it now
+/// diverges from the template source. This is the exact precondition that
+/// exposed the changelog data-loss bug (init/update fell through to an
+/// unconditional overwrite because `FileStatus::Modified` never fired).
+fn simulate_merge_resync(target: &Path) -> anyhow::Result<()>
+{
+    let sha = FileTracker::calculate_sha256(target)?;
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    tracker.record_installation_with_owners(target, sha, 5, &[], &[], "integration".to_string());
+    tracker.save()?;
+    Ok(())
+}
 
 /// Returns `true` if any `SKILL.md` exists recursively under `dir`.
 fn has_skill_md_under(dir: &Path) -> bool

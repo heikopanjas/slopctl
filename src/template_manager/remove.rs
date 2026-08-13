@@ -13,7 +13,7 @@ use crate::{
     agent_defaults::resolve_placeholder_path,
     bom,
     bom::BillOfMaterials,
-    file_tracker::{FileStatus, FileTracker},
+    file_tracker::FileTracker,
     template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
@@ -29,15 +29,13 @@ struct PurgeTargets
 
 /// Splits removal candidates into (preserved changelog files, deletable files)
 ///
-/// A candidate is preserved when it is tracked, locally modified, and carries the
-/// changelog marker: its divergence is user-owned log history that must survive
-/// remove and purge operations.
-fn split_changelog_preserved(file_tracker: &FileTracker, candidates: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>)
+/// A candidate is preserved whenever it carries the changelog marker, regardless of
+/// `FileStatus`: keying on `Modified` alone misses a file whose tracker SHA was
+/// re-recorded by `merge`, which still holds a user-owned, append-only log below the
+/// marker that remove and purge operations must not delete.
+fn split_changelog_preserved(candidates: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>)
 {
-    candidates.into_iter().partition(|file| {
-        file_tracker.check_modification(file).map(|status| status == FileStatus::Modified).unwrap_or(false) == true &&
-            template_engine::file_contains_changelog_marker(file) == true
-    })
+    candidates.into_iter().partition(|file| template_engine::file_contains_changelog_marker(file) == true)
 }
 
 impl TemplateManager
@@ -400,14 +398,9 @@ impl TemplateManager
         files_to_remove.dedup();
 
         // Preserve user-owned changelog files regardless of how they were collected:
-        // their local modifications are append-only log history, not stale template state.
-        let changelog_kept;
-        {
-            let file_tracker = FileTracker::new(&current_dir)?;
-            let (kept, deletable) = split_changelog_preserved(&file_tracker, files_to_remove);
-            files_to_remove = deletable;
-            changelog_kept = kept;
-        }
+        // their log history is not stale template state.
+        let (changelog_kept, deletable) = split_changelog_preserved(files_to_remove);
+        files_to_remove = deletable;
 
         dirs_to_cleanup.sort_by(|left, right| right.components().count().cmp(&left.components().count()).then_with(|| left.cmp(right)));
         dirs_to_cleanup.dedup();
@@ -753,11 +746,11 @@ impl TemplateManager
             }
         }
 
-        // Preserve user-owned changelog files: tracked, locally modified, marker present.
+        // Preserve user-owned changelog files (marker present); --force overrides.
         let mut changelog_skipped: Vec<PathBuf> = Vec::new();
         if force == false
         {
-            let (skipped, kept) = split_changelog_preserved(&file_tracker, files_to_purge);
+            let (skipped, kept) = split_changelog_preserved(files_to_purge);
             files_to_purge = kept;
             changelog_skipped = skipped;
         }

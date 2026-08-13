@@ -4,6 +4,17 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-14 (v22.5.8, protect changelog-marker files like AGENTS.md)
+
+- fixed a silent data-loss bug: after `merge` re-records a changelog-marker file's (e.g. `UPDATES.md`) tracker SHA, the file read as `FileStatus::Unmodified` while still diverging from the template source, so `init --agent <other>` and plain `slopctl update` fell through to an unconditional overwrite and wiped the log with no flag involved. the `SkipModified` guard never fired because the file was never classified as `Modified`
+- changelog-marker files are now blocked in `init` and `update` (full or `--file`) under any flag, the same way `AGENTS.md` is blocked; `update --file UPDATES.md` is now a hard error pointing to `merge`. `merge` remains the only command that refreshes the template half above the marker; `remove --purge --force` keeps its documented ability to delete the file, matching `AGENTS.md`
+- added `template_engine::is_changelog_protected`, a new `PlannedFileActionKind::SkipChangelog`, and a matching guard in `partial_update.rs`'s full-refresh classifier; all key on the marker itself via `file_contains_changelog_marker`, never on `FileStatus`, which is what created the original gap
+- dropped the `FileStatus::Modified` conjunct from `remove.rs`'s `split_changelog_preserved`, closing the same post-merge hole in `remove --all`/`remove --purge` (no force)
+- fixed a second bug found while testing the above: `file_contains_changelog_marker` matched the marker as a raw substring anywhere in a file, so the `recent-updates` skill's own documentation (which shows the marker as literal example text) was mistaken for a real changelog file and silently failed to install for any newly added agent. tightened the check to require the marker on its own trimmed line
+- rationale: README.md already promised "init, update, and merge never overwrite" the log; the code did not match that promise. this closes the gap without requiring an LLM call for the common case (an unmerged template half plus a preserved log), at the cost of the template half also needing `merge` to refresh, same tradeoff already accepted for AGENTS.md
+- added integration coverage for the post-merge regression (init, update full with/without --force, remove --all) and unit coverage for the inline-mention false positive
+- version bump: 22.5.7 to 22.5.8 (PATCH - data-loss bug fix, no API change)
+
 ### 2026-08-14 (v22.5.7, drop rustfmt required_version pin)
 
 - removed `required_version` from both `.rustfmt.toml` (this repo's dogfooded copy) and `templates/v5/rust-format-instructions.toml` (the canonical shipped template installed into every downstream workspace's rust language support)
