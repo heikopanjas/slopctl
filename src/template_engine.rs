@@ -134,7 +134,8 @@ enum PlannedFileActionKind
 {
     Copy,
     RefreshTracker,
-    SkipModified
+    SkipModified,
+    SkipChangelog
 }
 
 /// Loads template configuration from templates.yml
@@ -177,14 +178,26 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
     Ok(content.contains(TEMPLATE_MARKER) == false)
 }
 
-/// Checks whether a file contains the changelog marker comment
+/// Checks whether a file contains the changelog marker comment as its own line
 ///
 /// Files carrying the marker keep a user-owned, append-only log below it, so
-/// install and cleanup paths must preserve their local modifications.
-/// Returns `false` when the file is missing or unreadable.
+/// install and cleanup paths must preserve their local modifications. Matching
+/// requires a standalone (trimmed) line rather than a raw substring, so
+/// documentation that merely mentions the marker as example text (e.g. the
+/// `recent-updates` skill explaining the syntax) is not mistaken for a real
+/// changelog-marker file. Returns `false` when the file is missing or unreadable.
 pub fn file_contains_changelog_marker(path: &Path) -> bool
 {
-    fs::read_to_string(path).map(|content| content.contains(CHANGELOG_MARKER)).unwrap_or(false)
+    fs::read_to_string(path).map(|content| content.lines().any(|line| line.trim() == CHANGELOG_MARKER)).unwrap_or(false)
+}
+
+/// Returns true when an existing target carries a user-owned changelog log.
+///
+/// Such files are never written by install or refresh paths; `merge` is the
+/// only command that may update the template half above the marker.
+pub fn is_changelog_protected(target: &Path) -> bool
+{
+    target.exists() == true && file_contains_changelog_marker(target) == true
 }
 
 /// Validates that no two file entries target the same destination path
@@ -1298,6 +1311,14 @@ impl<'a> TemplateEngine<'a>
             {
                 planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
             }
+            else if is_changelog_protected(&entry.target) == true
+            {
+                // Changelog-marker files (e.g. UPDATES.md) hold a user-owned, append-only
+                // log below the marker. Keying protection on FileStatus::Modified alone
+                // misses the common case where 'merge' already re-recorded the tracker SHA,
+                // so key on the marker itself instead; 'merge' is the only refresh path.
+                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::SkipChangelog });
+            }
             else
             {
                 match file_tracker.check_modification(&entry.target)?
@@ -1511,6 +1532,10 @@ impl<'a> TemplateEngine<'a>
             {
                 println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), entry.target.display());
             }
+            else if planned.kind == PlannedFileActionKind::SkipChangelog
+            {
+                println!("  {} {} (skipped - changelog log preserved)", "○".yellow(), entry.target.display());
+            }
             else if planned.kind == PlannedFileActionKind::RefreshTracker
             {
                 println!("  {} {} (already installed, tracker would be refreshed)", "○".yellow(), entry.target.display());
@@ -1621,6 +1646,16 @@ impl<'a> TemplateEngine<'a>
                 // Keep the user's version and the original tracker SHA; 'slopctl merge' is the update path.
                 println!(
                     "  {} {} (skipped - local modifications preserved; use 'slopctl merge' to apply template updates)",
+                    "○".yellow(),
+                    target.display().to_string().yellow()
+                );
+            }
+            else if planned.kind == PlannedFileActionKind::SkipChangelog
+            {
+                // Never write a changelog-marker file here; 'slopctl merge' splices the
+                // template half back in without touching the user-owned log below the marker.
+                println!(
+                    "  {} {} (skipped - changelog log preserved; use 'slopctl merge' to apply template updates)",
                     "○".yellow(),
                     target.display().to_string().yellow()
                 );
@@ -1863,6 +1898,45 @@ mod tests
     {
         let dir = tempfile::TempDir::new().unwrap();
         assert!(file_contains_changelog_marker(&dir.path().join("missing.md")) == false);
+    }
+
+    #[test]
+    fn test_file_contains_changelog_marker_inline_mention_false()
+    {
+        // Documentation that explains the marker syntax (e.g. the recent-updates
+        // skill) mentions it inline, not as a standalone line; it must not be
+        // mistaken for an actual changelog-marker file.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("SKILL.md");
+        fs::write(&path, format!("- `UPDATES.md` contains a title, a short intro, and a `{}` marker line\n", CHANGELOG_MARKER)).unwrap();
+        assert!(file_contains_changelog_marker(&path) == false);
+    }
+
+    // -- is_changelog_protected --
+
+    #[test]
+    fn test_is_changelog_protected_marker_present_true()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("UPDATES.md");
+        fs::write(&path, format!("# Log\n\n{}\n\n### entry\n", CHANGELOG_MARKER)).unwrap();
+        assert!(is_changelog_protected(&path) == true);
+    }
+
+    #[test]
+    fn test_is_changelog_protected_marker_absent_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plain.md");
+        fs::write(&path, "# Log\n\nno marker here\n").unwrap();
+        assert!(is_changelog_protected(&path) == false);
+    }
+
+    #[test]
+    fn test_is_changelog_protected_missing_file_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(is_changelog_protected(&dir.path().join("missing.md")) == false);
     }
 
     // -- load_template_config --

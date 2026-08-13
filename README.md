@@ -589,7 +589,7 @@ slopctl remove --purge --dry-run
 - `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories; skips `$instructions` fragments; validates the language name against templates.yml
 - `--all`: removes all agent files and skills from all agents; **NEVER touches AGENTS.md**
 - `--purge`: removes everything `--all` removes **plus** AGENTS.md; customized AGENTS.md is preserved unless `--force` is also given
-- Modified changelog-marker files (e.g. `UPDATES.md` with user log entries) are preserved by `remove` and `--purge`; `--purge --force` overrides
+- Changelog-marker files (e.g. `UPDATES.md`) are preserved by `remove` and `--purge` regardless of tracked modification status; `--purge --force` overrides
 - Only removes files that exist in the current directory
 - Shows list of files to be removed before deletion
 - Asks for confirmation unless `--force` is specified
@@ -797,7 +797,7 @@ Files and skills are routed to the same workspace locations as `init`. The scope
 
 When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
 
-This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs something *new*: a language or an agent). `AGENTS.md` is never refreshed by `update`; use `merge`.
+This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs something *new*: a language or an agent). `AGENTS.md` and changelog-marker files (e.g. `UPDATES.md`) are never refreshed by `update`, under any flag; use `merge`.
 
 **Usage:**
 
@@ -824,7 +824,7 @@ slopctl update --skill git-workflow --dry-run       # Preview without writing
 - `--force` / `-f` - Overwrite locally customized or untracked files
 - `--dry-run` / `-n` - Preview changes without applying them
 
-A `--file` path that lives inside a skill directory is rejected with a hint to use `--skill <name>` instead (skills refresh as whole units so upstream-removed files get pruned). Without `--file`/`--skill` the whole workspace is refreshed. `AGENTS.md` is excluded in both modes (it is fragment-merged); use `merge` to update it. Agent instruction and prompt files are created only for agents that slopctl installed; an agent detected merely through its marker directory receives skills but no agent files.
+A `--file` path that lives inside a skill directory is rejected with a hint to use `--skill <name>` instead (skills refresh as whole units so upstream-removed files get pruned). Without `--file`/`--skill` the whole workspace is refreshed. `AGENTS.md` is excluded in both modes (it is fragment-merged); use `merge` to update it. Changelog-marker files (e.g. `UPDATES.md`) are excluded the same way, under `--force` too, and `--file UPDATES.md` is a hard error; `merge` is the only command that refreshes the template half above the marker. Agent instruction and prompt files are created only for agents that slopctl installed; an agent detected merely through its marker directory receives skills but no agent files.
 
 ### `models` - Manage Global Model Defaults Catalog
 

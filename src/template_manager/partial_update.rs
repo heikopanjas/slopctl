@@ -133,6 +133,15 @@ impl TemplateManager
 
             if let Some(entry) = candidates.get(&resolved)
             {
+                // Checked against the template source (not the on-disk target) so this
+                // blocks the selector unconditionally, the same way AGENTS.md is blocked
+                // above regardless of local state; 'merge' is the only refresh path.
+                if template_engine::file_contains_changelog_marker(&entry.source) == true
+                {
+                    return Err(anyhow::anyhow!(
+                        "'{}' holds a user-owned changelog log and cannot be refreshed as a single file. Use 'slopctl merge' instead.", requested
+                    ));
+                }
                 selected.insert(resolved, entry);
             }
             else if let Some(skill_name) = skill_name_of(&resolved)
@@ -345,6 +354,7 @@ impl TemplateManager
         // untracked ones (kept with a report; --force overwrites), drop up-to-date copies.
         let mut to_refresh: Vec<(&PathBuf, &ResolvedFile)> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
+        let mut changelog_skipped: Vec<String> = Vec::new();
         let mut up_to_date = 0usize;
         for (target, entry) in &candidates
         {
@@ -357,6 +367,15 @@ impl TemplateManager
                 {
                     to_refresh.push((target, entry));
                 }
+            }
+            else if template_engine::is_changelog_protected(target) == true
+            {
+                // Changelog-marker files (e.g. UPDATES.md) hold a user-owned, append-only
+                // log below the marker. Keying protection on FileStatus::Modified alone
+                // misses the common case where 'merge' already re-recorded the tracker SHA,
+                // so key on the marker itself instead; 'merge' is the only refresh path,
+                // and unlike ordinary modified files, --force does not override this.
+                changelog_skipped.push(display_path(target, &workspace));
             }
             else
             {
@@ -404,8 +423,9 @@ impl TemplateManager
 
         if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
         {
-            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len());
+            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len() + changelog_skipped.len());
             report_skipped(&skipped);
+            report_changelog_skipped(&changelog_skipped);
             println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
             return Ok(());
         }
@@ -428,6 +448,10 @@ impl TemplateManager
             for path in &skipped
             {
                 println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), path);
+            }
+            for path in &changelog_skipped
+            {
+                println!("  {} {} (skipped - changelog log preserved)", "○".yellow(), path);
             }
             if stale_to_remove.is_empty() == false
             {
@@ -462,6 +486,7 @@ impl TemplateManager
         file_tracker.save()?;
 
         report_skipped(&skipped);
+        report_changelog_skipped(&changelog_skipped);
         println!("{} Refreshed {} file(s); {} already up to date", "✓".green(), to_refresh.len(), up_to_date);
         println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
         Ok(())
@@ -509,6 +534,18 @@ fn report_skipped(skipped: &[String])
     for path in skipped
     {
         println!("  {} {} (skipped - local modifications preserved; use 'slopctl merge' or --force)", "○".yellow(), path.yellow());
+    }
+}
+
+/// Reports changelog-marker targets skipped by update
+///
+/// Unlike `report_skipped`, `--force` does not override this: `merge` is the
+/// only command that may refresh a changelog-marker file's template half.
+fn report_changelog_skipped(skipped: &[String])
+{
+    for path in skipped
+    {
+        println!("  {} {} (skipped - changelog log preserved; use 'slopctl merge')", "○".yellow(), path.yellow());
     }
 }
 
