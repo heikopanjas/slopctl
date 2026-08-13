@@ -4,6 +4,14 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-14 (v22.5.7, drop rustfmt required_version pin)
+
+- removed `required_version` from both `.rustfmt.toml` (this repo's dogfooded copy) and `templates/v5/rust-format-instructions.toml` (the canonical shipped template installed into every downstream workspace's rust language support)
+- rationale: `.rustfmt.toml` is a shared template, not a CI-only file; a hardcoded `required_version` breaks `cargo fmt` for any downstream user whose local rustfmt does not match exactly, since they do not get this repo's `rust-toolchain.toml`. it also desynced this workspace's tracked SHA from the template SHA, tripping the shared-ownership preflight check and blocking `slopctl update`/`init` on this repo's own rust language files
+- version safety for this repo's own CI is now handled solely by the `rust-toolchain.toml` pin added in v22.5.6; the two files no longer need a version assertion to stay in sync
+- documented in AGENTS.md that `required_version` (or any CI-environment-specific setting) must never be reintroduced into `.rustfmt.toml`
+- version bump: 22.5.6 to 22.5.7 (PATCH - template/config fix, no API change)
+
 ### 2026-08-14 (v22.5.6, pin nightly toolchain to stop rustfmt drift)
 
 - added `rust-toolchain.toml` pinning `channel = "nightly-2026-08-12"` (rustfmt 1.10.0, clippy) so `rustup` and CI's `dtolnay/rust-toolchain` resolve the identical toolchain build

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-14 (v22.5.6)
+**Last updated:** 2026-08-14 (v22.5.7)
 
 <!-- {mission} -->
 
@@ -93,8 +93,9 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 
 - `rust-toolchain.toml` at the repo root pins the exact nightly (`channel = "nightly-YYYY-MM-DD"`) plus its `rustfmt`/`clippy` components; `rustup` and `dtolnay/rust-toolchain` in CI both read this file automatically, so local dev and CI always resolve to the identical toolchain build
 - CI workflows (`build.yml`, `release.yml`) must NOT pass an explicit `toolchain:` input to `dtolnay/rust-toolchain` — that would override the pinned file with a floating channel and reintroduce drift; only `components:` is passed explicitly
-- Do not use an unpinned `nightly` channel anywhere (CI matrix, local `rustup default`, etc.); a floating nightly silently changes the shipped `rustfmt` version over time and desyncs from `.rustfmt.toml`'s `required_version`, breaking `cargo fmt --check` in CI with no local warning
-- To bump the toolchain: update the `channel` date in `rust-toolchain.toml`, run `cargo fmt` locally to confirm the new `rustfmt` version, update `required_version` in `.rustfmt.toml` to match, and land both changes in the same commit
+- Do not use an unpinned `nightly` channel anywhere (CI matrix, local `rustup default`, etc.); a floating nightly silently changes the shipped `rustfmt` version over time
+- To bump the toolchain: update the `channel` date in `rust-toolchain.toml` and run `cargo fmt`/`cargo clippy` locally to confirm the new toolchain formats and lints cleanly before committing
+- Do NOT reintroduce `.rustfmt.toml`'s `required_version` as a substitute for this: `.rustfmt.toml` is a shared template (see below) installed into arbitrary downstream workspaces that do not get this repo's `rust-toolchain.toml`, so a hardcoded version pin there breaks `cargo fmt` for any user on a different rustfmt build. The toolchain file is the only place version pinning belongs.
 
 ### File Tracker Ownership
 
@@ -378,14 +379,14 @@ Load the `rust-build-commands` skill when building or running the project.
 
 **Formatting Configuration (.rustfmt.toml):**
 
-- Use project-specific rustfmt configuration for consistency
+- This repo's root `.rustfmt.toml` is dogfooded from `templates/v5/rust-format-instructions.toml`, the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files
+- Do NOT add `required_version` (or other CI-environment-specific settings) to either copy — a hardcoded version pin breaks `cargo fmt` for any downstream user whose local rustfmt doesn't match exactly, since they don't get this repo's `rust-toolchain.toml`. Version consistency for this repo's own CI is handled entirely by the toolchain pin (see "Toolchain Pinning" above)
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability
   - `brace_style = "AlwaysNextLine"` - Opening braces on new line
   - `control_brace_style = "AlwaysNextLine"` - Consistent brace placement
   - `trailing_comma = "Never"` - No trailing commas
   - `edition = "2024"` - Use latest Rust edition
-  - `required_version = "1.10.0"` - Must match the rustfmt shipped by the toolchain pinned in `rust-toolchain.toml`; bump both files together in the same commit
   - `tab_spaces = 4` - Standard indentation
   - `imports_granularity = "Crate"` - Group imports by crate
   - `group_imports = "StdExternalCrate"` - Organize imports logically
