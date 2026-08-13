@@ -4,6 +4,15 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-14 (v22.5.6, pin nightly toolchain to stop rustfmt drift)
+
+- added `rust-toolchain.toml` pinning `channel = "nightly-2026-08-12"` (rustfmt 1.10.0, clippy) so `rustup` and CI's `dtolnay/rust-toolchain` resolve the identical toolchain build
+- removed the explicit `toolchain: ${{ matrix.rust }}` input from the "Setup Rust toolchain" step in `build.yml` and `release.yml` so both workflows read the pinned channel from `rust-toolchain.toml` instead of a floating `nightly`
+- bumped `.rustfmt.toml` `required_version` 1.9.0 to 1.10.0 to match the pinned toolchain's shipped rustfmt
+- rationale: CI previously ran an unpinned `nightly` channel that silently updates over time, so its `rustfmt` version could drift ahead of the hardcoded `required_version`, breaking `cargo fmt --check` in CI with no local warning; pinning the toolchain makes local dev and CI always match, and future rustfmt bumps become a deliberate one-commit change (toolchain date + `required_version` together)
+- documented the pinning convention and bump procedure in AGENTS.md under a new "Toolchain Pinning" section
+- version bump: 22.5.5 to 22.5.6 (PATCH - CI/build config and doc update, no API change)
+
 ### 2026-08-13 (v22.5.5, tool-agnostic versioning skill)
 
 - reworded `semantic-versioning` skill (template, installed `.claude` copy, and the orphaned `templates/v5/semantic-versioning.md` mirror) to reference the project's "version manifest" instead of hardcoding `Cargo.toml`
