@@ -63,7 +63,7 @@ Follow these rules to prevent VSCode terminal crashes and ensure clean git histo
 **Body Rules (MANDATORY WHEN A BODY EXISTS):**
 
 - Add blank line after subject before body
-- Body text is optional for simple commits
+- Body text is mandatory even for simple commits
 - Start every body line with `-`, except wrapped continuation lines
 - Use lowercase text after each bullet marker
 - Wrap each body line at 72 characters maximum
