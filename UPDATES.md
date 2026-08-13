@@ -4,6 +4,14 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-13 (v22.5.5, tool-agnostic versioning skill)
+
+- reworded `semantic-versioning` skill (template, installed `.claude` copy, and the orphaned `templates/v5/semantic-versioning.md` mirror) to reference the project's "version manifest" instead of hardcoding `Cargo.toml`
+- de-branded the remaining CLI-flavored bullets (commands/options, public interface) so the decision rules read correctly for any ecosystem
+- rationale: `semantic-versioning` is a top-level agent- and language-agnostic skill shipped to every workspace regardless of stack; C++/Swift/CMake workspaces were getting Rust-specific instructions
+- bumped skill frontmatter `metadata.version` 1.0 to 1.1
+- version bump: 22.5.4 to 22.5.5 (PATCH - template/doc content, no API change)
+
 ### 2026-07-22 (v22.5.4, fix duplicate managed files in status)
 
 - `slopctl status --verbose` no longer lists AGENTS.md (and agent files) twice; candidates from the BoM ('./x'), FileTracker ('x'), and the absolute AGENTS.md path are now canonicalized before deduplication so different spellings of the same file collapse to one entry
