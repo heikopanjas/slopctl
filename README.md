@@ -703,7 +703,7 @@ slopctl status
 Global Templates:
   ✓ Installed at: /Users/.../slopctl/templates
   → Template version: 5
-  → Available agents: claude, codex, copilot, cursor, opencode, vibe
+  → Available agents: claude, cline, codex, copilot, cursor, goose, kiro, opencode, pi, vibe
   → Available languages: c, c++, rust, swift, swiftui
 
 Project Status:
@@ -966,8 +966,12 @@ All templates in this repository enforce these critical rules:
 - Codex (OpenAI)
 - Mistral Vibe
 - OpenCode
+- Pi (earendil-works)
+- Kiro (Amazon Web Services)
+- Goose (Agentic AI Foundation)
+- Cline (Cline Bot Inc.)
 
-One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) reference AGENTS.md when needed. Claude Code, GitHub Copilot, and Cursor additionally get a slim redirect stub (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`), since each auto-loads a file of its own before it would otherwise discover AGENTS.md; all three stubs come from one shared template source. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent. The default catalog includes `init-session` support for every built-in agent: Claude, Cursor, Copilot, and OpenCode use their native command/prompt directories; Codex and Vibe use an `init-session` skill because those agents do not provide the same recommended predefined prompt workflow.
+One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) reference AGENTS.md when needed. Claude Code, GitHub Copilot, and Cursor additionally get a slim redirect stub (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`), since each auto-loads a file of its own before it would otherwise discover AGENTS.md; all three stubs come from one shared template source. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent. The default catalog includes `init-session` support for every built-in agent: Claude, Cursor, Copilot, OpenCode, Pi, and Kiro use their native command/prompt directories; Codex, Vibe, Goose, and Cline use an `init-session` skill because those agents do not provide the same recommended predefined prompt workflow.
 
 ## Supported Languages
 
@@ -1043,6 +1047,10 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 | Copilot | `.github/skills/` | `~/.copilot/skills/` | ✓ |
 | Mistral Vibe | `.vibe/skills/` ¹ | `~/.vibe/skills/` | ✓ |
 | OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | ✓ |
+| Pi | `.pi/skills/` | `~/.pi/agent/skills/` | ✓ |
+| Kiro | `.kiro/skills/` | `~/.kiro/skills/` | ✗ |
+| Goose | `.goose/skills/` | `~/.agents/skills/` | ✓ |
+| Cline | `.cline/skills/` | `~/.cline/skills/` | ✗ |
 
 ¹ Codex and Mistral Vibe each scan both their native skill dir and `.agents/skills/`. slopctl installs their agent-specific skills to the native dir; language and top-level skills use `.agents/skills/` to avoid duplication with other cross-client agents.
 
@@ -1550,8 +1558,8 @@ Add it to the relevant `skills:` section in `templates.yml`, then run `slopctl t
 It depends on how the skill is defined and which agents are installed. See the [slopctl skill routing decisions](#agent-skills) table for the full matrix. In short:
 
 - **No agents installed**: language and top-level skills go to `.agents/skills/`
-- **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`): one shared copy in `.agents/skills/`
-- **Native-only agents** (`claude`, `vibe`): one copy in the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`
+- **Cross-client agents** (`cursor`, `codex`, `copilot`, `opencode`, `pi`, `goose`): one shared copy in `.agents/skills/`
+- **Native-only agents** (`claude`, `vibe`, `kiro`, `cline`): one copy in the agent's native workspace dir (e.g. `.claude/skills/`) — these agents do not read `.agents/skills/`
 - **Mixed agents**: both the shared `.agents/skills/` copy and native-only copies
 - **Adding a native-only agent after language install**: language skills are hydrated from templates into the agent's native skill dir
 - **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir

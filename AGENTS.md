@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-29 (v23.1.0)
+**Last updated:** 2026-08-29 (v23.1.1)
 
 <!-- {mission} -->
 
