@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-29 (v23.0.0)
+**Last updated:** 2026-08-29 (v23.1.0)
 
 <!-- {mission} -->
 
@@ -110,7 +110,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Command verb separation: `init` installs something new (a language or agent) and rejects a no-op re-init when everything requested is already tracker-installed (bypass with `--force`); bare `slopctl update` refreshes the whole workspace from the local cache (selectors narrow it); `merge` reconciles customized files. "Already installed" is determined from FileTracker owners (`get_installed_languages`/`get_installed_agents`), never from marker directories, because agents create their own markers
 - Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
 - Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
-- `update` never creates agent-category files for agents that were not slopctl-installed; marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
+- `update` creates agent-category files only for agents that own at least one tracker entry (`get_installed_agents`), never for agents known only by a marker directory. The check is per agent, not per file: an installed agent's missing, newly catalogued, or previously deleted file (e.g. a `CLAUDE.md` dropped by an old init/remove cycle) is recreated, which a per-file `get_metadata` probe used to silently skip. Files it refuses to create are reported per agent with a `slopctl init --agent <name>` hint, never dropped silently; `--force` does not override this, and `--agent` on `update` narrows scope only — it never authorizes creation, and errors with the same hint when the named agent owns nothing. `update --file`/`--skill` selectors are explicit intent and are deliberately not gated this way (an unmatched selector already hard-errors), so refreshing a single agent file makes that agent tracker-installed and its remaining files reachable by the next bare `update`. Marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
 
 ### Security & Safety
 

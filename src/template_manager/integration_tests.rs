@@ -1550,6 +1550,170 @@ fn test_merge_recreates_prompt_files_for_all_detected_agents() -> anyhow::Result
     Ok(())
 }
 
+// ── update_full agent-ownership gate ─────────────────────────────────────────
+
+#[test]
+fn test_update_full_recreates_untracked_missing_file_for_installed_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Reproduces an old init/remove cycle: the file is gone from disk AND from the
+    // tracker, while bogus remains genuinely installed through its other entries
+    // (e.g. its skills). A per-file tracker lookup alone cannot tell this apart from
+    // a marker-only agent; the fix must probe agent ownership instead.
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(instructions_file.exists() == true, "update must recreate an installed agent's untracked missing file");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_recreates_untracked_missing_file_for_explicit_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, Some("bogus"), false, false)?;
+
+    assert!(instructions_file.exists() == true, "update --agent bogus must recreate its untracked missing file");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_marker_only_agent_when_other_agent_installed() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // fake's marker dir exists but slopctl never installed it.
+    fs::create_dir_all(workspace.path().join(".fake"))?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(instructions_file.exists() == true, "the installed agent's file must still be recreated");
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == false, "a marker-only agent must stay blocked even while another agent is installed");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_creates_newly_catalogued_agent_file_for_installed_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Simulate the template catalog gaining a second instruction file for bogus
+    // after this workspace was already installed.
+    let config_dir = fixture.config_dir.path();
+    fs::write(config_dir.join("bogus/extra.md"), "# Bogus extra\n")?;
+    let templates_yml = fs::read_to_string(config_dir.join("templates.yml"))?;
+    let updated =
+        templates_yml.replace(
+            "  bogus:\n    instructions:\n      - source: bogus/instructions.md\n        target: '$workspace/.bogus/instructions.md'\n",
+            "  bogus:\n    instructions:\n      - source: bogus/instructions.md\n        target: '$workspace/.bogus/instructions.md'\n      - source: \
+             bogus/extra.md\n        target: '$workspace/.bogus/extra.md'\n"
+        );
+    assert_ne!(updated, templates_yml, "test fixture must match the templates.yml bogus section verbatim");
+    fs::write(config_dir.join("templates.yml"), updated)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".bogus/extra.md").exists() == true, "update must create a newly catalogued file for an installed agent");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_agent_files_after_remove_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+    fixture.remove_agent("bogus")?;
+
+    // The agent app recreates its own marker dir independently of slopctl.
+    fs::create_dir_all(workspace.path().join(".bogus"))?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".bogus/instructions.md").exists() == false, "removing an agent must revoke creation authority even if its marker dir reappears");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_dry_run_does_not_create_agent_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, true)?;
+
+    assert!(instructions_file.exists() == false, "dry run must not write the recreated file to disk");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_explicit_uninstalled_agent_errors_with_init_hint() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(None, Some("Rust++"))?;
+
+    let err = fixture.manager().update_full(None, Some("bogus"), false, false).expect_err("update --agent on a never-installed agent must error");
+
+    let message = err.to_string();
+    assert!(message.contains("slopctl init --agent"), "error must hint at the install command, got: {message}");
+
+    Ok(())
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Re-records `target`'s tracker entry to match its current on-disk content.
@@ -1565,6 +1729,20 @@ fn simulate_merge_resync(target: &Path) -> anyhow::Result<()>
     let sha = FileTracker::calculate_sha256(target)?;
     let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
     tracker.record_installation_with_owners(target, sha, 5, &[], &[], "integration".to_string());
+    tracker.save()?;
+    Ok(())
+}
+
+/// Drops `target`'s tracker entry, leaving the file unknown to slopctl.
+///
+/// Reproduces the state left by an older init/remove cycle: the agent is still
+/// tracker-installed through its other files, but this particular target is neither
+/// on disk nor in `tracker.yml`, so a per-file `get_metadata` probe cannot authorize
+/// recreating it. This is the exact precondition that hid a missing `CLAUDE.md`.
+fn forget_tracker_entry(target: &Path) -> anyhow::Result<()>
+{
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    tracker.remove_entry(target);
     tracker.save()?;
     Ok(())
 }

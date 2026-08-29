@@ -319,6 +319,15 @@ impl TemplateManager
             }
         };
 
+        // An explicitly requested agent must already be tracker-installed: --agent narrows
+        // scope, it never authorizes creating that agent's files (see the candidate-loop
+        // gate below). Marker-detected scope (agent omitted) is unaffected.
+        if let Some(name) = agent &&
+            tracker.get_installed_agents().iter().any(|installed| installed == name) == false
+        {
+            return Err(anyhow::anyhow!("Agent '{}' is not installed in this workspace.\nUse 'slopctl init --agent {}' to install it.", name, name));
+        }
+
         let effective_agents = effective_agent_scope(agent, &config, &agent_catalog, &workspace)?;
 
         // Resolve the full template set per (language, agent) combination and union
@@ -350,22 +359,30 @@ impl TemplateManager
         let resolved_skill_names: Vec<String> = candidates.keys().filter_map(|target| skill_name_of(target)).collect::<BTreeSet<String>>().into_iter().collect();
         let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates);
 
+        // Per-agent installed-ness, probed once: an agent counts as installed when it owns
+        // at least one tracker entry. Never derived from marker dirs (agents create their
+        // own) and never from a per-file lookup, which misses a newly catalogued or
+        // previously deleted file belonging to an agent the user genuinely installed.
+        let installed_agents: BTreeSet<String> = tracker.get_installed_agents().into_iter().collect();
+
         // Classify: refresh unmodified/missing/deleted targets, skip modified or
         // untracked ones (kept with a report; --force overwrites), drop up-to-date copies.
         let mut to_refresh: Vec<(&PathBuf, &ResolvedFile)> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
         let mut changelog_skipped: Vec<String> = Vec::new();
+        let mut agent_skipped: BTreeMap<String, usize> = BTreeMap::new();
         let mut up_to_date = 0usize;
         for (target, entry) in &candidates
         {
             if target.exists() == false
             {
-                // Agent files are created only for slopctl-installed agents: marker
-                // detection alone (the agent app created its own marker dir) must not
-                // conjure prompt or instruction files the user never installed.
-                if entry.category != "agent" || tracker.get_metadata(target).is_some() == true
+                if may_create_missing(entry, target, &tracker, &installed_agents) == true
                 {
                     to_refresh.push((target, entry));
+                }
+                else if let Some(owner) = entry.agent.first()
+                {
+                    *agent_skipped.entry(owner.clone()).or_insert(0) += 1;
                 }
             }
             else if template_engine::is_changelog_protected(target) == true
@@ -421,11 +438,14 @@ impl TemplateManager
             }
         }
 
+        let agent_skipped_total: usize = agent_skipped.values().sum();
+
         if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
         {
-            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len() + changelog_skipped.len());
+            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len() + changelog_skipped.len() + agent_skipped_total);
             report_skipped(&skipped);
             report_changelog_skipped(&changelog_skipped);
+            report_agent_skipped(&agent_skipped);
             println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
             return Ok(());
         }
@@ -452,6 +472,10 @@ impl TemplateManager
             for path in &changelog_skipped
             {
                 println!("  {} {} (skipped - changelog log preserved)", "○".yellow(), path);
+            }
+            for (agent_name, count) in &agent_skipped
+            {
+                println!("  {} {} file(s) for agent '{}' (skipped - agent not installed)", "○".yellow(), count, agent_name);
             }
             if stale_to_remove.is_empty() == false
             {
@@ -487,6 +511,7 @@ impl TemplateManager
 
         report_skipped(&skipped);
         report_changelog_skipped(&changelog_skipped);
+        report_agent_skipped(&agent_skipped);
         println!("{} Refreshed {} file(s); {} already up to date", "✓".green(), to_refresh.len(), up_to_date);
         println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
         Ok(())
@@ -525,6 +550,32 @@ pub(super) fn effective_agent_scope(agent: Option<&str>, config: &TemplateConfig
                 Ok(detected)
             }
         }
+    }
+}
+
+/// Returns true when a missing target may be created by a full update
+///
+/// Non-agent files are always created. Agent-category files are gated so that marker
+/// detection alone (the agent app created its own marker dir) cannot conjure prompt or
+/// instruction files for an agent the user never installed. An agent qualifies when it
+/// owns at least one tracker entry; a target that is still tracked itself is restored
+/// regardless, covering a tracked-but-deleted file of any category. Neither side can carry
+/// the `AGENT_ALL` sentinel: `owner_list` maps it to an empty owner vector and
+/// `normalize_owner_list` strips it from tracker entries, so the set test is sentinel-safe.
+fn may_create_missing(entry: &ResolvedFile, target: &Path, tracker: &FileTracker, installed_agents: &BTreeSet<String>) -> bool
+{
+    entry.category != "agent" || tracker.get_metadata(target).is_some() == true || entry.agent.iter().any(|owner| installed_agents.contains(owner)) == true
+}
+
+/// Reports agent-category files update refused to create, grouped by agent
+///
+/// Unlike `report_skipped`, `--force` does not override this: a marker directory is not
+/// an install record, so `init` is the command that adds an agent's files.
+fn report_agent_skipped(skipped: &BTreeMap<String, usize>)
+{
+    for (agent, count) in skipped
+    {
+        println!("  {} agent '{}' not installed by slopctl; {} file(s) not created (use 'slopctl init --agent {}')", "○".yellow(), agent.yellow(), count, agent);
     }
 }
 
