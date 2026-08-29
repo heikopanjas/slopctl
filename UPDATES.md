@@ -4,6 +4,81 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 (v23.0.0, extract template catalog to slopctl-templates, relocate cache)
+
+- moved the entire `templates/` directory out of this repo into the separate
+  [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository, as
+  `templates/` at its root, so the binary's release cycle and the template catalog's can
+  version independently. Default catalog URL:
+  `https://github.com/heikopanjas/slopctl-templates/tree/main/templates`. That directory was
+  briefly named `v5/` before being renamed: `templates.yml`'s own `version:` field and header
+  comments already track the format's history, so the directory name doesn't need to repeat it
+- `agent-defaults.yml` and `model-defaults.yml` also moved out of this repo, into
+  `slopctl-templates`'s `defaults/` directory — a sibling of `templates/`, not nested inside it,
+  since they describe agent/provider conventions rather than the template format. reversed an
+  intermediate design (briefly landed as `resources/` in this repo, never pushed) after
+  establishing they don't need to stay: default source URLs become
+  `https://github.com/heikopanjas/slopctl-templates/tree/main/defaults`
+- the agent/model bootstrap fallback chains (`main.rs`, `bootstrap_agent_defaults_if_missing`
+  and `bootstrap_model_defaults_if_missing`) dropped their third candidate, which used to try
+  "the template source just used" — now that the defaults live in a different subpath of the
+  same repo as the catalog, that candidate would silently succeed by coincidence rather than by
+  design, which is worse than removing it; the now-unused `template_source` parameter was
+  removed from both function signatures
+- **removed the compile-time embedded fallback entirely** for both catalogs — no more
+  `include_str!`, no more `.expect("embedded ... catalog must be valid")` panic path. Both
+  `load_agent_catalog_from_dir`/`load_model_catalog_from_dir` now error cleanly when the cache
+  file is missing, pointing at `slopctl templates --update`. Consolidated with the
+  now-identical `load_cached_*_catalog_from_dir` variants (single caller each), rather than
+  keeping two functions with the same behavior
+- deleted the entire leaked-`'static`-registry layer built on top of the embed
+  (`DEFAULT_AGENT_DEFAULTS`/`DEFAULT_MODEL_DEFAULTS` `OnceLock`s, `default_agent_defaults()`,
+  `default_model_defaults()`, `leak_agent_defaults()`, `leak_model_defaults()`, and nine public
+  `agent_defaults` fns: `get_defaults`, `known_agents`, `get_skill_dir`,
+  `reads_cross_client_skills`, `get_effective_userprofile_skill_dir`,
+  `get_workspace_marker_dirs`, `detect_installed_agent`, `detect_all_installed_agents`,
+  `get_all_skill_search_dirs`, `get_workspace_skill_search_dirs`) — verified by grep that every
+  one had zero production callers outside their own module; the catalog-taking `*_from_catalog`
+  siblings already carried all real usage. Also dropped `file_tracker.rs`'s
+  `adopt_untracked_files()` wrapper (the one caller of the unconditional embedded-catalog path),
+  itself unreachable outside a test that already had a `_from_catalog` counterpart
+- **`llm.rs` is now catalog-authoritative for provider config**: deleted the four hardcoded
+  `match self { ... }` fallback blocks in `api_key_env_var`/`default_model`/`endpoint`/
+  `models_endpoint` — they were exact duplicates of `model-defaults.yml`, field for field, and
+  both copies had already drifted stale (`claude-sonnet-4-6` predates the Claude 5 family).
+  `Provider::detect_from_env` and `LlmClient::new` now take an explicit `&ModelCatalog`, loaded
+  once by the caller (`merge.rs`, `smart.rs`) from `self.config_dir` — not from a hardcoded
+  global-cache path inside `llm.rs`, which would have made `LlmClient`'s own tests depend on
+  whatever happened to be cached on the machine running them (and fail outright in CI, which has
+  no cache at all). `LlmClient` gained owned `endpoint`/`models_endpoint` String fields resolved
+  once at construction. `merge.rs`'s "Using provider: X (model)" status line moved from a
+  separate prediction before construction to printing the client's actual resolved values after
+  — one fewer place that could disagree with what's really being used
+- refreshed the stale provider defaults in `model-defaults.yml`: `openai` → `gpt-5.6-terra`
+  (`gpt-4.1` no longer appears in OpenAI's current model catalog), `anthropic` →
+  `claude-sonnet-5`. Left `mistral` (`mistral-large-latest` is a maintained, still-current
+  auto-updating alias) and `ollama` (`llama3.2` still pulls, no confidently-better default)
+  unchanged rather than guess
+- relocated the global template cache from a platform-specific data dir
+  (`~/Library/Application Support/slopctl/templates` on macOS, `~/.local/share/…` on Linux,
+  `%LOCALAPPDATA%\…` on Windows) to `${XDG_CACHE_HOME:-$HOME/.cache}/slopctl/templates` on
+  every platform, matching how `Config::get_global_path` already resolves config paths. added
+  `utils::global_cache_dir()` as the single implementation, replacing three independent
+  `dirs::data_local_dir()` call sites in `template_manager/mod.rs`, `agent_defaults.rs`, and
+  `model_defaults.rs`. no migration: existing caches at the old location are orphaned, and
+  `slopctl templates --update` regenerates the cache at the new path — the cache was always
+  fully regenerable, so nothing is lost, but every existing user needs to re-run it once
+- CI: removed the `templates` job (and its `needs:`) from both `build.yml` and `release.yml` —
+  it used to `zip -r slopctl-templates.zip templates/` and gate every downstream job. slopctl's
+  release artifacts are now binary + LICENSE only; `slopctl-templates` publishes its own
+  `slopctl-templates.zip` snapshot via its own `release.yml` on every push to `main`
+- rationale for a MAJOR bump: three independent breaking changes at once — the default source
+  moves (breaks anyone with `templates.uri` pinned at the old in-repo path), the cache
+  relocates (every user must re-run `slopctl templates --update`), and the
+  `slopctl-templates.zip` release asset leaves this repo's releases
+- version bump: 22.7.0 to 23.0.0 (MAJOR — removal/relocation of user-facing infrastructure,
+  requires user action)
+
 ### 2026-08-29 (v22.7.0, drop .gitignore/.gitattributes from the template catalog)
 
 - removed `.gitignore` and `.gitattributes` from `templates/v5/templates.yml`: `shared.cmake.files`, `languages.rust.files`, and `languages.swift.files` no longer map anything to `.gitignore` (dropping it from `c`/`c++`/`swiftui` too, via `includes`); `integration.git.files` no longer maps `git-attributes-common.txt` to `.gitattributes`

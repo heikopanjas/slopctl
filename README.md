@@ -15,7 +15,7 @@
 
 slopctl is a command-line tool that helps you:
 
-- **Manage templates globally** – Store templates in platform-specific directories (e.g., `~/Library/Application Support/slopctl/templates` on macOS)
+- **Manage templates globally** – Store templates in a single cache directory (`$XDG_CACHE_HOME/slopctl/templates`, or `$HOME/.cache/slopctl/templates` — same on all platforms)
 - **Configure via YAML** – Define template structure in `templates.yml` and agent filesystem defaults in `agent-defaults.yml`
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – Follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
@@ -55,7 +55,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Skills are declared in `templates.yml` and installed automatically with the selected language, agent, or top-level template set
 - Cross-client skill directory: template-defined non-agent skills install to `.agents/skills/` for agents that support the agentskills.io convention
-- URL: `https://github.com/heikopanjas/slopctl/tree/develop/templates/v5`
+- URL: `https://github.com/heikopanjas/slopctl-templates/tree/main/templates`
 
 **Usage:**
 
@@ -142,7 +142,7 @@ slopctl init --lang rust
 
 1. **Downloads templates** (first run only):
    - Fetches `templates.yml` from GitHub (V5 format)
-   - Downloads all template files to platform-specific directory (e.g., `~/Library/Application Support/slopctl/templates/` on macOS)
+   - Downloads all template files to the global cache directory (`$HOME/.cache/slopctl/templates`, same on all platforms)
 
 2. **Processes configuration**:
    - Detects template version 5 (agents.md standard)
@@ -406,11 +406,10 @@ slopctl templates --update --verify --list
 
 - Downloads templates from specified source or default GitHub repository
 - If `--from` is not specified, downloads from:
-  - **Default**: `https://github.com/heikopanjas/slopctl/tree/develop/templates/v5` (agents.md standard)
+  - **Default**: `https://github.com/heikopanjas/slopctl-templates/tree/main/templates` (agents.md standard)
 - Downloads `templates.yml` configuration file and all template files
-- Stores templates in local data directory:
-  - Linux: `$HOME/.local/share/slopctl/templates`
-  - macOS: `$HOME/Library/Application Support/slopctl/templates`
+- Stores templates in the global cache directory: `$HOME/.cache/slopctl/templates`
+  (`$XDG_CACHE_HOME/slopctl/templates` if `XDG_CACHE_HOME` is set) — same on all platforms
 - If `--dry-run` is specified, shows the source URL and target directory without downloading
 - Overwrites existing global templates with new versions
 - Does NOT modify any files in the current project directory
@@ -900,7 +899,7 @@ slopctl config --delete templates.uri
 slopctl config --global --delete templates.uri
 
 # Set fallback source for resilience (global)
-slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl/tree/develop/templates
+slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl-templates/tree/main/templates
 
 # Set an independent agent defaults source
 slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/templates
@@ -919,7 +918,7 @@ slopctl config --global --set merge.model claude-sonnet-4-6
 - `agents.uri` - Default agent defaults source used by `agents --update`; also used by `templates --update` when bootstrapping missing agent defaults
 - `agents.fallbackUri` - Fallback source for agent defaults when the primary source fails or is unreachable
 - `merge.provider` - Default LLM provider for the `merge` command (openai, anthropic, ollama, mistral)
-- `merge.model` - Default model for the `merge` command (e.g., `gpt-4.1`, `claude-sonnet-4-6`)
+- `merge.model` - Default model for the `merge` command (e.g., `gpt-5.6-terra`, `claude-sonnet-5`)
 - `models.uri` - Default model defaults source used by `models --update`
 - `models.fallbackUri` - Fallback source for model defaults when the primary source fails or is unreachable
 
@@ -940,7 +939,7 @@ Consumer commands (`templates --update`, `agents --update`, `models --update`, `
 - `agents --update` command uses `agents.uri` if set and `--from` not specified
 - `init` command uses `templates.uri` when downloading missing global templates
 - If primary source fails and `templates.fallbackUri` is configured, automatically tries the fallback
-- If missing during `templates --update`, `agent-defaults.yml` is bootstrapped from `agents.uri`, then the template source, then the default repository
+- If missing during `templates --update`, `agent-defaults.yml` (and `model-defaults.yml`) is bootstrapped from `agents.uri` (`models.uri`), then its configured fallback, then the default `slopctl-templates` repository
 - Empty configuration file is valid (all defaults used)
 - `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
 
@@ -970,7 +969,7 @@ One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) refere
 
 ## Supported Languages
 
-The default `templates/v5/templates.yml` is a starter catalog, not a hard-coded language list. It ships useful examples for common languages, but language support is data-driven: add a new entry under `languages:` and provide the referenced files or skills in your template source.
+The default [`templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/main/templates/templates.yml) is a starter catalog, not a hard-coded language list. It ships useful examples for common languages, but language support is data-driven: add a new entry under `languages:` and provide the referenced files or skills in your template source.
 
 Currently configured in the default template catalog:
 
@@ -988,16 +987,16 @@ Supported agents are also data-driven: `agent-defaults.yml` defines agent filesy
 
 ### Template Storage
 
-Templates are stored in platform-specific directories:
+Templates are stored in a single global cache directory, the same on every platform:
 
-- **macOS**: `~/Library/Application Support/slopctl/templates/`
-- **Linux**: `~/.local/share/slopctl/templates/`
-- **Windows**: `%LOCALAPPDATA%\slopctl\templates\`
+- `$HOME/.cache/slopctl/templates/` — or `$XDG_CACHE_HOME/slopctl/templates/` when
+  `XDG_CACHE_HOME` is set
 
 Templates include:
 
 - **templates.yml**: Configuration file defining structure and file mappings (with version field)
 - **agent-defaults.yml**: Configuration file defining known agent filesystem conventions
+- **model-defaults.yml**: Configuration file defining known LLM provider endpoints, API key env vars, and default models
 - **Main template**: AGENTS.md (primary instruction file)
 - **Language fragments**: Language-specific coding standards and build commands - merged into AGENTS.md
 - **Integration fragments**: Tool/workflow templates (e.g., git-workflow-conventions.md) - merged into AGENTS.md
@@ -1137,7 +1136,7 @@ Each entry in `directories` has a single field:
 
 The `templates.yml` file defines the template structure with a version field and multiple sections:
 
-The bundled `templates/v5/templates.yml` should be read as an example catalog. It demonstrates how to model languages, shared groups, agent prompts, integrations, and skills. You can replace or extend the language section for your own stack without changing slopctl itself, as long as the referenced source files exist in your template cache or use explicit full GitHub URLs.
+The [bundled `templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/main/templates/templates.yml) should be read as an example catalog. It demonstrates how to model languages, shared groups, agent prompts, integrations, and skills. You can replace or extend the language section for your own stack without changing slopctl itself, as long as the referenced source files exist in your template cache or use explicit full GitHub URLs.
 
 **Version Field:**
 
@@ -1462,23 +1461,20 @@ slopctl init --lang c++ --agent claude
 
 ### Modifying Global Templates
 
-1. Navigate to platform-specific template directory:
-   - macOS: `~/Library/Application Support/slopctl/templates/`
-   - Linux: `~/.local/share/slopctl/templates/`
-   - Windows: `%LOCALAPPDATA%\slopctl\templates\`
+1. Navigate to the global template cache directory: `$HOME/.cache/slopctl/templates/`
 2. Edit the templates as needed
 3. Run `slopctl update` in your projects to apply the changes
 
 ### Creating New Templates
 
-To add a new language or agent template:
+Templates live in the separate [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository, not here. To add a new language or agent template:
 
-1. Fork this repository
-2. Add your template to the `templates/` directory
+1. Fork [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates)
+2. Add your template under `templates/`
 3. For languages: Create coding conventions and build commands markdown files
 4. For agents: Create `agent-name/` directory with instructions and prompts
-5. Update `templates.yml` with the new entries
-6. Submit a pull request
+5. Update `templates/templates.yml` with the new entries
+6. Submit a pull request there
 
 ## Technology Stack
 
@@ -1500,9 +1496,8 @@ To add a new language or agent template:
 
 **Where are templates stored?**
 
-- Global templates (macOS): `~/Library/Application Support/slopctl/templates/`
-- Global templates (Linux): `~/.local/share/slopctl/templates/`
-- Global templates (Windows): `%LOCALAPPDATA%\slopctl\templates\`
+- Global templates: `$HOME/.cache/slopctl/templates/` (same on all platforms; honors
+  `$XDG_CACHE_HOME` if set)
 
 **What happens if I modify AGENTS.md?**
 slopctl detects customization via template marker removal and skips AGENTS.md when updating. Use `--force` to override.

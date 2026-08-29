@@ -15,7 +15,7 @@ mod verify;
 
 use std::{
     ffi::OsStr,
-    fs, io,
+    fs,
     path::{Path, PathBuf}
 };
 
@@ -32,9 +32,9 @@ use crate::{
 /// Manages template files for coding agent instructions
 ///
 /// The `TemplateManager` handles all operations related to template storage,
-/// verification, and synchronization. Templates are stored in the
-/// local data directory (e.g., `$HOME/.local/share/slopctl/templates` on Linux,
-/// `$HOME/Library/Application Support/slopctl/templates` on macOS).
+/// verification, and synchronization. Templates are stored in the global
+/// cache directory (`$XDG_CACHE_HOME/slopctl/templates`, or
+/// `$HOME/.cache/slopctl/templates` — same on all platforms).
 pub struct TemplateManager
 {
     pub(crate) config_dir: PathBuf
@@ -44,17 +44,15 @@ impl TemplateManager
 {
     /// Creates a new TemplateManager instance
     ///
-    /// Initializes path to local data directory using the `dirs` crate.
-    /// Templates are stored in the local data directory.
+    /// Initializes path to the global cache directory via
+    /// [`crate::utils::global_cache_dir`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the local data directory cannot be determined
+    /// Returns an error if the cache directory cannot be determined
     pub fn new() -> Result<Self>
     {
-        let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
-
-        let config_dir = data_dir.join("slopctl/templates");
+        let config_dir = crate::utils::global_cache_dir()?;
 
         Ok(Self { config_dir })
     }

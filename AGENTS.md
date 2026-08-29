@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-29 (v22.7.0)
+**Last updated:** 2026-08-29 (v23.0.0)
 
 <!-- {mission} -->
 
@@ -13,7 +13,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
-- **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, and file tracker, serde_json for legacy migration
+- **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, model-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
@@ -379,7 +379,7 @@ Load the `rust-build-commands` skill when building or running the project.
 
 **Formatting Configuration (.rustfmt.toml):**
 
-- This repo's root `.rustfmt.toml` is dogfooded from `templates/v5/rust-format-instructions.toml`, the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files
+- This repo's root `.rustfmt.toml` is dogfooded from `templates/rust-format-instructions.toml` in the separate [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository — the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files. This is now a cross-repo invariant with nothing enforcing it automatically — check by hand when either file changes
 - Do NOT add `required_version` (or other CI-environment-specific settings) to either copy — a hardcoded version pin breaks `cargo fmt` for any downstream user whose local rustfmt doesn't match exactly, since they don't get this repo's `rust-toolchain.toml`. Version consistency for this repo's own CI is handled entirely by the toolchain pin (see "Toolchain Pinning" above)
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability

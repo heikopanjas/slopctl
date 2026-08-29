@@ -498,26 +498,17 @@ impl FileTracker
         self.get_metadata(file_path).map(|meta| meta.is_unreferenced()).unwrap_or(true)
     }
 
-    /// Adopt existing slopctl-managed files that are not yet tracked
+    /// Adopt existing slopctl-managed files using a specific agent catalog
     ///
     /// Scans the workspace for agent instruction files, skills, and commands
-    /// using the known agent conventions from `agent_defaults`. Any files
-    /// found on disk that are not already in the tracker are adopted with
-    /// their current SHA and a `template_version` of 0 (indicating adoption
-    /// rather than a template install).
+    /// using the given `AgentCatalog`. Any files found on disk that are not
+    /// already in the tracker are adopted with their current SHA and a
+    /// `template_version` of 0 (indicating adoption rather than a template
+    /// install).
     ///
     /// # Returns
     ///
     /// The number of files adopted.
-    pub fn adopt_untracked_files(&mut self, workspace: &Path) -> anyhow::Result<usize>
-    {
-        use crate::agent_defaults;
-
-        let catalog = agent_defaults::load_embedded_agent_catalog()?;
-        self.adopt_untracked_files_from_catalog(workspace, &catalog)
-    }
-
-    /// Adopt existing slopctl-managed files using a specific agent catalog
     pub fn adopt_untracked_files_from_catalog(&mut self, workspace: &Path, catalog: &crate::agent_defaults::AgentCatalog) -> anyhow::Result<usize>
     {
         use crate::agent_defaults;
