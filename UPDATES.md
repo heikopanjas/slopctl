@@ -4,6 +4,33 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 15:09 (v23.1.1, document pi/kiro/goose/cline agent support)
+
+- added four agents to the catalog in the sibling `slopctl-templates` repo:
+  `defaults/agent-defaults.yml` gained `pi`, `kiro`, `goose`, `cline` entries,
+  and `templates/templates.yml` gained matching `agents:` keys; `pi`/`kiro`
+  get a native `init-session` prompt file (new `templates/pi/prompts/` and
+  `templates/kiro/prompts/`), `goose`/`cline` reuse the existing
+  `skills/init-session` skill, mirroring the codex/vibe/opencode pattern
+- `kiro` and `cline` are marked `reads_cross_client_skills: false` since
+  neither documents reading `.agents/skills/`, matching claude's native-only
+  skill-duplication path
+- updated this repo's `README.md` (supported-agents list, sample `status`
+  output, skill-directory reference table, cross-client/native-only agent
+  bullets) to reflect the four new agents; no Rust source changed, since
+  `--agent` and the catalog loader are already fully data-driven
+- rationale: `docs/coding-agent-config-locations-v3.md` documents 17+ coding
+  agents against a 6-agent catalog; pi, kiro, goose, and cline are the
+  subset that map onto the existing schema (home dir, project marker dir,
+  `skills/*/SKILL.md` convention) without special-casing
+- verified end-to-end with a local `agents --update`/`templates --update`
+  from the working copy, `agents --verify`/`templates --verify`, dry-run
+  `init` for all four agents, and a real `init --agent kiro` /
+  `remove --agent kiro --force` cycle in a scratch workspace
+- version bump: 23.1.0 to 23.1.1 (PATCH - documentation update only; the
+  new agent definitions live in the separate slopctl-templates repo, not
+  in this repo's Rust source)
+
 ### 2026-08-29 (v23.1.0, fix update silently skipping missing agent files)
 
 - `slopctl update`/`update --agent <name>` no longer silently drops a missing
