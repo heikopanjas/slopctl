@@ -1,21 +1,56 @@
-MIT License
+MIT No-AI License (DE Variant)
 
-Copyright (c) 2025 Heiko Panjas
+Copyright (c) Heiko Panjas
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+Permission is hereby granted, free of charge, to any natural or legal
+person — and explicitly not to any artificial intelligence (AI) or
+machine learning (ML) system acting autonomously — obtaining a copy of
+this software and associated documentation files (the "Software"), to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. The above copyright notice and this permission notice shall be
+   included in all copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. The Software, and any modification, derivative, or update based on
+   it, may not be used — directly or indirectly — for the purpose of
+   training, fine-tuning, evaluating, or otherwise improving any
+   machine learning model, including but not limited to large language
+   models, artificial intelligence systems, or other data-mining or
+   pattern-extraction techniques ("AI Training"), unless the copyright
+   holder has granted prior written permission for that specific use.
+
+3. The Software may not be included, in whole or in part, in any
+   dataset assembled or distributed for the purpose of AI Training.
+
+4. Any person or organization found in breach of conditions 2 or 3 is
+   in breach of this License and of the copyright in the Software, and
+   may be held liable for damages arising from such breach, in addition
+   to any other remedies available at law.
+
+5. Pursuant to Art. 4 of Directive (EU) 2019/790 and § 44b of the
+   German Copyright Act (Urheberrechtsgesetz, UrhG), the copyright
+   holder hereby expressly reserves all rights regarding the use of the
+   Software for text and data mining, including AI Training, in a
+   machine-readable manner. This reservation applies wherever the
+   Software is made available, including via source-code repositories,
+   package registries, and archival mirrors. (See the accompanying
+   machine-readable reservation notes below for how this is signaled
+   outside of this file.)
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE, EXCEPT FOR LIABILITY ARISING FROM INTENT
+(VORSATZ), GROSS NEGLIGENCE (GROBE FAHRLÄSSIGKEIT), OR INJURY TO LIFE,
+BODY, OR HEALTH, WHICH SHALL BE GOVERNED BY MANDATORY APPLICABLE LAW.
+
+This License shall be governed by and construed in accordance with the
+laws of the Federal Republic of Germany, without regard to its
+conflict-of-law principles. To the extent legally permissible, the
+place of jurisdiction shall be Berlin, Germany.
