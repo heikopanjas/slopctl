@@ -14,7 +14,8 @@ use crate::{
     EffectiveConfig, Result,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
-    template_engine::{self, ResolvedContent, TemplateEngine, UpdateOptions}
+    model_defaults::{self, ModelCatalog},
+    template_engine::{self, CHANGELOG_MARKER, ResolvedContent, TemplateEngine, UpdateOptions}
 };
 
 /// User-supplied overrides that control which templates are considered during merge
@@ -22,14 +23,11 @@ pub struct MergeOptions<'a>
 {
     /// Language/framework override (falls back to installed language from tracker)
     pub lang:    Option<&'a str>,
-    /// Agent override (falls back to installed agents detected in workspace)
+    /// Agent override; when omitted, all agents detected in the workspace are included
     pub agent:   Option<&'a str>,
     /// Mission statement to use when generating the fresh template for comparison
     pub mission: Option<&'a str>
 }
-
-/// Marker that separates template-managed content from user-owned changelog
-const CHANGELOG_MARKER: &str = "<!-- {changelog} -->";
 
 /// Classification of a file in the target-source map
 enum FileClass
@@ -37,7 +35,7 @@ enum FileClass
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, display: String
+        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, category: String, display: String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -55,6 +53,7 @@ enum FileClass
         user_changelog:   Option<String>,
         lang:             Vec<String>,
         agent:            Vec<String>,
+        category:         String,
         display:          String,
         /// True when this file is the main AGENTS.md; enables skill-aware merging
         is_main:          bool
@@ -74,8 +73,8 @@ You are a file merge assistant that combines user-customized configuration files
 5. Do NOT add commentary, explanations, or merge markers. Output ONLY the merged file content, ready to save.
 6. If the template introduces a new section that the user's file does not have, insert it in a natural location that matches the template's ordering.
 7. Do NOT remove any user content unless it directly contradicts a template change (in which case prefer the template's factual updates but keep user customizations).
-8. CRITICAL: Changelog, history, and log sections (such as 'Recent Updates & Decisions') must be preserved IN FULL. Every single entry must appear in the output \
-     exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or condensed.
+8. CRITICAL: Changelog, history, and log sections (such as the 'Recent Updates & Decisions' entries in UPDATES.md) must be preserved IN FULL. Every single entry must \
+     appear in the output exactly as it was in the user's file. These sections are append-only records and must never be summarized, truncated, or condensed.
 9. SKILL DEDUPLICATION: When the user message contains an <available_skills> block, each entry inside it is the canonical source for the topic it covers. If any \
      guidance, conventions, build commands, coding rules, or other instructions in <current_file> are already covered by a skill, REMOVE the duplicated content from \
      the merged output and rely on the skill instead. You may keep a brief one-line reference naming the skill, but do not retain duplicated prose. This rule does \
@@ -113,10 +112,31 @@ impl TemplateManager
             local_cache_only: false
         };
 
-        let content_map = engine.build_target_content_map(&update_options)?;
-
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
+
+        // Without --agent, union the resolved content across all detected agents so
+        // every agent's instruction and prompt files participate in the merge.
+        let content_map = if options.agent.is_some() == true
+        {
+            engine.build_target_content_map(&update_options)?
+        }
+        else
+        {
+            let config = template_engine::load_template_config(&self.config_dir)?;
+            let agent_catalog = crate::agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+            let effective_agents = super::partial_update::effective_agent_scope(None, &config, &agent_catalog, &workspace)?;
+            let mut map = HashMap::new();
+            for agent_opt in &effective_agents
+            {
+                let per_agent_options = UpdateOptions { agent: agent_opt.as_deref(), ..update_options };
+                for (target, resolved) in engine.build_target_content_map(&per_agent_options)?
+                {
+                    map.entry(target).or_insert(resolved);
+                }
+            }
+            map
+        };
         let classified = classify_files(&content_map, &workspace);
         let skills = collect_skills(&content_map);
 
@@ -146,9 +166,12 @@ impl TemplateManager
         let needs_llm = diverged_count > 0 && dry_run == false;
         let client = if needs_llm == true
         {
-            let (provider_name, model_name) = Self::resolve_provider_and_model()?;
+            let catalog = model_defaults::load_model_catalog_from_dir(&self.config_dir).map_err(|e| anyhow::anyhow!("{}\nRun: slopctl templates --update", e))?;
+            let (provider_name, model_name) = Self::resolve_provider_and_model(&catalog)?;
             let provider_enum = Provider::from_name(&provider_name)?;
-            Some(LlmClient::new(provider_enum, model_name.as_deref())?)
+            let client = LlmClient::new(provider_enum, model_name.as_deref(), &catalog)?;
+            println!("{} Using provider: {} ({})", "→".blue(), client.provider_name().green(), client.model_name().yellow());
+            Some(client)
         }
         else
         {
@@ -166,7 +189,7 @@ impl TemplateManager
         {
             match entry
             {
-                | FileClass::New { target, content, lang, agent, display } =>
+                | FileClass::New { target, content, lang, agent, category, display } =>
                 {
                     if dry_run == true
                     {
@@ -182,8 +205,7 @@ impl TemplateManager
                         println!("  {} Created {}", "✓".green(), display.green());
 
                         let sha = FileTracker::calculate_sha256(target)?;
-                        let category = categorize_path(target, options);
-                        file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
+                        file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -193,7 +215,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, display, is_main } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, display, is_main } =>
                 {
                     if dry_run == true
                     {
@@ -329,8 +351,7 @@ impl TemplateManager
                                 {
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
-                                    let category = categorize_path(target, options);
-                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category);
+                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
                                 }
                             }
                         }
@@ -394,7 +415,7 @@ impl TemplateManager
     /// Priority: config `merge.provider` > auto-detect from environment API keys
     /// (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
     /// Model: config `merge.model` > None (provider default used later).
-    pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
+    pub(super) fn resolve_provider_and_model(catalog: &ModelCatalog) -> Result<(String, Option<String>)>
     {
         let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
 
@@ -403,7 +424,7 @@ impl TemplateManager
         {
             p
         }
-        else if let Some(detected) = Provider::detect_from_env()
+        else if let Some(detected) = Provider::detect_from_env(catalog)
         {
             detected.name().to_string()
         }
@@ -423,9 +444,6 @@ impl TemplateManager
         {
             None
         };
-
-        let effective_model = model.clone().unwrap_or_else(|| Provider::from_name(&provider).map(|p| p.default_model().to_string()).unwrap_or_default());
-        println!("{} Using provider: {} ({})", "→".blue(), provider.green(), effective_model.yellow());
 
         Ok((provider, model))
     }
@@ -462,6 +480,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 content: template_content.clone(),
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
+                category: resolved.category.clone(),
                 display
             });
         }
@@ -486,6 +505,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                         user_changelog: Some(user_lower.to_string()),
                         lang: resolved.lang.clone(),
                         agent: resolved.agent.clone(),
+                        category: resolved.category.clone(),
                         display,
                         is_main
                     });
@@ -500,6 +520,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                     user_changelog: None,
                     lang: resolved.lang.clone(),
                     agent: resolved.agent.clone(),
+                    category: resolved.category.clone(),
                     display,
                     is_main
                 });
@@ -514,6 +535,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 user_changelog: None,
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
+                category: resolved.category.clone(),
                 display,
                 is_main
             });
@@ -533,39 +555,6 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
     });
 
     classified
-}
-
-/// Determines the tracking category for a target file path
-fn categorize_path(target: &Path, options: &MergeOptions) -> String
-{
-    let target_str = target.to_string_lossy();
-    if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
-    {
-        "skill".to_string()
-    }
-    else if target_str.contains(".git")
-    {
-        "integration".to_string()
-    }
-    else if target_str.contains("AGENTS.md")
-    {
-        "main".to_string()
-    }
-    else if let Some(name) = options.agent
-    {
-        if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
-        {
-            "agent".to_string()
-        }
-        else
-        {
-            "language".to_string()
-        }
-    }
-    else
-    {
-        "language".to_string()
-    }
 }
 
 /// Prints the outgoing chat messages to stdout for verbose mode
@@ -744,7 +733,36 @@ mod tests
 
     fn rc(content: &str) -> ResolvedContent
     {
-        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new() }
+        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() }
+    }
+
+    /// Synthetic model catalog covering the real `Provider` enum's supported
+    /// providers, for tests exercising `Provider::detect_from_env` /
+    /// `resolve_provider_and_model` against real provider names.
+    fn test_model_catalog() -> ModelCatalog
+    {
+        model_defaults::parse_model_catalog(
+            r#"
+version: 1
+providers:
+  - name: openai
+    api_key_env: OPENAI_API_KEY
+    endpoint: https://api.openai.com/v1/chat/completions
+    models_endpoint: https://api.openai.com/v1/models
+    default_model: test-openai-model
+  - name: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    endpoint: https://api.anthropic.com/v1/messages
+    models_endpoint: https://api.anthropic.com/v1/models
+    default_model: test-anthropic-model
+  - name: mistral
+    api_key_env: MISTRAL_API_KEY
+    endpoint: https://api.mistral.ai/v1/chat/completions
+    models_endpoint: https://api.mistral.ai/v1/models
+    default_model: test-mistral-model
+"#
+        )
+        .expect("synthetic model catalog should parse")
     }
 
     #[test]
@@ -788,7 +806,7 @@ mod tests
         let config_temp = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
-        let result = TemplateManager::resolve_provider_and_model();
+        let result = TemplateManager::resolve_provider_and_model(&test_model_catalog());
         assert!(result.is_err() == true);
         assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
 
@@ -834,7 +852,7 @@ mod tests
         let config_temp = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
-        let result = TemplateManager::resolve_provider_and_model();
+        let result = TemplateManager::resolve_provider_and_model(&test_model_catalog());
         assert!(result.is_ok() == true);
         let (provider, _model) = result.unwrap();
         assert_eq!(provider, "openai");
@@ -1009,41 +1027,6 @@ mod tests
     }
 
     #[test]
-    fn test_categorize_path_main()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/AGENTS.md"), &options), "main");
-    }
-
-    #[test]
-    fn test_categorize_path_skill()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.bogus/skills/my-skill/SKILL.md"), &options), "skill");
-    }
-
-    #[test]
-    fn test_categorize_path_integration()
-    {
-        let options = MergeOptions { lang: None, agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.gitignore"), &options), "integration");
-    }
-
-    #[test]
-    fn test_categorize_path_agent()
-    {
-        let options = MergeOptions { lang: None, agent: Some("bogus"), mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.bogus/instructions.md"), &options), "agent");
-    }
-
-    #[test]
-    fn test_categorize_path_language()
-    {
-        let options = MergeOptions { lang: Some("Rust++"), agent: None, mission: None };
-        assert_eq!(categorize_path(Path::new("/project/.rpp.toml"), &options), "language");
-    }
-
-    #[test]
     fn test_plural()
     {
         assert_eq!(plural(0), "s");
@@ -1063,9 +1046,9 @@ mod tests
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new() });
-        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new() });
-        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new() });
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified

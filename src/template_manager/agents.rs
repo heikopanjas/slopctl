@@ -114,7 +114,7 @@ impl TemplateManager
         let mut issues: Vec<String> = Vec::new();
 
         println!("{} Agent defaults YAML", "→".blue());
-        let local_catalog = match agent_defaults::load_cached_agent_catalog_from_dir(&self.config_dir)
+        let local_catalog = match agent_defaults::load_agent_catalog_from_dir(&self.config_dir)
         {
             | Ok(catalog) =>
             {

@@ -12,26 +12,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  templates:
-    name: Create Templates Archive
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Create templates archive
-        run: zip -r slopctl-templates.zip templates/
-
-      - name: Upload templates as artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: slopctl-templates-temp
-          path: slopctl-templates.zip
-          if-no-files-found: error
-
   build:
     name: Build Release
-    needs: templates
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -46,7 +28,6 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
 
       - name: Cache dependencies
@@ -126,22 +107,16 @@ jobs:
         if: always() && steps.signing.outputs.available == 'true'
         run: security delete-keychain $KEYCHAIN_PATH
 
-      - name: Download templates archive
-        uses: actions/download-artifact@v7
-        with:
-          name: slopctl-templates-temp
-          path: .
-
-      - name: Bundle binary with templates (Windows)
+      - name: Bundle binary (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/release/slopctl.exe, slopctl-templates.zip -DestinationPath slopctl-${{ matrix.os }}.zip
+          Compress-Archive -Path target/release/slopctl.exe, LICENSE -DestinationPath slopctl-${{ matrix.os }}.zip
 
-      - name: Bundle binary with templates (Unix)
+      - name: Bundle binary (Unix)
         if: matrix.os != 'windows-latest'
         run: |
-          zip -j slopctl-${{ matrix.os }}.zip target/release/slopctl slopctl-templates.zip
+          zip -j slopctl-${{ matrix.os }}.zip target/release/slopctl LICENSE
 
       - name: Upload bundled artifact
         uses: actions/upload-artifact@v6
@@ -202,4 +177,3 @@ jobs:
             artifacts/slopctl-ubuntu-latest/slopctl-linux.zip
             artifacts/slopctl-macos-latest/slopctl-macos.zip
             artifacts/slopctl-windows-latest/slopctl-windows.zip
-            artifacts/slopctl-templates-temp/slopctl-templates.zip

@@ -1,0 +1,6 @@
+templates: {}
+agents: {}
+models: {}
+merge:
+  provider: anthropic
+  model: sonnet-5

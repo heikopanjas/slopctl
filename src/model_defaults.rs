@@ -2,10 +2,12 @@
 //!
 //! Provides a registry of provider-specific settings: API endpoints, API key
 //! environment variables, and default model identifiers. The registry is loaded
-//! from `model-defaults.yml` in the global template cache, with an embedded
-//! fallback for first-run behavior.
+//! from `model-defaults.yml` in the global template cache. There is no
+//! compile-time embedded fallback: the catalog is authoritative, matching
+//! `templates.yml` and `agent-defaults.yml`, and callers must handle a missing
+//! or unparsable cache by pointing the user at `slopctl templates --update`.
 
-use std::{collections::HashSet, fs, path::Path, sync::OnceLock};
+use std::{collections::HashSet, fs, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,26 +15,6 @@ use crate::Result;
 
 /// File name of the model defaults catalog
 pub const MODEL_DEFAULTS_FILE: &str = "model-defaults.yml";
-
-const EMBEDDED_MODEL_DEFAULTS: &str = include_str!("../templates/v5/model-defaults.yml");
-
-/// Runtime representation of a provider's default configuration
-///
-/// Fields are `&'static str` so callers in `llm.rs` can return them without allocation.
-#[derive(Debug, Clone)]
-pub struct ProviderDefaults
-{
-    /// Provider identifier (lowercase, e.g. `openai`)
-    pub name:            &'static str,
-    /// Environment variable that holds the API key, or `None` for Ollama
-    pub api_key_env:     Option<&'static str>,
-    /// Chat-completions endpoint URL
-    pub endpoint:        &'static str,
-    /// Model-listing endpoint URL
-    pub models_endpoint: &'static str,
-    /// Default model identifier used when the user has not set `merge.model`
-    pub default_model:   &'static str
-}
 
 /// Top-level YAML representation of the model defaults catalog
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,53 +45,54 @@ pub struct ProviderEntry
     pub default_model:   String
 }
 
-static DEFAULT_MODEL_DEFAULTS: OnceLock<&'static [ProviderDefaults]> = OnceLock::new();
-
 fn default_catalog_version() -> u32
 {
     1
 }
 
-/// Load the model defaults catalog from a template cache directory
-///
-/// Falls back to the embedded catalog when `model-defaults.yml` is absent.
-///
-/// # Errors
-///
-/// Returns an error if the catalog file exists but cannot be read, parsed, or
-/// validated, or if the embedded fallback is invalid.
-pub fn load_model_catalog_from_dir(config_dir: &Path) -> Result<ModelCatalog>
+fn get_provider_entry<'a>(catalog: &'a ModelCatalog, provider: &str) -> Option<&'a ProviderEntry>
 {
-    let path = config_dir.join(MODEL_DEFAULTS_FILE);
-    if path.exists() == true
-    {
-        return load_model_catalog_file(&path);
-    }
-    load_embedded_model_catalog()
+    catalog.providers.iter().find(|p| p.name == provider)
 }
 
-/// Load the cached model defaults catalog from a template cache directory
+/// Get the API key environment variable name for a provider from a specific catalog
 ///
-/// Unlike `load_model_catalog_from_dir`, this requires the cache file to exist.
+/// Returns `None` if the provider is not in the catalog or requires no key (Ollama).
+pub fn get_api_key_env_from_catalog<'a>(catalog: &'a ModelCatalog, provider: &str) -> Option<&'a str>
+{
+    get_provider_entry(catalog, provider).and_then(|p| p.api_key_env.as_deref())
+}
+
+/// Get the default model for a provider from a specific catalog
+pub fn get_default_model_from_catalog<'a>(catalog: &'a ModelCatalog, provider: &str) -> Option<&'a str>
+{
+    get_provider_entry(catalog, provider).map(|p| p.default_model.as_str())
+}
+
+/// Get the chat-completions endpoint URL for a provider from a specific catalog
+pub fn get_endpoint_from_catalog<'a>(catalog: &'a ModelCatalog, provider: &str) -> Option<&'a str>
+{
+    get_provider_entry(catalog, provider).map(|p| p.endpoint.as_str())
+}
+
+/// Get the model-listing endpoint URL for a provider from a specific catalog
+pub fn get_models_endpoint_from_catalog<'a>(catalog: &'a ModelCatalog, provider: &str) -> Option<&'a str>
+{
+    get_provider_entry(catalog, provider).map(|p| p.models_endpoint.as_str())
+}
+
+/// Load the model defaults catalog from a template cache directory
 ///
 /// # Errors
 ///
-/// Returns an error if `model-defaults.yml` is missing or invalid.
-pub fn load_cached_model_catalog_from_dir(config_dir: &Path) -> Result<ModelCatalog>
+/// Returns an error if `model-defaults.yml` is missing, unreadable, unparsable,
+/// or fails validation. Callers should point the user at
+/// `slopctl templates --update` when this fails.
+pub fn load_model_catalog_from_dir(config_dir: &Path) -> Result<ModelCatalog>
 {
     let path = config_dir.join(MODEL_DEFAULTS_FILE);
     require!(path.exists() == true, Err(anyhow::anyhow!("{} not found in global template directory", MODEL_DEFAULTS_FILE)));
     load_model_catalog_file(&path)
-}
-
-/// Load the embedded fallback model defaults catalog
-///
-/// # Errors
-///
-/// Returns an error if the embedded catalog is invalid.
-pub fn load_embedded_model_catalog() -> Result<ModelCatalog>
-{
-    parse_model_catalog(EMBEDDED_MODEL_DEFAULTS)
 }
 
 /// Load a model defaults catalog from a specific file
@@ -159,85 +142,6 @@ pub fn validate_model_catalog(catalog: &ModelCatalog) -> Result<()>
     Ok(())
 }
 
-fn default_model_defaults() -> &'static [ProviderDefaults]
-{
-    DEFAULT_MODEL_DEFAULTS.get_or_init(|| {
-        let catalog = load_default_model_catalog().or_else(|_| load_embedded_model_catalog()).expect("embedded model defaults catalog must be valid");
-        leak_model_defaults(catalog)
-    })
-}
-
-fn load_default_model_catalog() -> Result<ModelCatalog>
-{
-    let data_dir = dirs::data_local_dir().ok_or_else(|| anyhow::anyhow!("Could not determine local data directory"))?;
-    load_model_catalog_from_dir(&data_dir.join("slopctl/templates"))
-}
-
-fn leak_model_defaults(catalog: ModelCatalog) -> &'static [ProviderDefaults]
-{
-    let providers: Vec<ProviderDefaults> = catalog
-        .providers
-        .into_iter()
-        .map(|p| ProviderDefaults {
-            name:            leak_str(p.name),
-            api_key_env:     p.api_key_env.map(leak_str),
-            endpoint:        leak_str(p.endpoint),
-            models_endpoint: leak_str(p.models_endpoint),
-            default_model:   leak_str(p.default_model)
-        })
-        .collect();
-    Box::leak(providers.into_boxed_slice())
-}
-
-fn leak_str(value: String) -> &'static str
-{
-    Box::leak(value.into_boxed_str())
-}
-
-/// Look up defaults for a provider by name
-pub fn get_provider_defaults(provider: &str) -> Option<&'static ProviderDefaults>
-{
-    default_model_defaults().iter().find(|p| p.name == provider)
-}
-
-/// Get the default model for a provider
-///
-/// Returns `None` if the provider is not in the catalog.
-pub fn get_default_model(provider: &str) -> Option<&'static str>
-{
-    get_provider_defaults(provider).map(|p| p.default_model)
-}
-
-/// Get the chat-completions endpoint URL for a provider
-///
-/// Returns `None` if the provider is not in the catalog.
-pub fn get_endpoint(provider: &str) -> Option<&'static str>
-{
-    get_provider_defaults(provider).map(|p| p.endpoint)
-}
-
-/// Get the model-listing endpoint URL for a provider
-///
-/// Returns `None` if the provider is not in the catalog.
-pub fn get_models_endpoint(provider: &str) -> Option<&'static str>
-{
-    get_provider_defaults(provider).map(|p| p.models_endpoint)
-}
-
-/// Get the API key environment variable name for a provider
-///
-/// Returns `None` if the provider is not in the catalog or requires no key (Ollama).
-pub fn get_api_key_env(provider: &str) -> Option<&'static str>
-{
-    get_provider_defaults(provider).and_then(|p| p.api_key_env)
-}
-
-/// List all configured provider names
-pub fn known_providers() -> Vec<&'static str>
-{
-    default_model_defaults().iter().map(|p| p.name).collect()
-}
-
 #[cfg(test)]
 mod tests
 {
@@ -267,11 +171,11 @@ providers:
     }
 
     #[test]
-    fn test_load_model_catalog_from_dir_missing_uses_embedded() -> anyhow::Result<()>
+    fn test_load_model_catalog_from_dir_missing_errors() -> anyhow::Result<()>
     {
         let temp_dir = tempfile::TempDir::new()?;
-        let catalog = load_model_catalog_from_dir(temp_dir.path())?;
-        assert!(catalog.providers.is_empty() == false);
+        let err = load_model_catalog_from_dir(temp_dir.path()).unwrap_err();
+        assert!(err.to_string().contains(MODEL_DEFAULTS_FILE) == true);
         Ok(())
     }
 
@@ -361,15 +265,6 @@ providers:
 "#
         )?;
         assert_eq!(catalog.providers[0].api_key_env, None);
-        Ok(())
-    }
-
-    #[test]
-    fn test_embedded_catalog_is_valid() -> anyhow::Result<()>
-    {
-        let catalog = load_embedded_model_catalog()?;
-        assert!(catalog.providers.is_empty() == false);
-        assert!(catalog.providers.iter().all(|p| p.name.trim().is_empty() == false) == true);
         Ok(())
     }
 

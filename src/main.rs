@@ -13,13 +13,13 @@ use slopctl::{
 };
 
 /// Default template source URL (V5 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/templates";
 
 /// Default agent defaults source URL
-const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
+const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/defaults";
 
 /// Default model defaults source URL
-const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl/tree/develop/templates/v5";
+const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/defaults";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
@@ -142,7 +142,7 @@ fn download_agent_defaults_with_fallback(manager: &TemplateManager, source: &str
 /// # Errors
 ///
 /// Returns an error if all bootstrap sources fail.
-fn bootstrap_agent_defaults_if_missing(manager: &TemplateManager, template_source: &str, dry_run: bool) -> Result<()>
+fn bootstrap_agent_defaults_if_missing(manager: &TemplateManager, dry_run: bool) -> Result<()>
 {
     if manager.has_agent_defaults() == true
     {
@@ -155,8 +155,7 @@ fn bootstrap_agent_defaults_if_missing(manager: &TemplateManager, template_sourc
     let configured_agent_fallback = effective.as_ref().and_then(|c| c.get("agents.fallbackUri"));
 
     let mut candidates: Vec<String> = Vec::new();
-    for candidate in
-        [configured_agent_source, configured_agent_fallback, Some(template_source.to_string()), Some(DEFAULT_AGENTS_SOURCE_URL.to_string())].into_iter().flatten()
+    for candidate in [configured_agent_source, configured_agent_fallback, Some(DEFAULT_AGENTS_SOURCE_URL.to_string())].into_iter().flatten()
     {
         if candidates.contains(&candidate) == false
         {
@@ -239,7 +238,7 @@ fn download_model_defaults_with_fallback(manager: &TemplateManager, source: &str
 /// # Errors
 ///
 /// Returns an error if all bootstrap sources fail.
-fn bootstrap_model_defaults_if_missing(manager: &TemplateManager, template_source: &str, dry_run: bool) -> Result<()>
+fn bootstrap_model_defaults_if_missing(manager: &TemplateManager, dry_run: bool) -> Result<()>
 {
     if manager.has_model_defaults() == true
     {
@@ -252,8 +251,7 @@ fn bootstrap_model_defaults_if_missing(manager: &TemplateManager, template_sourc
     let configured_model_fallback = effective.as_ref().and_then(|c| c.get("models.fallbackUri"));
 
     let mut candidates: Vec<String> = Vec::new();
-    for candidate in
-        [configured_model_source, configured_model_fallback, Some(template_source.to_string()), Some(DEFAULT_MODELS_SOURCE_URL.to_string())].into_iter().flatten()
+    for candidate in [configured_model_source, configured_model_fallback, Some(DEFAULT_MODELS_SOURCE_URL.to_string())].into_iter().flatten()
     {
         if candidates.contains(&candidate) == false
         {
@@ -559,12 +557,12 @@ fn main()
                         eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
                         std::process::exit(1);
                     }
-                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, &source, false)
+                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, false)
                     {
                         eprintln!("{} Failed to bootstrap agent defaults: {}", "✗".red(), e);
                         std::process::exit(1);
                     }
-                    if let Err(e) = bootstrap_model_defaults_if_missing(&manager, &source, false)
+                    if let Err(e) = bootstrap_model_defaults_if_missing(&manager, false)
                     {
                         eprintln!("{} Failed to bootstrap model defaults: {}", "✗".red(), e);
                         std::process::exit(1);
@@ -624,11 +622,11 @@ fn main()
                         println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
                     }
                     println!("{} Templates would be downloaded to: {}", "→".blue(), manager.get_config_dir().display().to_string().yellow());
-                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, &source, true)
+                    if let Err(e) = bootstrap_agent_defaults_if_missing(&manager, true)
                     {
                         Err(e)
                     }
-                    else if let Err(e) = bootstrap_model_defaults_if_missing(&manager, &source, true)
+                    else if let Err(e) = bootstrap_model_defaults_if_missing(&manager, true)
                     {
                         Err(e)
                     }
@@ -646,8 +644,8 @@ fn main()
                     }
                     println!("{} Updating global templates from {}", "→".blue(), source.yellow());
                     download_with_fallback(&manager, &source, fallback)
-                        .and_then(|()| bootstrap_agent_defaults_if_missing(&manager, &source, false))
-                        .and_then(|()| bootstrap_model_defaults_if_missing(&manager, &source, false))
+                        .and_then(|()| bootstrap_agent_defaults_if_missing(&manager, false))
+                        .and_then(|()| bootstrap_model_defaults_if_missing(&manager, false))
                 }
             }
             else
@@ -809,13 +807,12 @@ fn main()
         {
             if file.is_empty() == true && skill.is_empty() == true
             {
-                eprintln!("{} Must specify at least one --file or --skill", "✗".red());
-                eprintln!("{} Examples: slopctl update --skill rust-coding-conventions", "→".blue());
-                eprintln!("{}          slopctl update --file .rustfmt.toml", "→".blue());
-                std::process::exit(1);
+                manager.update_full(lang.as_deref(), agent.as_deref(), force, dry_run)
             }
-
-            manager.update_partial(&file, &skill, lang.as_deref(), agent.as_deref(), force, dry_run)
+            else
+            {
+                manager.update_partial(&file, &skill, lang.as_deref(), agent.as_deref(), force, dry_run)
+            }
         }
         | Commands::Models { update, list, verify, from, dry_run } =>
         {

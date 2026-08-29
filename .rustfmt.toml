@@ -1,6 +1,5 @@
 # https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
 
-max_width = 167
 array_width = 167
 attr_fn_like_width = 167
 binop_separator = "Back"
@@ -44,6 +43,7 @@ match_arm_blocks = false
 # match_arm_indent = true
 match_arm_leading_pipes = "Always"
 match_block_trailing_comma = false
+max_width = 167
 merge_derives = true
 newline_style = "Unix"
 normalize_comments = true
@@ -53,7 +53,6 @@ remove_nested_parens = true
 reorder_impl_items = true
 reorder_imports = true
 reorder_modules = true
-required_version = "1.9.0"
 short_array_element_width_threshold = 133
 show_parse_errors = true
 single_line_if_else_max_width = 0

@@ -380,6 +380,24 @@ impl FileTracker
         self.get_installed_languages().into_iter().next()
     }
 
+    /// Returns the installed agents for this workspace
+    ///
+    /// Scans tracked entries and returns every agent owner in sorted order.
+    /// Unlike marker-directory detection, this reflects only what slopctl installed.
+    pub fn get_installed_agents(&self) -> Vec<String>
+    {
+        let mut agents = BTreeSet::new();
+        for meta in self.metadata.values()
+        {
+            for agent in &meta.agent
+            {
+                agents.insert(agent.clone());
+            }
+        }
+
+        agents.into_iter().collect()
+    }
+
     /// Returns all tracked file entries
     ///
     /// Each entry is a `(PathBuf, &FileMetadata)` tuple where the path is
@@ -432,6 +450,34 @@ impl FileTracker
         }
     }
 
+    /// Release a language owner from every tracked entry.
+    ///
+    /// Removing a language must release its ownership tracker-wide, not only on
+    /// files queued for deletion, so `get_installed_languages()` stays truthful
+    /// even for entries whose files were deleted manually or live outside the
+    /// removal sweep.
+    pub fn clear_lang_owner(&mut self, lang: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            meta.release_lang(lang);
+        }
+    }
+
+    /// Release an agent owner from every tracked entry.
+    ///
+    /// Removing an agent must release its ownership tracker-wide; native-only
+    /// agents (e.g. Claude) also own shared cross-client copies that are never
+    /// queued for deletion, and a leaked owner would make `get_installed_agents()`
+    /// report the agent as still installed.
+    pub fn clear_agent_owner(&mut self, agent: &str)
+    {
+        for meta in self.metadata.values_mut()
+        {
+            meta.release_agent(agent);
+        }
+    }
+
     /// Release a language owner from a tracked file.
     pub fn release_lang(&mut self, file_path: &Path, lang: &str) -> bool
     {
@@ -452,26 +498,17 @@ impl FileTracker
         self.get_metadata(file_path).map(|meta| meta.is_unreferenced()).unwrap_or(true)
     }
 
-    /// Adopt existing slopctl-managed files that are not yet tracked
+    /// Adopt existing slopctl-managed files using a specific agent catalog
     ///
     /// Scans the workspace for agent instruction files, skills, and commands
-    /// using the known agent conventions from `agent_defaults`. Any files
-    /// found on disk that are not already in the tracker are adopted with
-    /// their current SHA and a `template_version` of 0 (indicating adoption
-    /// rather than a template install).
+    /// using the given `AgentCatalog`. Any files found on disk that are not
+    /// already in the tracker are adopted with their current SHA and a
+    /// `template_version` of 0 (indicating adoption rather than a template
+    /// install).
     ///
     /// # Returns
     ///
     /// The number of files adopted.
-    pub fn adopt_untracked_files(&mut self, workspace: &Path) -> anyhow::Result<usize>
-    {
-        use crate::agent_defaults;
-
-        let catalog = agent_defaults::load_embedded_agent_catalog()?;
-        self.adopt_untracked_files_from_catalog(workspace, &catalog)
-    }
-
-    /// Adopt existing slopctl-managed files using a specific agent catalog
     pub fn adopt_untracked_files_from_catalog(&mut self, workspace: &Path, catalog: &crate::agent_defaults::AgentCatalog) -> anyhow::Result<usize>
     {
         use crate::agent_defaults;
@@ -976,6 +1013,83 @@ agents:
 
         let none = tracker.get_entries_by_category("nonexistent");
         assert_eq!(none.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_agent_owner_releases_across_categories() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let agent_file = workspace.join("a.md");
+        fs::write(&agent_file, b"a")?;
+        tracker.record_installation(&agent_file, "sha1".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        let skill_file = workspace.join("s.md");
+        fs::write(&skill_file, b"s")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "skill".into());
+        tracker.record_installation(&skill_file, "sha2".into(), 5, LANG_NONE.into(), "fake".into(), "skill".into());
+
+        tracker.clear_agent_owner("bogus");
+
+        assert!(tracker.get_installed_agents().iter().any(|agent| agent == "bogus") == false, "owner must be released in every category");
+        let meta = tracker.get_metadata(&skill_file).expect("entry must remain");
+        assert!(meta.has_agent("fake") == true, "other owners must be preserved");
+        assert_eq!(meta.ref_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_lang_owner_releases_across_categories() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let lang_file = workspace.join("l.md");
+        fs::write(&lang_file, b"l")?;
+        tracker.record_installation(&lang_file, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+
+        let skill_file = workspace.join("s.md");
+        fs::write(&skill_file, b"s")?;
+        tracker.record_installation(&skill_file, "sha2".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+
+        tracker.clear_lang_owner("Rust++");
+
+        assert!(tracker.get_installed_languages().is_empty() == true, "language owner must be released in every category");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_installed_agents_returns_unique_sorted_owners() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let file_a = workspace.join("a.md");
+        fs::write(&file_a, b"a")?;
+        tracker.record_installation(&file_a, "sha1".into(), 5, LANG_NONE.into(), "fake".into(), "agent".into());
+
+        let file_b = workspace.join("b.md");
+        fs::write(&file_b, b"b")?;
+        tracker.record_installation(&file_b, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        let file_c = workspace.join("c.md");
+        fs::write(&file_c, b"c")?;
+        tracker.record_installation(&file_c, "sha3".into(), 5, "Rust++".into(), "bogus".into(), "language".into());
+
+        // Sentinel-owned files contribute no agent owner.
+        let file_d = workspace.join("d.md");
+        fs::write(&file_d, b"d")?;
+        tracker.record_installation(&file_d, "sha4".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "integration".into());
+
+        assert_eq!(tracker.get_installed_agents(), vec!["bogus".to_string(), "fake".to_string()]);
 
         Ok(())
     }

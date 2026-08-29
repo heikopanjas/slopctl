@@ -5,7 +5,12 @@
 use std::{fs, path::Path};
 
 use super::cwd_test_guard;
-use crate::{FileTracker, MergeOptions, TemplateManager, UpdateOptions, agent_defaults::AGENT_DEFAULTS_FILE, template_engine::TEMPLATE_MARKER};
+use crate::{
+    FileTracker, MergeOptions, TemplateManager, UpdateOptions,
+    agent_defaults::AGENT_DEFAULTS_FILE,
+    model_defaults::MODEL_DEFAULTS_FILE,
+    template_engine::{CHANGELOG_MARKER, TEMPLATE_MARKER}
+};
 
 // ── Fixture ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +88,12 @@ integration:
     files:
       - source: git-workflow-summary.md
         target: '$instructions'
+  updates:
+    files:
+      - source: UPDATES.md
+        target: '$workspace/UPDATES.md'
+      - source: recent-updates-summary.md
+        target: '$instructions'
 
 principles:
   - source: core-principles.md
@@ -129,6 +140,18 @@ agents:
 "#
         )?;
 
+        // ── model-defaults.yml ───────────────────────────────────────────
+        fs::write(
+            d.join(MODEL_DEFAULTS_FILE),
+            r#"version: 1
+providers:
+  - name: ollama
+    endpoint: http://localhost:11434/api/chat
+    models_endpoint: http://localhost:11434/api/tags
+    default_model: test-ollama-model
+"#
+        )?;
+
         // ── Agent source files ───────────────────────────────────────────
         fs::create_dir_all(d.join("bogus"))?;
         fs::write(d.join("bogus/instructions.md"), "# Bogus instructions\n")?;
@@ -145,8 +168,12 @@ agents:
 
         // ── Fragment source files ────────────────────────────────────────
         fs::write(d.join("git-workflow-summary.md"), "## Git Workflow\n")?;
+        fs::write(d.join("recent-updates-summary.md"), "## Recent Updates\n")?;
         fs::write(d.join("core-principles.md"), "## Principles\n")?;
         fs::write(d.join("mission-statement.md"), "## Mission\n")?;
+
+        // ── Changelog-marker file (user-owned log tail below the marker) ─
+        fs::write(d.join("UPDATES.md"), format!("# Recent Updates & Decisions\n\n{}\n\n### 2025-01-01 (v0.1.0, seed)\n\n- seed entry\n", CHANGELOG_MARKER))?;
 
         // ── Skill directories ────────────────────────────────────────────
         for skill in &["git-workflow", "semantic-versioning", "rpp-coding-conventions", "cmake-build-commands"]
@@ -168,6 +195,17 @@ agents:
     {
         let options = UpdateOptions { lang, agent, mission: None, force: false, dry_run: false, partial: None, local_cache_only: false };
         self.manager().update(&options)
+    }
+
+    fn init_force(&self, agent: Option<&str>, lang: Option<&str>) -> anyhow::Result<()>
+    {
+        let options = UpdateOptions { lang, agent, mission: None, force: true, dry_run: false, partial: None, local_cache_only: false };
+        self.manager().update(&options)
+    }
+
+    fn remove_all(&self) -> anyhow::Result<()>
+    {
+        self.manager().remove(None, None, true, false)
     }
 
     fn remove_agent(&self, agent: &str) -> anyhow::Result<()>
@@ -977,7 +1015,737 @@ fn test_merge_truncated_response_keeps_partial() -> anyhow::Result<()>
     Ok(())
 }
 
+// ── Changelog-marker file lifecycle (UPDATES.md) ─────────────────────────────
+
+#[test]
+fn test_init_installs_updates_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    assert!(updates.exists() == true, "UPDATES.md must be installed by init");
+    let content = fs::read_to_string(&updates)?;
+    assert!(content.contains(CHANGELOG_MARKER) == true, "installed UPDATES.md must carry the changelog marker");
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    let metadata = tracker.get_metadata(&cwd.join("UPDATES.md")).expect("UPDATES.md must be tracked");
+    assert!(metadata.is_unreferenced() == true, "integration file must have no language or agent owners");
+    assert_eq!(metadata.category, "integration", "UPDATES.md must carry its templates.yml section category");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_after_updates_append_preserves_entries() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    // A later init (different agent) must not fail preflight and must leave the log untouched.
+    fixture.init(Some("fake"), None)?;
+
+    assert_eq!(fs::read_to_string(&updates)?, appended, "user log entries must survive re-init");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_force_preserves_updates_log() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    // Changelog files are blocked like AGENTS.md: --force does not override this.
+    // 'slopctl merge' is the only command that may refresh the template half.
+    fixture.init_force(Some("bogus"), None)?;
+
+    assert_eq!(fs::read_to_string(&updates)?, appended, "--force must not overwrite the changelog log");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Regression: after a merge re-records the tracker SHA, the file reads as
+    // Unmodified while still diverging from the template source. A second init
+    // (different agent) must not fall through to an unconditional overwrite.
+    fixture.init(Some("fake"), None)?;
+
+    assert_eq!(fs::read_to_string(&updates)?, appended, "post-merge log must survive a later init with no flag involved");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Same regression via 'slopctl update' (no lang/agent selectors), with and
+    // without --force: neither may touch a changelog-marker file's log.
+    fixture.manager().update_full(None, Some("bogus"), false, false)?;
+    assert_eq!(fs::read_to_string(&updates)?, appended, "plain update must not overwrite the post-merge log");
+
+    fixture.manager().update_full(None, Some("bogus"), true, false)?;
+    assert_eq!(fs::read_to_string(&updates)?, appended, "update --force must not overwrite the post-merge log");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_file_updates_md_is_rejected() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Mirrors the existing AGENTS.md single-file rejection: changelog-marker
+    // files are refreshed only via 'slopctl merge', never as a --file selector.
+    let err = fixture
+        .manager()
+        .update_partial(&["UPDATES.md".to_string()], &[], None, Some("bogus"), false, false)
+        .expect_err("UPDATES.md must be rejected as a --file selector");
+    let message = err.to_string();
+    assert!(message.contains("UPDATES.md") == true, "error must name the rejected file: {}", message);
+    assert!(message.contains("slopctl merge") == true, "error must point to merge: {}", message);
+
+    let updates = workspace.path().join("UPDATES.md");
+    let original = fs::read_to_string(&updates)?;
+    let err_force =
+        fixture.manager().update_partial(&["UPDATES.md".to_string()], &[], None, Some("bogus"), true, false).expect_err("--force must not bypass the rejection");
+    assert!(err_force.to_string().contains("slopctl merge") == true);
+    assert_eq!(fs::read_to_string(&updates)?, original, "rejected selector must not touch the file");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_all_preserves_unmodified_per_tracker_updates_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+    simulate_merge_resync(&updates)?;
+
+    // Regression: split_changelog_preserved used to key on FileStatus::Modified,
+    // which never fires once the tracker SHA matches the on-disk content.
+    fixture.remove_all()?;
+
+    assert!(updates.exists() == true, "UPDATES.md must survive remove --all even when Unmodified per tracker");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "post-merge log must be untouched");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_lang_preserves_updates_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    fixture.remove_lang("Rust++")?;
+
+    assert!(updates.exists() == true, "UPDATES.md must survive remove --lang");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "log entries must be untouched by remove --lang");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_all_preserves_updates_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    fixture.remove_all()?;
+
+    assert!(updates.exists() == true, "UPDATES.md must survive remove --all");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "log entries must be untouched by remove --all");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_all_preserves_updates_file_in_agent_named_path() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let parent = tempfile::TempDir::new()?;
+
+    // Tracker categories are authoritative (recorded from the templates.yml section),
+    // so a workspace path containing the agent name no longer miscategorizes files;
+    // the changelog guard remains as defense in depth for user-owned log entries.
+    let workspace = parent.path().join("bogus-nest");
+    fs::create_dir_all(&workspace)?;
+    std::env::set_current_dir(&workspace)?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    fixture.remove_all()?;
+
+    assert!(updates.exists() == true, "UPDATES.md must survive remove --all even when categorized as agent");
+    assert_eq!(fs::read_to_string(&updates)?, appended, "log entries must be untouched");
+
+    Ok(())
+}
+
+#[test]
+fn test_init_in_agent_named_path_records_section_categories() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let parent = tempfile::TempDir::new()?;
+
+    // The workspace path contains the agent name; categories must still come from
+    // the templates.yml section each file resolves from, not from path substrings.
+    let workspace = parent.path().join("bogus-nest");
+    fs::create_dir_all(&workspace)?;
+    std::env::set_current_dir(&workspace)?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    let category_of = |rel: &str| tracker.get_metadata(&cwd.join(rel)).unwrap_or_else(|| panic!("{} must be tracked", rel)).category.clone();
+
+    assert_eq!(category_of(".bogus/instructions.md"), "agent");
+    assert_eq!(category_of(".rpp.toml"), "language");
+    assert_eq!(category_of("UPDATES.md"), "integration");
+    assert_eq!(category_of(".bogus/skills/git-workflow/SKILL.md"), "skill");
+
+    Ok(())
+}
+
+// ── No-op re-init guard ──────────────────────────────────────────────────────
+
+#[test]
+fn test_reinit_same_agent_and_lang_errors_with_guidance() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let err = fixture.init(Some("bogus"), Some("Rust++")).expect_err("no-op re-init must be rejected");
+    let message = err.to_string();
+    assert!(message.contains("already initialized") == true, "message must state the workspace is initialized: {}", message);
+    assert!(message.contains("slopctl update") == true, "message must point to the update command: {}", message);
+    assert!(message.contains("slopctl merge") == true, "message must point to the merge command: {}", message);
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_same_agent_only_errors() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let err = fixture.init(Some("bogus"), None).expect_err("agent-only no-op re-init must be rejected");
+    assert!(err.to_string().contains("agent 'bogus'") == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_init_new_agent_on_initialized_workspace_succeeds() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    // Anything new keeps init working: same language, new agent.
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_force_bypasses_noop_guard() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+    fixture.init_force(Some("bogus"), Some("Rust++"))?;
+
+    Ok(())
+}
+
+// ── Modified tracked files never block re-init ───────────────────────────────
+
+#[test]
+fn test_add_second_agent_with_modified_language_file_succeeds() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    // A locally modified tracked file unrelated to the new agent must not block the install.
+    let format_file = workspace.path().join(".rpp.toml");
+    fs::write(&format_file, "max_width = 99\n")?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == true, "second agent files must be installed");
+    assert_eq!(fs::read_to_string(&format_file)?, "max_width = 99\n", "local modifications must be preserved");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_force_overwrites_modified_language_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let format_file = workspace.path().join(".rpp.toml");
+    fs::write(&format_file, "max_width = 99\n")?;
+
+    fixture.init_force(Some("bogus"), Some("Rust++"))?;
+
+    assert_eq!(fs::read_to_string(&format_file)?, "max_width = 167\n", "with --force the template must overwrite the modified file");
+
+    Ok(())
+}
+
+#[test]
+fn test_merge_dry_run_after_updates_append_succeeds() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let updates = workspace.path().join("UPDATES.md");
+    let appended = format!("{}\n### 2026-02-02 (v1.2.3, user change)\n\n- user-authored entry\n", fs::read_to_string(&updates)?);
+    fs::write(&updates, &appended)?;
+
+    // Tail-only diff classifies as Unchanged, so the dry run needs no LLM provider.
+    fixture.merge_dry_run(Some("bogus"), None)?;
+
+    assert_eq!(fs::read_to_string(&updates)?, appended, "merge dry run must not touch the log");
+
+    Ok(())
+}
+
+// ── Native-only agent ownership and path-matching regressions ────────────────
+
+#[test]
+fn test_remove_native_agent_then_reinit_succeeds() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // Mixed workspace: cross-client fake first, then native-only bogus.
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    assert!(tracker.get_installed_agents().iter().any(|agent| agent == "bogus") == false, "removed agent must not linger as an owner anywhere in the tracker");
+
+    // Re-adding the agent must not be rejected by the no-op init guard.
+    fixture.init(Some("bogus"), None)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_native_agent_releases_owner_on_cross_client_copies() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let cwd = std::env::current_dir()?;
+    let tracker = FileTracker::new(&cwd)?;
+    let shared = cwd.join(".agents/skills/git-workflow/SKILL.md");
+    assert!(shared.exists() == true, "shared cross-client skill must survive native-agent removal");
+    let meta = tracker.get_metadata(&shared).expect("shared skill must stay tracked");
+    assert!(meta.has_agent("bogus") == false, "cross-client copy must not keep the removed agent as owner");
+    assert!(meta.has_agent("fake") == true, "remaining agent ownership must be preserved");
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_agent_ignores_agent_named_ancestor_dir() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let parent = tempfile::TempDir::new()?;
+
+    // The workspace lives under a directory component equal to the agent name;
+    // location-based force-deletion must not treat shared files as agent-owned.
+    let workspace = parent.path().join("bogus").join("ws");
+    fs::create_dir_all(&workspace)?;
+    std::env::set_current_dir(&workspace)?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+
+    fixture.remove_agent("bogus")?;
+
+    let shared_lang_skill = workspace.join(".agents/skills/rpp-coding-conventions/SKILL.md");
+    assert!(shared_lang_skill.exists() == true, "shared language skill outside the agent dirs must survive remove --agent");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_never_installed_agent_files() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // The agent app created its own marker dir; slopctl never installed the agent.
+    fs::create_dir_all(workspace.path().join(".fake"))?;
+    fixture.init(None, Some("Rust++"))?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == false, "update must not create agent files for a marker-only agent");
+    assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true, "skill distribution stays marker-based");
+
+    Ok(())
+}
+
+#[test]
+fn test_merge_recreates_prompt_files_for_all_detected_agents() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+    fixture.init(Some("fake"), None)?;
+
+    let bogus_file = workspace.path().join(".bogus/instructions.md");
+    let fake_file = workspace.path().join(".fake/commands/init-session.md");
+    fs::remove_file(&bogus_file)?;
+    fs::remove_file(&fake_file)?;
+
+    // Deleted files classify as New (no LLM needed); the hook guards against any
+    // unexpected divergence reaching a real provider.
+    let _hook = crate::llm::set_chat_test_hook(Box::new(|_msgs| {
+        Ok(crate::llm::ChatResponse { content: String::new(), input_tokens: None, output_tokens: None, stop_reason: Some("end_turn".to_string()) })
+    }));
+
+    let options = crate::MergeOptions { lang: None, agent: None, mission: None };
+    fixture.manager().merge(&options, false, false, false)?;
+
+    assert!(bogus_file.exists() == true, "merge without --agent must recreate the first agent's file");
+    assert!(fake_file.exists() == true, "merge without --agent must recreate the second agent's file");
+
+    Ok(())
+}
+
+// ── update_full agent-ownership gate ─────────────────────────────────────────
+
+#[test]
+fn test_update_full_recreates_untracked_missing_file_for_installed_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Reproduces an old init/remove cycle: the file is gone from disk AND from the
+    // tracker, while bogus remains genuinely installed through its other entries
+    // (e.g. its skills). A per-file tracker lookup alone cannot tell this apart from
+    // a marker-only agent; the fix must probe agent ownership instead.
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(instructions_file.exists() == true, "update must recreate an installed agent's untracked missing file");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_recreates_untracked_missing_file_for_explicit_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, Some("bogus"), false, false)?;
+
+    assert!(instructions_file.exists() == true, "update --agent bogus must recreate its untracked missing file");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_marker_only_agent_when_other_agent_installed() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // fake's marker dir exists but slopctl never installed it.
+    fs::create_dir_all(workspace.path().join(".fake"))?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(instructions_file.exists() == true, "the installed agent's file must still be recreated");
+    assert!(workspace.path().join(".fake/commands/init-session.md").exists() == false, "a marker-only agent must stay blocked even while another agent is installed");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_creates_newly_catalogued_agent_file_for_installed_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    // Simulate the template catalog gaining a second instruction file for bogus
+    // after this workspace was already installed.
+    let config_dir = fixture.config_dir.path();
+    fs::write(config_dir.join("bogus/extra.md"), "# Bogus extra\n")?;
+    let templates_yml = fs::read_to_string(config_dir.join("templates.yml"))?;
+    let updated =
+        templates_yml.replace(
+            "  bogus:\n    instructions:\n      - source: bogus/instructions.md\n        target: '$workspace/.bogus/instructions.md'\n",
+            "  bogus:\n    instructions:\n      - source: bogus/instructions.md\n        target: '$workspace/.bogus/instructions.md'\n      - source: \
+             bogus/extra.md\n        target: '$workspace/.bogus/extra.md'\n"
+        );
+    assert_ne!(updated, templates_yml, "test fixture must match the templates.yml bogus section verbatim");
+    fs::write(config_dir.join("templates.yml"), updated)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".bogus/extra.md").exists() == true, "update must create a newly catalogued file for an installed agent");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_skips_agent_files_after_remove_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+    fixture.remove_agent("bogus")?;
+
+    // The agent app recreates its own marker dir independently of slopctl.
+    fs::create_dir_all(workspace.path().join(".bogus"))?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert!(workspace.path().join(".bogus/instructions.md").exists() == false, "removing an agent must revoke creation authority even if its marker dir reappears");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_dry_run_does_not_create_agent_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), None)?;
+
+    let instructions_file = workspace.path().join(".bogus/instructions.md");
+    fs::remove_file(&instructions_file)?;
+    forget_tracker_entry(&instructions_file)?;
+
+    fixture.manager().update_full(None, None, false, true)?;
+
+    assert!(instructions_file.exists() == false, "dry run must not write the recreated file to disk");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_explicit_uninstalled_agent_errors_with_init_hint() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(None, Some("Rust++"))?;
+
+    let err = fixture.manager().update_full(None, Some("bogus"), false, false).expect_err("update --agent on a never-installed agent must error");
+
+    let message = err.to_string();
+    assert!(message.contains("slopctl init --agent"), "error must hint at the install command, got: {message}");
+
+    Ok(())
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Re-records `target`'s tracker entry to match its current on-disk content.
+///
+/// Mirrors what `slopctl merge` does after splicing a changelog-marker file's
+/// template half: the tracker's `original_sha` is updated to the post-merge
+/// content, so the file reads as `FileStatus::Unmodified` even though it now
+/// diverges from the template source. This is the exact precondition that
+/// exposed the changelog data-loss bug (init/update fell through to an
+/// unconditional overwrite because `FileStatus::Modified` never fired).
+fn simulate_merge_resync(target: &Path) -> anyhow::Result<()>
+{
+    let sha = FileTracker::calculate_sha256(target)?;
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    tracker.record_installation_with_owners(target, sha, 5, &[], &[], "integration".to_string());
+    tracker.save()?;
+    Ok(())
+}
+
+/// Drops `target`'s tracker entry, leaving the file unknown to slopctl.
+///
+/// Reproduces the state left by an older init/remove cycle: the agent is still
+/// tracker-installed through its other files, but this particular target is neither
+/// on disk nor in `tracker.yml`, so a per-file `get_metadata` probe cannot authorize
+/// recreating it. This is the exact precondition that hid a missing `CLAUDE.md`.
+fn forget_tracker_entry(target: &Path) -> anyhow::Result<()>
+{
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    tracker.remove_entry(target);
+    tracker.save()?;
+    Ok(())
+}
 
 /// Returns `true` if any `SKILL.md` exists recursively under `dir`.
 fn has_skill_md_under(dir: &Path) -> bool
