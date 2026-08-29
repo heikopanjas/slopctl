@@ -13,13 +13,13 @@ use slopctl::{
 };
 
 /// Default template source URL (V5 templates - agents.md standard)
-const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/main/templates";
+const DEFAULT_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/templates";
 
 /// Default agent defaults source URL
-const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/main/defaults";
+const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/defaults";
 
 /// Default model defaults source URL
-const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/main/defaults";
+const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/defaults";
 
 /// Resolves template source URL from CLI argument, config, or default
 ///
