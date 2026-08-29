@@ -45,7 +45,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 
 - Follows the [agents.md](https://agents.md) community standard
 - Single AGENTS.md file compatible with Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode
-- No per-agent instruction stubs: agents read AGENTS.md natively; only Copilot keeps a slim `.github/copilot-instructions.md` reference
+- AGENTS.md is the single source of truth; most agents read it natively with no additional stub. Claude Code, GitHub Copilot, and Cursor each auto-load an instruction file of their own before AGENTS.md, so all three get a slim redirect stub (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`) from one shared template source
 - [Agent Skills](https://agentskills.io) support: define skills per agent, per language, or as top-level entries
 - Shared file groups (`shared` section) and composable languages (`includes`) for reuse across languages
 - Skills associated with agents, languages, or shared groups — skills propagate via `includes` (from shared groups and from included languages)
@@ -969,7 +969,7 @@ All templates in this repository enforce these critical rules:
 - Mistral Vibe
 - OpenCode
 
-One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) reference AGENTS.md when needed. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent. The default catalog includes `init-session` support for every built-in agent: Claude, Cursor, Copilot, and OpenCode use their native command/prompt directories; Codex and Vibe use an `init-session` skill because those agents do not provide the same recommended predefined prompt workflow.
+One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) reference AGENTS.md when needed. Claude Code, GitHub Copilot, and Cursor additionally get a slim redirect stub (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`), since each auto-loads a file of its own before it would otherwise discover AGENTS.md; all three stubs come from one shared template source. Agent-specific [skills](https://agentskills.io) (SKILL.md) can also be defined per agent. The default catalog includes `init-session` support for every built-in agent: Claude, Cursor, Copilot, and OpenCode use their native command/prompt directories; Codex and Vibe use an `init-session` skill because those agents do not provide the same recommended predefined prompt workflow.
 
 ## Supported Languages
 
@@ -1043,10 +1043,10 @@ A skill is a directory containing a `SKILL.md` file with YAML frontmatter (name,
 | Claude Code | `.claude/skills/` | `~/.claude/skills/` | ✗ |
 | Codex | `.codex/skills/` ¹ | `~/.codex/skills/` | ✓ |
 | Copilot | `.github/skills/` | `~/.copilot/skills/` | ✓ |
-| Mistral Vibe | `.vibe/skills/` | `~/.vibe/skills/` | ✗ |
+| Mistral Vibe | `.vibe/skills/` ¹ | `~/.vibe/skills/` | ✓ |
 | OpenCode | `.opencode/skills/` | `~/.config/opencode/skills/` | ✓ |
 
-¹ Codex scans both `.codex/skills/` and `.agents/skills/`. slopctl installs Codex agent-specific skills to `.codex/skills/`; language and top-level skills use `.agents/skills/` to avoid duplication with other cross-client agents.
+¹ Codex and Mistral Vibe each scan both their native skill dir and `.agents/skills/`. slopctl installs their agent-specific skills to the native dir; language and top-level skills use `.agents/skills/` to avoid duplication with other cross-client agents.
 
 **slopctl skill routing decisions:**
 
@@ -1427,7 +1427,7 @@ When you run `slopctl init --lang rust`:
 
 1. Detects existing installation language from file tracker
 2. Adds agent prompts, agent-specific skills, and the agent's marker directory
-3. For native-only agents (Claude, Vibe): hydrates the installed languages' skills from templates into the agent's native skill dir
+3. For native-only agents (Claude Code): hydrates the installed languages' skills from templates into the agent's native skill dir
 
 The resulting AGENTS.md contains the complete merged content with all relevant sections for your project.
 
