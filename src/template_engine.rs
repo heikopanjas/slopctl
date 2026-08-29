@@ -24,6 +24,9 @@ use crate::{
 /// Template marker comment used to detect unmerged template files
 pub const TEMPLATE_MARKER: &str = "<!-- SLOPCTL-TEMPLATE: This marker indicates an unmerged template. Do not remove manually. -->";
 
+/// Changelog marker comment separating template-managed content from the user-owned log tail
+pub const CHANGELOG_MARKER: &str = "<!-- {changelog} -->";
+
 /// Selectors for partial workspace refresh (`slopctl update --file` / `--skill`)
 pub struct PartialSelectors<'a>
 {
@@ -74,12 +77,14 @@ pub struct TemplateContext
 /// A single resolved file with its provenance metadata
 pub struct ResolvedFile
 {
-    pub source: PathBuf,
-    pub target: PathBuf,
+    pub source:   PathBuf,
+    pub target:   PathBuf,
     /// Language owners for this file
-    pub lang:   Vec<String>,
+    pub lang:     Vec<String>,
     /// Agent owners for this file
-    pub agent:  Vec<String>
+    pub agent:    Vec<String>,
+    /// FileTracker category derived from the templates.yml section this file resolves from
+    pub category: String
 }
 
 /// All files, fragments, and directories resolved from templates.yml for a given set of options
@@ -104,9 +109,11 @@ pub struct ResolvedFiles
 /// A resolved file's content with provenance metadata for the merge command
 pub struct ResolvedContent
 {
-    pub content: String,
-    pub lang:    Vec<String>,
-    pub agent:   Vec<String>
+    pub content:  String,
+    pub lang:     Vec<String>,
+    pub agent:    Vec<String>,
+    /// FileTracker category carried from the resolved file (`"main"` for AGENTS.md)
+    pub category: String
 }
 
 struct PreflightPlan
@@ -126,7 +133,9 @@ struct PlannedFileAction
 enum PlannedFileActionKind
 {
     Copy,
-    RefreshTracker
+    RefreshTracker,
+    SkipModified,
+    SkipChangelog
 }
 
 /// Loads template configuration from templates.yml
@@ -167,6 +176,28 @@ pub fn is_file_customized(local_path: &Path) -> Result<bool>
 
     let content = fs::read_to_string(local_path)?;
     Ok(content.contains(TEMPLATE_MARKER) == false)
+}
+
+/// Checks whether a file contains the changelog marker comment as its own line
+///
+/// Files carrying the marker keep a user-owned, append-only log below it, so
+/// install and cleanup paths must preserve their local modifications. Matching
+/// requires a standalone (trimmed) line rather than a raw substring, so
+/// documentation that merely mentions the marker as example text (e.g. the
+/// `recent-updates` skill explaining the syntax) is not mistaken for a real
+/// changelog-marker file. Returns `false` when the file is missing or unreadable.
+pub fn file_contains_changelog_marker(path: &Path) -> bool
+{
+    fs::read_to_string(path).map(|content| content.lines().any(|line| line.trim() == CHANGELOG_MARKER)).unwrap_or(false)
+}
+
+/// Returns true when an existing target carries a user-owned changelog log.
+///
+/// Such files are never written by install or refresh paths; `merge` is the
+/// only command that may update the template half above the marker.
+pub fn is_changelog_protected(target: &Path) -> bool
+{
+    target.exists() == true && file_contains_changelog_marker(target) == true
 }
 
 /// Validates that no two file entries target the same destination path
@@ -225,6 +256,24 @@ impl<'a> TemplateEngine<'a>
     pub fn config_dir(&self) -> &Path
     {
         self.config_dir
+    }
+
+    /// Maps a templates.yml section name to its FileTracker category.
+    ///
+    /// The section namespace uses `"languages"` (plural, matching the YAML key and the
+    /// AGENTS.md fragment marker) while the tracker category is `"language"` (singular);
+    /// all other sections map to themselves. Categories are authoritative from the
+    /// resolution pipeline and must never be derived from file paths.
+    fn tracker_category_for_section(section: &str) -> String
+    {
+        if section == "languages"
+        {
+            "language".to_string()
+        }
+        else
+        {
+            section.to_string()
+        }
     }
 
     /// Convert a scalar owner into a tracker owner list.
@@ -757,10 +806,11 @@ impl<'a> TemplateEngine<'a>
                 else
                 {
                     files_to_copy.push(ResolvedFile {
-                        source: source_path,
-                        target: target_path,
-                        lang:   Self::owner_list(lang, LANG_NONE),
-                        agent:  Self::owner_list(agent, AGENT_ALL)
+                        source:   source_path,
+                        target:   target_path,
+                        lang:     Self::owner_list(lang, LANG_NONE),
+                        agent:    Self::owner_list(agent, AGENT_ALL),
+                        category: Self::tracker_category_for_section(category)
                     });
                 }
             };
@@ -821,10 +871,11 @@ impl<'a> TemplateEngine<'a>
                         if source_path.exists() == true
                         {
                             files_to_copy.push(ResolvedFile {
-                                source: source_path,
-                                target: target_path,
-                                lang:   Vec::new(),
-                                agent:  Self::owner_list(agent_name, AGENT_ALL)
+                                source:   source_path,
+                                target:   target_path,
+                                lang:     Vec::new(),
+                                agent:    Self::owner_list(agent_name, AGENT_ALL),
+                                category: "agent".to_string()
                             });
                         }
                         else if local_cache_only == true
@@ -933,10 +984,11 @@ impl<'a> TemplateEngine<'a>
                 {
                     let target_path = self.resolve_placeholder(target, &workspace, &userprofile);
                     files_to_copy.push(ResolvedFile {
-                        source: source_path,
-                        target: target_path,
-                        lang:   Self::owner_list(lang, LANG_NONE),
-                        agent:  Self::owner_list(agent, AGENT_ALL)
+                        source:   source_path,
+                        target:   target_path,
+                        lang:     Self::owner_list(lang, LANG_NONE),
+                        agent:    Self::owner_list(agent, AGENT_ALL),
+                        category: Self::tracker_category_for_section(category)
                     });
                 }
             };
@@ -1006,10 +1058,11 @@ impl<'a> TemplateEngine<'a>
                     {
                         let target_path = self.resolve_placeholder(&entry.target, &workspace, &userprofile);
                         files_to_copy.push(ResolvedFile {
-                            source: source_path,
-                            target: target_path,
-                            lang:   Vec::new(),
-                            agent:  Self::owner_list(agent_name, AGENT_ALL)
+                            source:   source_path,
+                            target:   target_path,
+                            lang:     Vec::new(),
+                            agent:    Self::owner_list(agent_name, AGENT_ALL),
+                            category: "agent".to_string()
                         });
                     }
                 }
@@ -1126,9 +1179,10 @@ impl<'a> TemplateEngine<'a>
         let fresh_main = Self::generate_fresh_main(&resolved.context, options)?;
         let main_target = normalize_path(&resolved.context.target);
         map.insert(main_target, ResolvedContent {
-            content: fresh_main,
-            lang:    options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default(),
-            agent:   options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default()
+            content:  fresh_main,
+            lang:     options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default(),
+            agent:    options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default(),
+            category: "main".to_string()
         });
 
         for entry in &resolved.files
@@ -1136,7 +1190,12 @@ impl<'a> TemplateEngine<'a>
             if entry.source.exists() == true &&
                 let Ok(content) = fs::read_to_string(&entry.source)
             {
-                map.insert(normalize_path(&entry.target), ResolvedContent { content, lang: entry.lang.clone(), agent: entry.agent.clone() });
+                map.insert(normalize_path(&entry.target), ResolvedContent {
+                    content,
+                    lang: entry.lang.clone(),
+                    agent: entry.agent.clone(),
+                    category: entry.category.clone()
+                });
             }
         }
 
@@ -1190,34 +1249,6 @@ impl<'a> TemplateEngine<'a>
         Ok(content)
     }
 
-    fn planned_category(entry: &ResolvedFile, options: &UpdateOptions) -> String
-    {
-        let target_str = entry.target.to_string_lossy();
-        if target_str.contains("SKILL.md") || target_str.contains("/skills/") || target_str.contains("\\skills\\")
-        {
-            "skill".to_string()
-        }
-        else if target_str.contains(".git")
-        {
-            "integration".to_string()
-        }
-        else if let Some(name) = options.agent
-        {
-            if target_str.contains(&format!(".{}", name)) || target_str.contains(name)
-            {
-                "agent".to_string()
-            }
-            else
-            {
-                "language".to_string()
-            }
-        }
-        else
-        {
-            "language".to_string()
-        }
-    }
-
     fn push_parent_conflict(conflicts: &mut Vec<String>, path: &Path)
     {
         if let Some(parent) = path.parent() &&
@@ -1269,7 +1300,7 @@ impl<'a> TemplateEngine<'a>
             }
 
             let source_sha = FileTracker::calculate_sha256(&entry.source)?;
-            let category = Self::planned_category(entry, options);
+            let category = entry.category.clone();
             Self::push_parent_conflict(&mut conflicts, &entry.target);
 
             if entry.target.exists() == true && entry.target.is_dir() == true
@@ -1279,6 +1310,14 @@ impl<'a> TemplateEngine<'a>
             else if entry.target.exists() == false
             {
                 planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+            }
+            else if is_changelog_protected(&entry.target) == true
+            {
+                // Changelog-marker files (e.g. UPDATES.md) hold a user-owned, append-only
+                // log below the marker. Keying protection on FileStatus::Modified alone
+                // misses the common case where 'merge' already re-recorded the tracker SHA,
+                // so key on the marker itself instead; 'merge' is the only refresh path.
+                planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::SkipChangelog });
             }
             else
             {
@@ -1322,20 +1361,22 @@ impl<'a> TemplateEngine<'a>
                     {
                         let adds_new_owners =
                             file_tracker.get_metadata(&entry.target).map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
-                        if options.force == true && adds_new_owners == false
-                        {
-                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
-                        }
-                        else if adds_new_owners == true
+                        if adds_new_owners == true
                         {
                             conflicts.push(format!(
                                 "target '{}' has local modifications and cannot be shared with a new language or agent; use 'slopctl merge' to combine it",
                                 entry.target.display()
                             ));
                         }
+                        else if options.force == true
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::Copy });
+                        }
                         else
                         {
-                            conflicts.push(format!("target '{}' has local modifications", entry.target.display()));
+                            // Already-owned modified files never block an install: keep the
+                            // local version; 'slopctl merge' is the update path.
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::SkipModified });
                         }
                     }
                 }
@@ -1487,7 +1528,15 @@ impl<'a> TemplateEngine<'a>
         for planned in &preflight.files
         {
             let entry = &files_to_copy[planned.index];
-            if planned.kind == PlannedFileActionKind::RefreshTracker
+            if planned.kind == PlannedFileActionKind::SkipModified
+            {
+                println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), entry.target.display());
+            }
+            else if planned.kind == PlannedFileActionKind::SkipChangelog
+            {
+                println!("  {} {} (skipped - changelog log preserved)", "○".yellow(), entry.target.display());
+            }
+            else if planned.kind == PlannedFileActionKind::RefreshTracker
             {
                 println!("  {} {} (already installed, tracker would be refreshed)", "○".yellow(), entry.target.display());
             }
@@ -1592,17 +1641,46 @@ impl<'a> TemplateEngine<'a>
             let source = &entry.source;
             let target = &entry.target;
 
-            if planned.kind == PlannedFileActionKind::Copy
+            if planned.kind == PlannedFileActionKind::SkipModified
             {
-                copy_file_with_mkdir(source, target)?;
-                println!("  {} {}", "✓".green(), target.display().to_string().yellow());
+                // Keep the user's version and the original tracker SHA; 'slopctl merge' is the update path.
+                println!(
+                    "  {} {} (skipped - local modifications preserved; use 'slopctl merge' to apply template updates)",
+                    "○".yellow(),
+                    target.display().to_string().yellow()
+                );
+            }
+            else if planned.kind == PlannedFileActionKind::SkipChangelog
+            {
+                // Never write a changelog-marker file here; 'slopctl merge' splices the
+                // template half back in without touching the user-owned log below the marker.
+                println!(
+                    "  {} {} (skipped - changelog log preserved; use 'slopctl merge' to apply template updates)",
+                    "○".yellow(),
+                    target.display().to_string().yellow()
+                );
             }
             else
             {
-                println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
-            }
+                if planned.kind == PlannedFileActionKind::Copy
+                {
+                    copy_file_with_mkdir(source, target)?;
+                    println!("  {} {}", "✓".green(), target.display().to_string().yellow());
+                }
+                else
+                {
+                    println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
+                }
 
-            file_tracker.record_installation_with_owners(target, planned.source_sha.clone(), template_version, &entry.lang, &entry.agent, planned.category.clone());
+                file_tracker.record_installation_with_owners(
+                    target,
+                    planned.source_sha.clone(),
+                    template_version,
+                    &entry.lang,
+                    &entry.agent,
+                    planned.category.clone()
+                );
+            }
         }
 
         Ok(())
@@ -1717,7 +1795,8 @@ impl<'a> TemplateEngine<'a>
                             source: source_dir,
                             target,
                             lang: Self::owner_list(lang, LANG_NONE),
-                            agent: Self::owner_list(agent, AGENT_ALL)
+                            agent: Self::owner_list(agent, AGENT_ALL),
+                            category: "skill".to_string()
                         });
                     }
                 }
@@ -1754,10 +1833,11 @@ impl<'a> TemplateEngine<'a>
                 let Some(filename) = path.file_name()
             {
                 files_to_copy.push(ResolvedFile {
-                    source: path.clone(),
-                    target: target_base.join(filename),
-                    lang:   Self::owner_list(lang, LANG_NONE),
-                    agent:  Self::owner_list(agent, AGENT_ALL)
+                    source:   path.clone(),
+                    target:   target_base.join(filename),
+                    lang:     Self::owner_list(lang, LANG_NONE),
+                    agent:    Self::owner_list(agent, AGENT_ALL),
+                    category: "skill".to_string()
                 });
             }
         }
@@ -1784,7 +1864,79 @@ mod tests
 
     fn rf(source: &str, target: &str) -> ResolvedFile
     {
-        ResolvedFile { source: PathBuf::from(source), target: PathBuf::from(target), lang: Vec::new(), agent: Vec::new() }
+        ResolvedFile {
+            source:   PathBuf::from(source),
+            target:   PathBuf::from(target),
+            lang:     Vec::new(),
+            agent:    Vec::new(),
+            category: "language".to_string()
+        }
+    }
+
+    // -- file_contains_changelog_marker --
+
+    #[test]
+    fn test_file_contains_changelog_marker_present_true()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("UPDATES.md");
+        fs::write(&path, format!("# Log\n\n{}\n\n### entry\n", CHANGELOG_MARKER)).unwrap();
+        assert!(file_contains_changelog_marker(&path) == true);
+    }
+
+    #[test]
+    fn test_file_contains_changelog_marker_absent_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plain.md");
+        fs::write(&path, "# Log\n\nno marker here\n").unwrap();
+        assert!(file_contains_changelog_marker(&path) == false);
+    }
+
+    #[test]
+    fn test_file_contains_changelog_marker_missing_file_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(file_contains_changelog_marker(&dir.path().join("missing.md")) == false);
+    }
+
+    #[test]
+    fn test_file_contains_changelog_marker_inline_mention_false()
+    {
+        // Documentation that explains the marker syntax (e.g. the recent-updates
+        // skill) mentions it inline, not as a standalone line; it must not be
+        // mistaken for an actual changelog-marker file.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("SKILL.md");
+        fs::write(&path, format!("- `UPDATES.md` contains a title, a short intro, and a `{}` marker line\n", CHANGELOG_MARKER)).unwrap();
+        assert!(file_contains_changelog_marker(&path) == false);
+    }
+
+    // -- is_changelog_protected --
+
+    #[test]
+    fn test_is_changelog_protected_marker_present_true()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("UPDATES.md");
+        fs::write(&path, format!("# Log\n\n{}\n\n### entry\n", CHANGELOG_MARKER)).unwrap();
+        assert!(is_changelog_protected(&path) == true);
+    }
+
+    #[test]
+    fn test_is_changelog_protected_marker_absent_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("plain.md");
+        fs::write(&path, "# Log\n\nno marker here\n").unwrap();
+        assert!(is_changelog_protected(&path) == false);
+    }
+
+    #[test]
+    fn test_is_changelog_protected_missing_file_false()
+    {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(is_changelog_protected(&dir.path().join("missing.md")) == false);
     }
 
     // -- load_template_config --
@@ -2229,6 +2381,7 @@ languages:
 "#;
         fs::write(dir.join("templates.yml"), yml)?;
         fs::write(dir.join("AGENTS.md"), TEMPLATE_BASE)?;
+        write_synthetic_agent_defaults(dir, &[("bogus", false, None), ("fake", true, None)])?;
         Ok(())
     }
 
@@ -2289,7 +2442,11 @@ languages:
     #[test]
     fn test_update_accepts_known_agent() -> anyhow::Result<()>
     {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
         let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
         write_minimal_templates_yml(config_dir.path())?;
 
         fs::create_dir_all(config_dir.path().join("bogus"))?;
@@ -2307,7 +2464,8 @@ languages:
         };
 
         let result = engine.update(&options);
-        assert!(result.is_ok() == true);
+        let _ = std::env::set_current_dir(&original_cwd);
+        assert!(result.is_ok() == true, "{:?}", result.err());
         Ok(())
     }
 
@@ -2693,7 +2851,7 @@ languages:
         fs::write(&source, "# Skill")?;
         let source_sha = FileTracker::calculate_sha256(&source)?;
 
-        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new() }];
+        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new(), category: "skill".to_string() }];
         let plan = PreflightPlan {
             files: vec![PlannedFileAction {
                 index:      0,

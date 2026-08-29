@@ -12,7 +12,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, model_defaults};
+use crate::{Result, model_defaults, model_defaults::ModelCatalog};
 
 // ── Test injection hooks ─────────────────────────────────────────────────────
 
@@ -78,20 +78,11 @@ impl Provider
 
     /// Returns the environment variable name that holds the API key for this provider
     ///
-    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
-    fn api_key_env_var(&self) -> Option<&'static str>
+    /// Reads from a specific model defaults catalog. Returns `None` if the
+    /// provider is not in the catalog or requires no key (Ollama).
+    fn api_key_env_var<'a>(&self, catalog: &'a ModelCatalog) -> Option<&'a str>
     {
-        if let Some(env_var) = model_defaults::get_api_key_env(self.name())
-        {
-            return Some(env_var);
-        }
-        match self
-        {
-            | Self::OpenAi => Some("OPENAI_API_KEY"),
-            | Self::Anthropic => Some("ANTHROPIC_API_KEY"),
-            | Self::Ollama => None,
-            | Self::Mistral => Some("MISTRAL_API_KEY")
-        }
+        model_defaults::get_api_key_env_from_catalog(catalog, self.name())
     }
 
     /// Detects a provider by checking which API key environment variables are set
@@ -99,13 +90,13 @@ impl Provider
     /// Checks in order: Anthropic, OpenAI, Mistral. Returns the first provider
     /// whose API key is present in the environment. Ollama is not auto-detected
     /// because it requires no key (would always match).
-    pub fn detect_from_env() -> Option<Self>
+    pub fn detect_from_env(catalog: &ModelCatalog) -> Option<Self>
     {
         let candidates = [Self::Anthropic, Self::OpenAi, Self::Mistral];
 
         for provider in candidates
         {
-            if let Some(env_var) = provider.api_key_env_var() &&
+            if let Some(env_var) = provider.api_key_env_var(catalog) &&
                 env::var(env_var).is_ok() == true
             {
                 return Some(provider);
@@ -127,58 +118,37 @@ impl Provider
         }
     }
 
-    /// Returns the default model for this provider
+    /// Returns the default model for this provider from a specific catalog
     ///
-    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
-    pub fn default_model(&self) -> &'static str
+    /// # Errors
+    ///
+    /// Returns an error if the provider has no default model configured.
+    fn default_model<'a>(&self, catalog: &'a ModelCatalog) -> Result<&'a str>
     {
-        if let Some(model) = model_defaults::get_default_model(self.name())
-        {
-            return model;
-        }
-        match self
-        {
-            | Self::OpenAi => "gpt-4.1",
-            | Self::Anthropic => "claude-sonnet-4-6",
-            | Self::Ollama => "llama3.2",
-            | Self::Mistral => "mistral-large-latest"
-        }
+        model_defaults::get_default_model_from_catalog(catalog, self.name())
+            .ok_or_else(|| anyhow::anyhow!("no default model configured for provider '{}'; run slopctl templates --update", self.name()))
     }
 
-    /// Returns the base API endpoint URL for chat completions
+    /// Returns the base API endpoint URL for chat completions from a specific catalog
     ///
-    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
-    fn endpoint(&self) -> &'static str
+    /// # Errors
+    ///
+    /// Returns an error if the provider has no endpoint configured.
+    fn endpoint<'a>(&self, catalog: &'a ModelCatalog) -> Result<&'a str>
     {
-        if let Some(ep) = model_defaults::get_endpoint(self.name())
-        {
-            return ep;
-        }
-        match self
-        {
-            | Self::OpenAi => "https://api.openai.com/v1/chat/completions",
-            | Self::Anthropic => "https://api.anthropic.com/v1/messages",
-            | Self::Ollama => "http://localhost:11434/api/chat",
-            | Self::Mistral => "https://api.mistral.ai/v1/chat/completions"
-        }
+        model_defaults::get_endpoint_from_catalog(catalog, self.name())
+            .ok_or_else(|| anyhow::anyhow!("no endpoint configured for provider '{}'; run slopctl templates --update", self.name()))
     }
 
-    /// Returns the API endpoint URL for listing available models
+    /// Returns the API endpoint URL for listing available models from a specific catalog
     ///
-    /// Reads from the model defaults catalog first, then falls back to compile-time defaults.
-    pub fn models_endpoint(&self) -> &'static str
+    /// # Errors
+    ///
+    /// Returns an error if the provider has no models endpoint configured.
+    fn models_endpoint<'a>(&self, catalog: &'a ModelCatalog) -> Result<&'a str>
     {
-        if let Some(ep) = model_defaults::get_models_endpoint(self.name())
-        {
-            return ep;
-        }
-        match self
-        {
-            | Self::OpenAi => "https://api.openai.com/v1/models",
-            | Self::Anthropic => "https://api.anthropic.com/v1/models",
-            | Self::Ollama => "http://localhost:11434/api/tags",
-            | Self::Mistral => "https://api.mistral.ai/v1/models"
-        }
+        model_defaults::get_models_endpoint_from_catalog(catalog, self.name())
+            .ok_or_else(|| anyhow::anyhow!("no models_endpoint configured for provider '{}'; run slopctl templates --update", self.name()))
     }
 }
 
@@ -207,10 +177,12 @@ pub struct ChatResponse
 /// Client for making LLM API calls
 pub struct LlmClient
 {
-    provider: Provider,
-    model:    String,
-    api_key:  Option<String>,
-    http:     reqwest::blocking::Client
+    provider:        Provider,
+    model:           String,
+    api_key:         Option<String>,
+    endpoint:        String,
+    models_endpoint: String,
+    http:            reqwest::blocking::Client
 }
 
 impl std::fmt::Debug for LlmClient
@@ -226,19 +198,22 @@ impl LlmClient
     /// Creates a new LLM client for the given provider and model
     ///
     /// Reads the API key from the appropriate environment variable.
-    /// Ollama does not require an API key.
+    /// Ollama does not require an API key. Resolves the model, endpoint, and
+    /// models-listing endpoint from the given model defaults catalog.
     ///
     /// # Arguments
     ///
     /// * `provider` - The LLM provider to use
     /// * `model` - Optional model override; uses provider default if None
+    /// * `catalog` - Model defaults catalog to resolve endpoints/model from
     ///
     /// # Errors
     ///
-    /// Returns an error if a required API key is not set in the environment
-    pub fn new(provider: Provider, model: Option<&str>) -> Result<Self>
+    /// Returns an error if the provider has no endpoint/default model
+    /// configured, or if a required API key is not set in the environment
+    pub fn new(provider: Provider, model: Option<&str>, catalog: &ModelCatalog) -> Result<Self>
     {
-        let api_key = if let Some(env_var) = provider.api_key_env_var()
+        let api_key = if let Some(env_var) = provider.api_key_env_var(catalog)
         {
             let key = env::var(env_var).map_err(|_| anyhow::anyhow!("{} environment variable not set\nSet it with: export {}=<your-key>", env_var, env_var))?;
             Some(key)
@@ -248,11 +223,17 @@ impl LlmClient
             None
         };
 
-        let model_name = model.unwrap_or(provider.default_model()).to_string();
+        let model_name = match model
+        {
+            | Some(m) => m.to_string(),
+            | None => provider.default_model(catalog)?.to_string()
+        };
+        let endpoint = provider.endpoint(catalog)?.to_string();
+        let models_endpoint = provider.models_endpoint(catalog)?.to_string();
 
         let http = reqwest::blocking::Client::builder().user_agent("slopctl").connect_timeout(Duration::from_secs(30)).timeout(Duration::from_secs(300)).build()?;
 
-        Ok(Self { provider, model: model_name, api_key, http })
+        Ok(Self { provider, model: model_name, api_key, endpoint, models_endpoint, http })
     }
 
     /// Sends a chat completion request and returns the response with usage metadata
@@ -326,7 +307,7 @@ impl LlmClient
     /// Lists models via the OpenAI-compatible `/v1/models` endpoint (OpenAI, Mistral)
     fn list_models_openai_compatible(&self) -> Result<Vec<String>>
     {
-        let mut request = self.http.get(self.provider.models_endpoint());
+        let mut request = self.http.get(&self.models_endpoint);
 
         if let Some(ref key) = self.api_key
         {
@@ -355,8 +336,7 @@ impl LlmClient
     {
         let key = self.api_key.as_deref().ok_or_else(|| anyhow::anyhow!("Anthropic API key not set"))?;
 
-        let response =
-            self.http.get(self.provider.models_endpoint()).query(&[("limit", "1000")]).header("x-api-key", key).header("anthropic-version", "2023-06-01").send()?;
+        let response = self.http.get(&self.models_endpoint).query(&[("limit", "1000")]).header("x-api-key", key).header("anthropic-version", "2023-06-01").send()?;
 
         let status = response.status();
 
@@ -377,7 +357,7 @@ impl LlmClient
     /// Lists models via the Ollama `/api/tags` endpoint
     fn list_models_ollama(&self) -> Result<Vec<String>>
     {
-        let response = self.http.get(self.provider.models_endpoint()).send()?;
+        let response = self.http.get(&self.models_endpoint).send()?;
         let status = response.status();
 
         if status.is_success() == false
@@ -414,7 +394,7 @@ impl LlmClient
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
 
-        let mut request = self.http.post(self.provider.endpoint()).json(&body);
+        let mut request = self.http.post(&self.endpoint).json(&body);
 
         if let Some(ref key) = self.api_key
         {
@@ -519,7 +499,7 @@ impl LlmClient
 
         let response = self
             .http
-            .post(self.provider.endpoint())
+            .post(&self.endpoint)
             .header("x-api-key", key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
@@ -585,6 +565,39 @@ mod tests
 {
     use super::*;
 
+    /// Synthetic model catalog covering the real `Provider` enum's supported
+    /// providers, for tests exercising catalog-driven resolution against the
+    /// real provider names (`openai`, `anthropic`, `ollama`, `mistral`).
+    fn test_catalog() -> ModelCatalog
+    {
+        model_defaults::parse_model_catalog(
+            r#"
+version: 1
+providers:
+  - name: openai
+    api_key_env: OPENAI_API_KEY
+    endpoint: https://api.openai.com/v1/chat/completions
+    models_endpoint: https://api.openai.com/v1/models
+    default_model: test-openai-model
+  - name: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    endpoint: https://api.anthropic.com/v1/messages
+    models_endpoint: https://api.anthropic.com/v1/models
+    default_model: test-anthropic-model
+  - name: ollama
+    endpoint: http://localhost:11434/api/chat
+    models_endpoint: http://localhost:11434/api/tags
+    default_model: test-ollama-model
+  - name: mistral
+    api_key_env: MISTRAL_API_KEY
+    endpoint: https://api.mistral.ai/v1/chat/completions
+    models_endpoint: https://api.mistral.ai/v1/models
+    default_model: test-mistral-model
+"#
+        )
+        .expect("synthetic model catalog should parse")
+    }
+
     #[test]
     fn test_provider_from_name_valid()
     {
@@ -606,30 +619,31 @@ mod tests
     #[test]
     fn test_provider_default_model()
     {
-        // Defaults come from the model-defaults catalog (embedded or cached).
-        // Verify that each provider returns a non-empty string.
-        assert!(Provider::OpenAi.default_model().is_empty() == false);
-        assert!(Provider::Anthropic.default_model().is_empty() == false);
-        assert!(Provider::Ollama.default_model().is_empty() == false);
-        assert!(Provider::Mistral.default_model().is_empty() == false);
+        let catalog = test_catalog();
+        assert!(Provider::OpenAi.default_model(&catalog).expect("configured").is_empty() == false);
+        assert!(Provider::Anthropic.default_model(&catalog).expect("configured").is_empty() == false);
+        assert!(Provider::Ollama.default_model(&catalog).expect("configured").is_empty() == false);
+        assert!(Provider::Mistral.default_model(&catalog).expect("configured").is_empty() == false);
     }
 
     #[test]
     fn test_provider_api_key_env_var()
     {
-        assert_eq!(Provider::OpenAi.api_key_env_var(), Some("OPENAI_API_KEY"));
-        assert_eq!(Provider::Anthropic.api_key_env_var(), Some("ANTHROPIC_API_KEY"));
-        assert_eq!(Provider::Ollama.api_key_env_var(), None);
-        assert_eq!(Provider::Mistral.api_key_env_var(), Some("MISTRAL_API_KEY"));
+        let catalog = test_catalog();
+        assert_eq!(Provider::OpenAi.api_key_env_var(&catalog), Some("OPENAI_API_KEY"));
+        assert_eq!(Provider::Anthropic.api_key_env_var(&catalog), Some("ANTHROPIC_API_KEY"));
+        assert_eq!(Provider::Ollama.api_key_env_var(&catalog), None);
+        assert_eq!(Provider::Mistral.api_key_env_var(&catalog), Some("MISTRAL_API_KEY"));
     }
 
     #[test]
     fn test_provider_endpoint()
     {
-        assert!(Provider::OpenAi.endpoint().contains("openai.com") == true);
-        assert!(Provider::Anthropic.endpoint().contains("anthropic.com") == true);
-        assert!(Provider::Ollama.endpoint().contains("localhost") == true);
-        assert!(Provider::Mistral.endpoint().contains("mistral.ai") == true);
+        let catalog = test_catalog();
+        assert!(Provider::OpenAi.endpoint(&catalog).expect("configured").contains("openai.com") == true);
+        assert!(Provider::Anthropic.endpoint(&catalog).expect("configured").contains("anthropic.com") == true);
+        assert!(Provider::Ollama.endpoint(&catalog).expect("configured").contains("localhost") == true);
+        assert!(Provider::Mistral.endpoint(&catalog).expect("configured").contains("mistral.ai") == true);
     }
 
     #[test]
@@ -646,7 +660,7 @@ mod tests
     #[test]
     fn test_llm_client_new_ollama_no_key_required() -> anyhow::Result<()>
     {
-        let client = LlmClient::new(Provider::Ollama, None)?;
+        let client = LlmClient::new(Provider::Ollama, None, &test_catalog())?;
         assert_eq!(client.provider_name(), "ollama");
         assert!(client.model_name().is_empty() == false);
         Ok(())
@@ -655,7 +669,7 @@ mod tests
     #[test]
     fn test_llm_client_new_with_model_override() -> anyhow::Result<()>
     {
-        let client = LlmClient::new(Provider::Ollama, Some("codellama"))?;
+        let client = LlmClient::new(Provider::Ollama, Some("codellama"), &test_catalog())?;
         assert_eq!(client.model_name(), "codellama");
         Ok(())
     }
@@ -667,7 +681,7 @@ mod tests
         let saved = env::var("OPENAI_API_KEY").ok();
         unsafe { env::remove_var("OPENAI_API_KEY") };
 
-        let result = LlmClient::new(Provider::OpenAi, None);
+        let result = LlmClient::new(Provider::OpenAi, None, &test_catalog());
         assert!(result.is_err() == true);
         assert!(result.unwrap_err().to_string().contains("OPENAI_API_KEY") == true);
 
@@ -698,7 +712,7 @@ mod tests
         unsafe { env::remove_var("OPENAI_API_KEY") };
         unsafe { env::remove_var("MISTRAL_API_KEY") };
 
-        let detected = Provider::detect_from_env();
+        let detected = Provider::detect_from_env(&test_catalog());
         assert_eq!(detected, Some(Provider::Anthropic));
 
         // Restore
@@ -729,7 +743,7 @@ mod tests
         unsafe { env::set_var("OPENAI_API_KEY", "test-key") };
         unsafe { env::remove_var("MISTRAL_API_KEY") };
 
-        let detected = Provider::detect_from_env();
+        let detected = Provider::detect_from_env(&test_catalog());
         assert_eq!(detected, Some(Provider::OpenAi));
 
         // Restore
@@ -760,7 +774,7 @@ mod tests
         unsafe { env::remove_var("OPENAI_API_KEY") };
         unsafe { env::remove_var("MISTRAL_API_KEY") };
 
-        let detected = Provider::detect_from_env();
+        let detected = Provider::detect_from_env(&test_catalog());
         assert_eq!(detected, None);
 
         // Restore
@@ -781,9 +795,10 @@ mod tests
     #[test]
     fn test_provider_models_endpoint()
     {
-        assert_eq!(Provider::OpenAi.models_endpoint(), "https://api.openai.com/v1/models");
-        assert_eq!(Provider::Anthropic.models_endpoint(), "https://api.anthropic.com/v1/models");
-        assert_eq!(Provider::Ollama.models_endpoint(), "http://localhost:11434/api/tags");
-        assert_eq!(Provider::Mistral.models_endpoint(), "https://api.mistral.ai/v1/models");
+        let catalog = test_catalog();
+        assert_eq!(Provider::OpenAi.models_endpoint(&catalog).expect("configured"), "https://api.openai.com/v1/models");
+        assert_eq!(Provider::Anthropic.models_endpoint(&catalog).expect("configured"), "https://api.anthropic.com/v1/models");
+        assert_eq!(Provider::Ollama.models_endpoint(&catalog).expect("configured"), "http://localhost:11434/api/tags");
+        assert_eq!(Provider::Mistral.models_endpoint(&catalog).expect("configured"), "https://api.mistral.ai/v1/models");
     }
 }

@@ -112,7 +112,7 @@ impl TemplateManager
         let mut issues: Vec<String> = Vec::new();
 
         println!("{} Model defaults YAML", "→".blue());
-        let local_catalog = match model_defaults::load_cached_model_catalog_from_dir(&self.config_dir)
+        let local_catalog = match model_defaults::load_model_catalog_from_dir(&self.config_dir)
         {
             | Ok(catalog) =>
             {

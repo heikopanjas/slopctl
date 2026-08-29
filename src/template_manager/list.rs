@@ -1,6 +1,10 @@
 //! Template list command
 
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf}
+};
 
 use owo_colors::OwoColorize;
 
@@ -20,13 +24,75 @@ impl TemplateManager
         Ok(agent_defaults::detect_all_installed_agents_from_catalog(&catalog, workspace))
     }
 
+    /// Returns installed skill names from existing FileTracker entries.
+    fn tracked_skill_names(file_tracker: &FileTracker, workspace: &Path) -> BTreeSet<String>
+    {
+        file_tracker
+            .get_entries_by_category("skill")
+            .into_iter()
+            .filter_map(|(path, _)| {
+                let absolute = workspace.join(&path);
+                if absolute.exists() == true
+                {
+                    Self::extract_skill_name_from_path(&path)
+                }
+                else
+                {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Collects the deduplicated set of slopctl-managed workspace files
+    ///
+    /// Merges candidates from the Bill of Materials, the FileTracker, and the main
+    /// AGENTS.md path. Every candidate is canonicalized before deduplication so the
+    /// same file collected from different sources (BoM `./x`, tracker `x`, absolute
+    /// AGENTS.md) collapses to a single entry rather than surviving as distinct
+    /// spellings. Only files that exist on disk are included; the result is sorted.
+    fn collect_managed_files(current_dir: &Path, config_file: &Path, file_tracker: &FileTracker, agents_md_path: &Path) -> Vec<PathBuf>
+    {
+        let mut managed_files: Vec<PathBuf> = Vec::new();
+
+        if config_file.exists() == true &&
+            let Ok(bom) = BillOfMaterials::from_config(config_file)
+        {
+            for agent_name in bom.get_agent_names()
+            {
+                if let Some(files) = bom.get_agent_files(&agent_name)
+                {
+                    managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
+                }
+            }
+        }
+
+        for (path, _) in file_tracker.get_entries()
+        {
+            if path.exists() == true
+            {
+                managed_files.push(path);
+            }
+        }
+
+        if agents_md_path.exists() == true
+        {
+            managed_files.push(agents_md_path.to_path_buf());
+        }
+
+        let mut normalized: Vec<PathBuf> = managed_files.iter().map(|file| template_engine::normalize_path(&current_dir.join(file))).collect();
+        normalized.sort();
+        normalized.dedup();
+        normalized
+    }
+
     /// Show workspace status
     ///
     /// Displays the current state of slopctl in the project:
     /// - Global template status (downloaded, location)
     /// - AGENTS.md status (exists, customized)
     /// - Installed agents (detected by checking for their files)
-    /// - Installed skills (filesystem scan of agent skill dirs + FileTracker fallback)
+    /// - Installed skills (from FileTracker ownership records)
     /// - All slopctl managed files in current directory (verbose only)
     ///
     /// # Arguments
@@ -130,41 +196,7 @@ impl TemplateManager
             println!("  {} No languages installed", "○".yellow());
         }
 
-        // Detect installed skills by scanning workspace-scoped agent skill directories on disk,
-        // then merge in FileTracker entries for skills outside standard directories.
-        // Userprofile-based dirs are excluded from scanning; FileTracker below still
-        // picks up any userprofile skills that slopctl installed.
-        let userprofile = dirs::home_dir().unwrap_or_default();
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
-
-        let mut skill_names: BTreeSet<String> = BTreeSet::new();
-
-        for dir in &skill_search_dirs
-        {
-            if dir.exists() == true &&
-                let Ok(entries) = fs::read_dir(dir)
-            {
-                for entry in entries.flatten()
-                {
-                    if entry.path().is_dir() == true &&
-                        let Some(name) = entry.file_name().to_str()
-                    {
-                        skill_names.insert(name.to_string());
-                    }
-                }
-            }
-        }
-
-        let skill_entries = file_tracker.get_entries_by_category("skill");
-        for (path, _) in &skill_entries
-        {
-            if path.exists() == true &&
-                let Some(name) = Self::extract_skill_name_from_path(path)
-            {
-                skill_names.insert(name);
-            }
-        }
+        let skill_names = Self::tracked_skill_names(&file_tracker, &current_dir);
 
         if skill_names.is_empty() == false
         {
@@ -181,45 +213,18 @@ impl TemplateManager
 
         if verbose == true
         {
-            let mut managed_files: Vec<PathBuf> = Vec::new();
-
-            if config_file.exists() == true &&
-                let Ok(bom) = BillOfMaterials::from_config(&config_file)
-            {
-                for agent_name in bom.get_agent_names()
-                {
-                    if let Some(files) = bom.get_agent_files(&agent_name)
-                    {
-                        managed_files.extend(files.iter().filter(|f| f.exists()).cloned());
-                    }
-                }
-            }
-
-            let all_tracked = file_tracker.get_entries();
-            for (path, _) in all_tracked
-            {
-                if path.exists() == true
-                {
-                    managed_files.push(path);
-                }
-            }
-
-            if agents_md_path.exists() == true
-            {
-                managed_files.push(agents_md_path);
-            }
+            let managed_files = Self::collect_managed_files(&current_dir, &config_file, &file_tracker, &agents_md_path);
 
             println!();
 
-            managed_files.sort();
-            managed_files.dedup();
+            let canonical_dir = fs::canonicalize(&current_dir).unwrap_or_else(|_| current_dir.clone());
 
             if managed_files.is_empty() == false
             {
                 println!("{}", "Managed Files:".bold());
                 for file in &managed_files
                 {
-                    let display_path = file.strip_prefix(&current_dir).unwrap_or(file);
+                    let display_path = file.strip_prefix(&canonical_dir).unwrap_or(file);
                     println!("  • {}", display_path.display().to_string().yellow());
                 }
             }
@@ -410,7 +415,70 @@ impl TemplateManager
 #[cfg(test)]
 mod tests
 {
+    use std::path::PathBuf;
+
     use super::TemplateManager;
+    use crate::file_tracker::{AGENT_ALL, FileTracker, LANG_NONE};
+
+    #[test]
+    fn test_collect_managed_files_dedups_across_sources() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+
+        // templates.yml whose agent BoM yields a './'-prefixed workspace path.
+        std::fs::write(
+            config_dir.path().join("templates.yml"),
+            "version: 5\nmain:\n  source: AGENTS.md\n  target: '$workspace/AGENTS.md'\nagents:\n  bogus:\n    prompts:\n      - source: bogus/init.md\n        \
+             target: '$workspace/.bogus/commands/init.md'\nlanguages: {}\n"
+        )?;
+
+        // AGENTS.md and the agent file exist on disk and are tracked (relative keys).
+        let agents_md = workspace.path().join("AGENTS.md");
+        std::fs::write(&agents_md, "# Project\n")?;
+        let agent_file = workspace.path().join(".bogus/commands/init.md");
+        std::fs::create_dir_all(agent_file.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        std::fs::write(&agent_file, "# init\n")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&agents_md, "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
+        tracker.record_installation(&agent_file, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+
+        // agents_md_path is passed as an absolute path, matching list_workspace.
+        let collected = TemplateManager::collect_managed_files(workspace.path(), &config_dir.path().join("templates.yml"), &tracker, &agents_md);
+
+        let canonical_dir = std::fs::canonicalize(workspace.path())?;
+        let relative: Vec<PathBuf> = collected.iter().map(|p| p.strip_prefix(&canonical_dir).unwrap_or(p).to_path_buf()).collect();
+
+        let agents_md_count = relative.iter().filter(|p| p.as_os_str() == "AGENTS.md").count();
+        assert_eq!(agents_md_count, 1, "AGENTS.md must appear exactly once, got {:?}", relative);
+
+        let mut deduped = relative.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(deduped.len(), relative.len(), "managed files must contain no duplicate spellings: {:?}", relative);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_tracked_skill_names_ignores_untracked_empty_directories() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let empty_skill = workspace.path().join(".agents/skills/fake-stale-skill");
+        let tracked_skill = workspace.path().join(".agents/skills/fake-active-skill/SKILL.md");
+        std::fs::create_dir_all(&empty_skill)?;
+        std::fs::create_dir_all(tracked_skill.parent().ok_or_else(|| anyhow::anyhow!("missing skill parent"))?)?;
+        std::fs::write(&tracked_skill, "# Fake Active Skill")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&tracked_skill, "sha1".into(), 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+
+        let names = TemplateManager::tracked_skill_names(&tracker, workspace.path());
+
+        assert_eq!(names, ["fake-active-skill".to_string()].into_iter().collect());
+        Ok(())
+    }
 
     #[test]
     fn test_installed_agent_names_detects_marker_only_agent() -> anyhow::Result<()>

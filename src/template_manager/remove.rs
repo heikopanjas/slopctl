@@ -18,6 +18,26 @@ use crate::{
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
 
+/// Files selected for purge plus the preservation decisions for user-owned content
+struct PurgeTargets
+{
+    files:             Vec<PathBuf>,
+    agents_md_skipped: bool,
+    agents_md_path:    PathBuf,
+    changelog_skipped: Vec<PathBuf>
+}
+
+/// Splits removal candidates into (preserved changelog files, deletable files)
+///
+/// A candidate is preserved whenever it carries the changelog marker, regardless of
+/// `FileStatus`: keying on `Modified` alone misses a file whose tracker SHA was
+/// re-recorded by `merge`, which still holds a user-owned, append-only log below the
+/// marker that remove and purge operations must not delete.
+fn split_changelog_preserved(candidates: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>)
+{
+    candidates.into_iter().partition(|file| template_engine::file_contains_changelog_marker(file) == true)
+}
+
 impl TemplateManager
 {
     /// Remove agent-specific and/or language-specific files from the current directory
@@ -49,6 +69,7 @@ impl TemplateManager
         let mut files_to_remove: Vec<PathBuf> = Vec::new();
         let mut description_parts: Vec<String> = Vec::new();
         let mut dirs_to_cleanup: Vec<PathBuf> = Vec::new();
+        let mut agent_dirs: Vec<PathBuf> = Vec::new();
 
         // Collect agent files when agent or --all is requested.
         // Tries BoM first (templates.yml); falls back to FileTracker when the
@@ -69,6 +90,8 @@ impl TemplateManager
 
             if let Some(agent_name) = agent
             {
+                agent_dirs = Self::agent_workspace_dirs(&agent_catalog, agent_name, &current_dir);
+
                 let found_in_bom = if let Some(ref bom) = bom &&
                     bom.has_agent(agent_name) == true
                 {
@@ -83,17 +106,29 @@ impl TemplateManager
                     false
                 };
 
-                if found_in_bom == false
+                // Supplement with tracked files owned solely by this agent. Ownership is
+                // authoritative and catalog-free, so this also covers agents removed from
+                // templates.yml after installation. Shared entries (other owners remain)
+                // are not deletion candidates; their ownership is released tracker-wide
+                // after the removal loop.
+                let mut owner_matches = 0usize;
+                for (rel_path, meta) in file_tracker.get_entries()
+                {
+                    let abs_path = current_dir.join(&rel_path);
+                    if meta.has_agent(agent_name) == true &&
+                        meta.agent.len() == 1 &&
+                        meta.lang.is_empty() == true &&
+                        meta.category != "main" &&
+                        abs_path.exists() == true &&
+                        files_to_remove.contains(&abs_path) == false
+                    {
+                        files_to_remove.push(abs_path);
+                        owner_matches += 1;
+                    }
+                }
+                if found_in_bom == false && owner_matches > 0
                 {
                     println!("{} Agent '{}' not in templates.yml, using installation records", "→".blue(), agent_name.yellow());
-                    let agent_entries = file_tracker.get_entries_by_category("agent");
-                    for (path, _) in agent_entries
-                    {
-                        if path.exists() == true && Self::path_belongs_to_agent(&path, agent_name) == true
-                        {
-                            files_to_remove.push(path);
-                        }
-                    }
                 }
 
                 // Collect skill files under this agent's skill dir via filesystem scan
@@ -112,6 +147,7 @@ impl TemplateManager
                         {
                             if entry.path().is_dir() == true
                             {
+                                dirs_to_cleanup.push(entry.path());
                                 let mut skill_files = Vec::new();
                                 let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                 for f in skill_files
@@ -132,8 +168,12 @@ impl TemplateManager
                 for (rel_path, _) in skill_entries
                 {
                     let abs_path = current_dir.join(&rel_path);
-                    if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, agent_name) == true && files_to_remove.contains(&abs_path) == false
+                    if abs_path.exists() == true && Self::path_belongs_to_agent(&abs_path, &agent_dirs) == true && files_to_remove.contains(&abs_path) == false
                     {
+                        if let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                        {
+                            dirs_to_cleanup.push(skill_root);
+                        }
                         files_to_remove.push(abs_path);
                     }
                 }
@@ -161,6 +201,7 @@ impl TemplateManager
                             {
                                 if entry.path().is_dir() == true
                                 {
+                                    dirs_to_cleanup.push(entry.path());
                                     let mut skill_files = Vec::new();
                                     let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                     for f in skill_files
@@ -232,6 +273,7 @@ impl TemplateManager
                         {
                             if entry.path().is_dir() == true
                             {
+                                dirs_to_cleanup.push(entry.path());
                                 let mut skill_files = Vec::new();
                                 let _ = collect_files_recursive(&entry.path(), &mut skill_files);
                                 for f in skill_files
@@ -253,6 +295,10 @@ impl TemplateManager
                     let abs_path = current_dir.join(&rel_path);
                     if abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                     {
+                        if let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                        {
+                            dirs_to_cleanup.push(skill_root);
+                        }
                         files_to_remove.push(abs_path);
                     }
                 }
@@ -303,6 +349,7 @@ impl TemplateManager
                             let candidate = search_dir.join(skill_name);
                             if candidate.is_dir() == true
                             {
+                                dirs_to_cleanup.push(candidate.clone());
                                 let mut skill_files = Vec::new();
                                 collect_files_recursive(&candidate, &mut skill_files)?;
                                 for f in skill_files
@@ -335,6 +382,11 @@ impl TemplateManager
                 let abs_path = current_dir.join(&rel_path);
                 if meta.has_lang(lang_name) == true && meta.category != "main" && abs_path.exists() == true && files_to_remove.contains(&abs_path) == false
                 {
+                    if meta.category == "skill" &&
+                        let Some(skill_root) = Self::skill_root_from_path(&abs_path)
+                    {
+                        dirs_to_cleanup.push(skill_root);
+                    }
                     files_to_remove.push(abs_path);
                 }
             }
@@ -345,9 +397,18 @@ impl TemplateManager
         files_to_remove.sort();
         files_to_remove.dedup();
 
+        // Preserve user-owned changelog files regardless of how they were collected:
+        // their log history is not stale template state.
+        let (changelog_kept, deletable) = split_changelog_preserved(files_to_remove);
+        files_to_remove = deletable;
+
+        dirs_to_cleanup.sort_by(|left, right| right.components().count().cmp(&left.components().count()).then_with(|| left.cmp(right)));
+        dirs_to_cleanup.dedup();
+        dirs_to_cleanup.retain(|dir| dir.exists() == true);
+
         let description = description_parts.join(", ");
 
-        if files_to_remove.is_empty() == true
+        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true && changelog_kept.is_empty() == true
         {
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
@@ -360,6 +421,11 @@ impl TemplateManager
             for file in &files_to_remove
             {
                 println!("  {} {}", "●".red(), file.display());
+            }
+
+            for file in &changelog_kept
+            {
+                println!("  {} {} (kept - log entries preserved)", "○".yellow(), file.display());
             }
 
             for dir in &dirs_to_cleanup
@@ -410,7 +476,7 @@ impl TemplateManager
             // like Claude; the tracker records them as lang-owned, so is_unreferenced()
             // stays false. We force-delete by physical location so the agent directory
             // is fully cleaned up and status no longer reports the agent as installed.
-            let in_agent_dir = has_agent_target == true && agent.is_some_and(|a| Self::path_belongs_to_agent(file, a));
+            let in_agent_dir = has_agent_target == true && Self::path_belongs_to_agent(file, &agent_dirs) == true;
             let should_remove = remove_all == true || in_agent_dir == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
 
             if should_remove == true
@@ -435,17 +501,22 @@ impl TemplateManager
             }
         }
 
+        for file in &changelog_kept
+        {
+            println!("{} Kept {} (log entries preserved)", "→".blue(), file.display().to_string().yellow());
+        }
+
         // Main AGENTS.md stays on disk during normal remove operations, so release
         // ownership there explicitly even when it was not in the deletion candidate list.
         if has_lang_target == true
         {
             let lang_name = lang.unwrap();
-            file_tracker.clear_lang_for_category(lang_name, "main");
+            file_tracker.clear_lang_owner(lang_name);
         }
         if has_agent_target == true
         {
             let agent_name = agent.unwrap();
-            file_tracker.clear_agent_for_category(agent_name, "main");
+            file_tracker.clear_agent_owner(agent_name);
         }
 
         file_tracker.save()?;
@@ -482,9 +553,9 @@ impl TemplateManager
         let current_dir = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&current_dir);
 
-        let (files_to_purge, agents_md_skipped, agents_md_path) = self.collect_purge_targets(&current_dir, force)?;
+        let PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped } = self.collect_purge_targets(&current_dir, force)?;
 
-        if files_to_purge.is_empty() == true && agents_md_skipped == false
+        if files_to_purge.is_empty() == true && agents_md_skipped == false && changelog_skipped.is_empty() == true
         {
             println!("{} No slopctl files found to purge", "→".blue());
             return Ok(());
@@ -502,6 +573,11 @@ impl TemplateManager
             if agents_md_skipped == true
             {
                 println!("  {} {} (skipped - customized, use --force)", "○".yellow(), agents_md_path.display());
+            }
+
+            for file in &changelog_skipped
+            {
+                println!("  {} {} (skipped - log entries preserved, use --force)", "○".yellow(), file.display());
             }
 
             println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -551,6 +627,11 @@ impl TemplateManager
             println!("{} Use --force to delete it anyway", "→".yellow());
         }
 
+        for file in &changelog_skipped
+        {
+            println!("{} {} contains user log entries and was not deleted; use --force to delete it anyway", "→".yellow(), file.display());
+        }
+
         if purged_count == 0
         {
             println!("{} No slopctl files found to purge", "→".blue());
@@ -570,13 +651,14 @@ impl TemplateManager
     /// deduplicates them, then resolves the AGENTS.md handling: if AGENTS.md is
     /// customized and `force` is false it is removed from the list and
     /// `agents_md_skipped` is set; otherwise it is added if not already present.
-    ///
-    /// Returns `(files_to_purge, agents_md_skipped, agents_md_path)`.
+    /// Tracked, locally modified files carrying the changelog marker are likewise
+    /// moved to `changelog_skipped` unless `force` is true, so user-owned log
+    /// entries survive a purge.
     ///
     /// # Errors
     ///
     /// Returns an error if reading AGENTS.md fails.
-    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<(Vec<PathBuf>, bool, PathBuf)>
+    fn collect_purge_targets(&self, current_dir: &Path, force: bool) -> Result<PurgeTargets>
     {
         let mut files_to_purge: Vec<PathBuf> = Vec::new();
 
@@ -664,18 +746,54 @@ impl TemplateManager
             }
         }
 
-        Ok((files_to_purge, agents_md_skipped, agents_md_path))
+        // Preserve user-owned changelog files (marker present); --force overrides.
+        let mut changelog_skipped: Vec<PathBuf> = Vec::new();
+        if force == false
+        {
+            let (skipped, kept) = split_changelog_preserved(files_to_purge);
+            files_to_purge = kept;
+            changelog_skipped = skipped;
+        }
+
+        Ok(PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped })
     }
 
-    /// Check if a file path belongs to a specific agent's directory tree
+    /// Collects the workspace directories that belong to an agent
     ///
-    /// Matches paths containing the agent name in a directory component.
-    fn path_belongs_to_agent(path: &std::path::Path, agent_name: &str) -> bool
+    /// Returns the agent's marker directories plus its workspace-scoped skill and
+    /// prompt directories from the catalog. Agents absent from the catalog yield an
+    /// empty list; their files are removed via owner-based selection instead.
+    fn agent_workspace_dirs(catalog: &agent_defaults::AgentCatalog, agent_name: &str, workspace: &Path) -> Vec<PathBuf>
     {
-        let agent_dir_patterns = [format!(".{}/", agent_name), format!(".{}\\", agent_name), format!("/{}/", agent_name), format!("\\{}\\", agent_name)];
+        let userprofile = dirs::home_dir().unwrap_or_default();
+        let mut dirs_list = agent_defaults::get_workspace_marker_dirs_from_catalog(catalog, agent_name, workspace);
+        for raw in
+            [agent_defaults::get_skill_dir_from_catalog(catalog, agent_name), agent_defaults::get_prompt_dir_from_catalog(catalog, agent_name)].into_iter().flatten()
+        {
+            if raw.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
+            {
+                let resolved = resolve_placeholder_path(raw, workspace, &userprofile);
+                if dirs_list.contains(&resolved) == false
+                {
+                    dirs_list.push(resolved);
+                }
+            }
+        }
+        dirs_list
+    }
 
-        let path_str = path.to_string_lossy();
-        agent_dir_patterns.iter().any(|pattern| path_str.contains(pattern))
+    /// Check if a file path lives inside one of the agent's workspace directories
+    ///
+    /// Matches by path prefix against the precomputed directory list (never by
+    /// substring), so path components elsewhere that happen to equal the agent
+    /// name cannot cause false positives.
+    fn path_belongs_to_agent(path: &std::path::Path, agent_dirs: &[PathBuf]) -> bool
+    {
+        let canonical_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        agent_dirs.iter().any(|dir| {
+            let canonical_dir = fs::canonicalize(dir).unwrap_or_else(|_| dir.clone());
+            path.starts_with(dir) == true || canonical_path.starts_with(&canonical_dir) == true
+        })
     }
 }
 
@@ -684,11 +802,12 @@ mod tests
 {
     use std::{fs, path::PathBuf};
 
-    use super::TemplateManager;
+    use super::{PurgeTargets, TemplateManager};
     use crate::{
         agent_defaults::AGENT_DEFAULTS_FILE,
         bom::BillOfMaterials,
         file_tracker::{AGENT_ALL, FileTracker, LANG_NONE},
+        template_engine,
         template_manager::cwd_test_guard
     };
 
@@ -710,32 +829,46 @@ mod tests
         Ok(())
     }
 
+    fn bogus_agent_dirs() -> Vec<PathBuf>
+    {
+        vec![PathBuf::from("/home/user/project/.bogus"), PathBuf::from("/home/user/project/.bogus/skills")]
+    }
+
     #[test]
     fn test_path_belongs_to_bogus()
     {
         let path = PathBuf::from("/home/user/project/.bogus/skills/my-skill/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == true);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == true);
     }
 
     #[test]
-    fn test_path_belongs_to_fake()
+    fn test_path_does_not_belong_to_other_agent_dirs()
     {
         let path = PathBuf::from("/home/user/project/.fake/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == true);
-    }
-
-    #[test]
-    fn test_path_does_not_belong_to_wrong_agent()
-    {
-        let path = PathBuf::from("/home/user/project/.bogus/skills/foo/SKILL.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "fake") == false);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == false);
     }
 
     #[test]
     fn test_path_no_agent_directory()
     {
         let path = PathBuf::from("/home/user/project/AGENTS.md");
-        assert!(TemplateManager::path_belongs_to_agent(&path, "bogus") == false);
+        assert!(TemplateManager::path_belongs_to_agent(&path, &bogus_agent_dirs()) == false);
+    }
+
+    #[test]
+    fn test_path_with_agent_named_ancestor_does_not_match()
+    {
+        // A path component equal to the agent name outside its dirs must not match.
+        let path = PathBuf::from("/home/bogus/project/.agents/skills/foo/SKILL.md");
+        let dirs = vec![PathBuf::from("/home/bogus/project/.bogus"), PathBuf::from("/home/bogus/project/.bogus/skills")];
+        assert!(TemplateManager::path_belongs_to_agent(&path, &dirs) == false);
+    }
+
+    #[test]
+    fn test_path_belongs_with_empty_dirs_is_false()
+    {
+        let path = PathBuf::from("/home/user/project/.bogus/skills/foo/SKILL.md");
+        assert!(TemplateManager::path_belongs_to_agent(&path, &[]) == false);
     }
 
     #[test]
@@ -838,6 +971,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let stale_file = workspace.path().join(".rpp-legacy.toml");
         fs::write(&stale_file, "legacy = true")?;
@@ -865,6 +999,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let shared_file = workspace.path().join(".gitignore");
         fs::write(&shared_file, "target/\n")?;
@@ -933,6 +1068,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: skills/rpp-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/rpp-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -958,11 +1094,15 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# Fake Remote Skill")?;
+        let nested_file = skill_dir.join("references/guides/topic.md");
+        fs::create_dir_all(nested_file.parent().ok_or_else(|| anyhow::anyhow!("missing nested skill parent"))?)?;
+        fs::write(&nested_file, "# Topic")?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -971,6 +1111,31 @@ mod tests
         manager.remove(None, Some("Rust++"), true, false)?;
 
         assert!(skill_file.exists() == false, "untracked URL skill must be removed using the source path's skill name");
+        assert!(nested_file.exists() == false);
+        assert!(skill_dir.exists() == false, "empty skill root must be removed after its nested files");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_removes_empty_url_skill_root() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
+
+        let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
+        fs::create_dir_all(&skill_dir)?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(None, Some("Rust++"), true, false)?;
+
+        assert!(skill_dir.exists() == false, "empty skill root must be removed even when it contains no files");
         Ok(())
     }
 
@@ -1014,6 +1179,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         // Place an untracked skill in the cross-client directory
         let skill_dir = workspace.path().join(".agents/skills/my-skill");
@@ -1044,6 +1210,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1089,6 +1256,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/my-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -1111,6 +1279,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         // Track an agent file; purge should delete it without scanning userprofile skills.
         let agent_file = workspace.path().join(".bogus/instructions.md");
@@ -1137,6 +1306,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let agents_md = workspace.path().join("AGENTS.md");
         fs::write(&agents_md, "# My customized instructions\n")?;
@@ -1150,16 +1320,70 @@ mod tests
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
 
-        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), false)?;
+        let PurgeTargets { files, agents_md_skipped: skipped, .. } = manager.collect_purge_targets(workspace.path(), false)?;
         assert!(skipped == true, "customized AGENTS.md should be flagged as skipped");
         let agents_md_canonical = fs::canonicalize(&agents_md)?;
         let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
         assert!(queued == false, "customized AGENTS.md must not appear in files_to_purge");
 
-        let (files, skipped, _) = manager.collect_purge_targets(workspace.path(), true)?;
+        let PurgeTargets { files, agents_md_skipped: skipped, .. } = manager.collect_purge_targets(workspace.path(), true)?;
         assert!(skipped == false);
         let queued = files.iter().any(|f| fs::canonicalize(f).map(|c| c == agents_md_canonical).unwrap_or(false));
         assert!(queued == true, "with --force AGENTS.md must be queued for deletion");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_skips_modified_changelog_marker_file() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
+
+        // Tracked with a stale SHA so the file reads as Modified; the marker
+        // means the local changes are user-owned log entries.
+        let updates = workspace.path().join("UPDATES.md");
+        fs::write(&updates, format!("# Log\n\n{}\n\n### 2026-01-01 (v1.0.0, entry)\n\n- user entry\n", template_engine::CHANGELOG_MARKER))?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&updates, "stale-sha".into(), 5, LANG_NONE.into(), "all".into(), "integration".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        let targets = manager.collect_purge_targets(workspace.path(), false)?;
+        assert!(targets.changelog_skipped.iter().any(|f| f.ends_with("UPDATES.md")) == true, "modified changelog file must be reported as skipped");
+        assert!(targets.files.iter().any(|f| f.ends_with("UPDATES.md")) == false, "skipped changelog file must not be queued for deletion");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_purge_force_queues_modified_changelog_marker_file() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
+
+        let updates = workspace.path().join("UPDATES.md");
+        fs::write(&updates, format!("# Log\n\n{}\n\n### 2026-01-01 (v1.0.0, entry)\n\n- user entry\n", template_engine::CHANGELOG_MARKER))?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&updates, "stale-sha".into(), 5, LANG_NONE.into(), "all".into(), "integration".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        let targets = manager.collect_purge_targets(workspace.path(), true)?;
+        assert!(targets.changelog_skipped.is_empty() == true, "with --force no changelog file is skipped");
+        assert!(targets.files.iter().any(|f| f.ends_with("UPDATES.md")) == true, "with --force the changelog file must be queued for deletion");
 
         Ok(())
     }

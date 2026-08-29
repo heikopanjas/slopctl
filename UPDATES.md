@@ -1,0 +1,1794 @@
+# Recent Updates & Decisions
+
+This file is the append-only log of slopctl project decisions and notable changes, maintained by coding agents following the `recent-updates` skill. Everything below the marker line is user-owned history: slopctl never overwrites it during init or merge.
+
+<!-- {changelog} -->
+
+### 2026-08-29 15:29 (v23.1.2, add shell language for bash/zsh conventions)
+
+- added a `shell` language to the catalog in the sibling `slopctl-templates`
+  repo: `templates/templates.yml` gained a `shell:` entry between `rust` and
+  `swift`, with a new `shell-skills-hint.md` fragment and two new skills,
+  `skills/shell-coding-conventions` and `skills/shell-build-commands`
+- `shell` ships no `.editorconfig`, unlike `c`/`rust`/`swift`; those three
+  templates differ byte-for-byte, and `preflight_installation`
+  (`src/template_engine.rs:1324-1352`) hard-fails when a new language owner
+  claims a shared target whose source content differs from what is tracked.
+  shell is the language most likely to be installed alongside another, so
+  giving it its own `.editorconfig` would make that collision the common
+  case rather than the rare one; `shfmt` settings are documented as flags
+  in the build-commands skill instead. Verified end-to-end: `init --lang
+  rust` followed by `init --lang shell` in the same workspace no longer
+  hits the preflight conflict, and `remove --lang shell` leaves rust's
+  files (including `.editorconfig`) untouched
+- the conventions themselves are derived from ~11,900 lines across 77
+  `fx-*.sh` scripts in `~/_repos/FX/` (a separate project, Python files
+  there excluded): strict mode (`set -euo pipefail`), the two-tier
+  help/argument-parsing shape, a three-value exit-code scheme (0/1/2), the
+  no-color `✓`/`✗`/`→` message vocabulary, `snake_case` variables, and a
+  `mktemp` + `trap ... EXIT` cleanup idiom, standardized to 2-space indent
+  and lowercase `error:` prefixes where the corpus itself was split
+- rationale: unlike that corpus, which is bash-only (`shopt`,
+  `BASH_REMATCH`, 0-based array indices, `${BASH_SOURCE[0]}`, unquoted
+  word-splitting), the new skill targets scripts portable to both bash and
+  zsh, and documents each bash-only idiom next to its portable replacement
+  rather than silently adopting or ignoring the incompatibility
+- updated this repo's `README.md` (supported-languages list, sample
+  `status` output, `--lang` example lists on `init` and `remove`) to
+  reflect `shell`; also fixed a stale Swift bullet that omitted the
+  `swift-testing-pro` skill already installed by `templates.yml:179`
+- no Rust source changed: `--lang` is a free-form `String` in `src/cli.rs`
+  with no `value_parser`, validated at runtime against `templates.yml`
+  keys, so adding a language is pure catalog data plus docs
+- version bump: 23.1.1 to 23.1.2 (PATCH - documentation update only; the
+  new language definition lives in the separate slopctl-templates repo,
+  not in this repo's Rust source)
+
+### 2026-08-29 15:09 (v23.1.1, document pi/kiro/goose/cline agent support)
+
+- added four agents to the catalog in the sibling `slopctl-templates` repo:
+  `defaults/agent-defaults.yml` gained `pi`, `kiro`, `goose`, `cline` entries,
+  and `templates/templates.yml` gained matching `agents:` keys; `pi`/`kiro`
+  get a native `init-session` prompt file (new `templates/pi/prompts/` and
+  `templates/kiro/prompts/`), `goose`/`cline` reuse the existing
+  `skills/init-session` skill, mirroring the codex/vibe/opencode pattern
+- `kiro` and `cline` are marked `reads_cross_client_skills: false` since
+  neither documents reading `.agents/skills/`, matching claude's native-only
+  skill-duplication path
+- updated this repo's `README.md` (supported-agents list, sample `status`
+  output, skill-directory reference table, cross-client/native-only agent
+  bullets) to reflect the four new agents; no Rust source changed, since
+  `--agent` and the catalog loader are already fully data-driven
+- rationale: `docs/coding-agent-config-locations-v3.md` documents 17+ coding
+  agents against a 6-agent catalog; pi, kiro, goose, and cline are the
+  subset that map onto the existing schema (home dir, project marker dir,
+  `skills/*/SKILL.md` convention) without special-casing
+- verified end-to-end with a local `agents --update`/`templates --update`
+  from the working copy, `agents --verify`/`templates --verify`, dry-run
+  `init` for all four agents, and a real `init --agent kiro` /
+  `remove --agent kiro --force` cycle in a scratch workspace
+- version bump: 23.1.0 to 23.1.1 (PATCH - documentation update only; the
+  new agent definitions live in the separate slopctl-templates repo, not
+  in this repo's Rust source)
+
+### 2026-08-29 (v23.1.0, fix update silently skipping missing agent files)
+
+- `slopctl update`/`update --agent <name>` no longer silently drops a missing
+  agent-category file (e.g. `CLAUDE.md`) that is untracked because an older
+  init/remove cycle deleted it from both disk and `tracker.yml`. The gate in
+  `update_full` (`src/template_manager/partial_update.rs`) asked a per-file
+  question (`tracker.get_metadata(target).is_some()`) where the real question
+  is per-agent: it now also creates the file when the owning agent has at
+  least one other tracker entry, via the new `may_create_missing` helper and
+  a hoisted `installed_agents` set from `FileTracker::get_installed_agents()`
+- refusals are now reported instead of dropped silently: a new
+  `agent_skipped: BTreeMap<String, usize>` accumulator feeds a new
+  `report_agent_skipped` helper (mirroring `report_skipped`/
+  `report_changelog_skipped`), wired into the up-to-date branch, the dry-run
+  preview, and the post-refresh branch; the "file(s) checked" count includes
+  the refused files
+- `update_full` now hard-errors when an explicit `--agent <name>` owns
+  nothing in the tracker ("Agent 'X' is not installed in this workspace. Use
+  'slopctl init --agent X' to install it.") instead of quietly resolving
+  scope and doing nothing for that agent. `effective_agent_scope` itself is
+  unchanged (its other callers, `update_partial` and `merge`, keep today's
+  behavior); the check is a short-circuit added at the top of `update_full`
+- rationale: an explicit `--agent` deliberately still does NOT authorize
+  creation on its own (only tracker ownership does) - that would turn
+  `update --agent <name>` into a de-facto `init` for a never-installed
+  agent, bypassing init's no-op guard and untracked-collision preflight, and
+  would contradict the verb separation already documented for `init` vs
+  `update`. `update --file`/`--skill` selectors remain intentionally
+  ungated - they are explicit per-file intent and already hard-error on an
+  unmatched selector rather than failing silently
+- added seven integration tests in `integration_tests.rs` covering: recreate
+  via bare `update` and via explicit `--agent`, discrimination against a
+  marker-only sibling agent, a newly catalogued file for an already-installed
+  agent, revocation after `remove --agent`, dry-run writing nothing, and the
+  new hard-error path; plus a `forget_tracker_entry` helper reproducing the
+  exact untracked-and-missing precondition
+- updated the `AGENTS.md` "File Tracker Ownership" bullet and the README
+  `update` section to describe the per-agent check, the report, and the new
+  error, replacing the now-inaccurate "never creates agent-category files
+  for agents that were not slopctl-installed" wording
+- verified end-to-end in this workspace: `slopctl update --agent claude`
+  previously reported success without creating `CLAUDE.md`; it now creates
+  it, and `tracker.yml` records `CLAUDE.md` with `agent: [claude]`,
+  `ref_count: 1`, `category: agent`
+- version bump: 23.0.0 to 23.1.0 (MINOR - beyond the fix, this adds a new
+  hard-error path and new stdout reporting to an existing command, not just
+  a corrected internal behavior)
+
+### 2026-08-29 (v23.0.0, point default catalog sources at develop)
+
+- repointed `DEFAULT_SOURCE_URL`, `DEFAULT_AGENTS_SOURCE_URL`, and
+  `DEFAULT_MODELS_SOURCE_URL` (and every doc reference to them) from
+  `slopctl-templates/tree/main/...` to `slopctl-templates/tree/develop/...`
+- rationale: `slopctl-templates` now follows this repo's own branch convention —
+  `develop` is where active work lands and is merged into `main` via PR (the user
+  pushed the templates-catalog commits to `develop` and merged that into `main`
+  through PR #1, mirroring how this repo's own `develop`/`main` split works)
+- no version bump: a source-URL correction within the same unreleased 23.0.0 line
+  of work, not new behavior
+
+### 2026-08-29 (v23.0.0, extract template catalog to slopctl-templates, relocate cache)
+
+- moved the entire `templates/` directory out of this repo into the separate
+  [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository, as
+  `templates/` at its root, so the binary's release cycle and the template catalog's can
+  version independently. Default catalog URL:
+  `https://github.com/heikopanjas/slopctl-templates/tree/main/templates`. That directory was
+  briefly named `v5/` before being renamed: `templates.yml`'s own `version:` field and header
+  comments already track the format's history, so the directory name doesn't need to repeat it
+- `agent-defaults.yml` and `model-defaults.yml` also moved out of this repo, into
+  `slopctl-templates`'s `defaults/` directory — a sibling of `templates/`, not nested inside it,
+  since they describe agent/provider conventions rather than the template format. reversed an
+  intermediate design (briefly landed as `resources/` in this repo, never pushed) after
+  establishing they don't need to stay: default source URLs become
+  `https://github.com/heikopanjas/slopctl-templates/tree/main/defaults`
+- the agent/model bootstrap fallback chains (`main.rs`, `bootstrap_agent_defaults_if_missing`
+  and `bootstrap_model_defaults_if_missing`) dropped their third candidate, which used to try
+  "the template source just used" — now that the defaults live in a different subpath of the
+  same repo as the catalog, that candidate would silently succeed by coincidence rather than by
+  design, which is worse than removing it; the now-unused `template_source` parameter was
+  removed from both function signatures
+- **removed the compile-time embedded fallback entirely** for both catalogs — no more
+  `include_str!`, no more `.expect("embedded ... catalog must be valid")` panic path. Both
+  `load_agent_catalog_from_dir`/`load_model_catalog_from_dir` now error cleanly when the cache
+  file is missing, pointing at `slopctl templates --update`. Consolidated with the
+  now-identical `load_cached_*_catalog_from_dir` variants (single caller each), rather than
+  keeping two functions with the same behavior
+- deleted the entire leaked-`'static`-registry layer built on top of the embed
+  (`DEFAULT_AGENT_DEFAULTS`/`DEFAULT_MODEL_DEFAULTS` `OnceLock`s, `default_agent_defaults()`,
+  `default_model_defaults()`, `leak_agent_defaults()`, `leak_model_defaults()`, and nine public
+  `agent_defaults` fns: `get_defaults`, `known_agents`, `get_skill_dir`,
+  `reads_cross_client_skills`, `get_effective_userprofile_skill_dir`,
+  `get_workspace_marker_dirs`, `detect_installed_agent`, `detect_all_installed_agents`,
+  `get_all_skill_search_dirs`, `get_workspace_skill_search_dirs`) — verified by grep that every
+  one had zero production callers outside their own module; the catalog-taking `*_from_catalog`
+  siblings already carried all real usage. Also dropped `file_tracker.rs`'s
+  `adopt_untracked_files()` wrapper (the one caller of the unconditional embedded-catalog path),
+  itself unreachable outside a test that already had a `_from_catalog` counterpart
+- **`llm.rs` is now catalog-authoritative for provider config**: deleted the four hardcoded
+  `match self { ... }` fallback blocks in `api_key_env_var`/`default_model`/`endpoint`/
+  `models_endpoint` — they were exact duplicates of `model-defaults.yml`, field for field, and
+  both copies had already drifted stale (`claude-sonnet-4-6` predates the Claude 5 family).
+  `Provider::detect_from_env` and `LlmClient::new` now take an explicit `&ModelCatalog`, loaded
+  once by the caller (`merge.rs`, `smart.rs`) from `self.config_dir` — not from a hardcoded
+  global-cache path inside `llm.rs`, which would have made `LlmClient`'s own tests depend on
+  whatever happened to be cached on the machine running them (and fail outright in CI, which has
+  no cache at all). `LlmClient` gained owned `endpoint`/`models_endpoint` String fields resolved
+  once at construction. `merge.rs`'s "Using provider: X (model)" status line moved from a
+  separate prediction before construction to printing the client's actual resolved values after
+  — one fewer place that could disagree with what's really being used
+- refreshed the stale provider defaults in `model-defaults.yml`: `openai` → `gpt-5.6-terra`
+  (`gpt-4.1` no longer appears in OpenAI's current model catalog), `anthropic` →
+  `claude-sonnet-5`. Left `mistral` (`mistral-large-latest` is a maintained, still-current
+  auto-updating alias) and `ollama` (`llama3.2` still pulls, no confidently-better default)
+  unchanged rather than guess
+- relocated the global template cache from a platform-specific data dir
+  (`~/Library/Application Support/slopctl/templates` on macOS, `~/.local/share/…` on Linux,
+  `%LOCALAPPDATA%\…` on Windows) to `${XDG_CACHE_HOME:-$HOME/.cache}/slopctl/templates` on
+  every platform, matching how `Config::get_global_path` already resolves config paths. added
+  `utils::global_cache_dir()` as the single implementation, replacing three independent
+  `dirs::data_local_dir()` call sites in `template_manager/mod.rs`, `agent_defaults.rs`, and
+  `model_defaults.rs`. no migration: existing caches at the old location are orphaned, and
+  `slopctl templates --update` regenerates the cache at the new path — the cache was always
+  fully regenerable, so nothing is lost, but every existing user needs to re-run it once
+- CI: removed the `templates` job (and its `needs:`) from both `build.yml` and `release.yml` —
+  it used to `zip -r slopctl-templates.zip templates/` and gate every downstream job. slopctl's
+  release artifacts are now binary + LICENSE only; `slopctl-templates` publishes its own
+  `slopctl-templates.zip` snapshot via its own `release.yml` on every push to `main`
+- rationale for a MAJOR bump: three independent breaking changes at once — the default source
+  moves (breaks anyone with `templates.uri` pinned at the old in-repo path), the cache
+  relocates (every user must re-run `slopctl templates --update`), and the
+  `slopctl-templates.zip` release asset leaves this repo's releases
+- version bump: 22.7.0 to 23.0.0 (MAJOR — removal/relocation of user-facing infrastructure,
+  requires user action)
+
+### 2026-08-29 (v22.7.0, drop .gitignore/.gitattributes from the template catalog)
+
+- removed `.gitignore` and `.gitattributes` from `templates/v5/templates.yml`: `shared.cmake.files`, `languages.rust.files`, and `languages.swift.files` no longer map anything to `.gitignore` (dropping it from `c`/`c++`/`swiftui` too, via `includes`); `integration.git.files` no longer maps `git-attributes-common.txt` to `.gitattributes`
+- rationale: project scaffolders (`cargo new`, `npm init`, `swift package init`, etc.) commonly generate their own `.gitignore` before `slopctl init` ever runs; `preflight_installation` then refuses with "target '...' already exists but is not tracked" (`template_engine.rs:1358`), the same friction hit earlier today restoring the agent instruction stubs over pre-existing `.cursorrules`/`copilot-instructions.md`. slopctl no longer needs to own these files at all
+- deleted the six now-unreferenced source files: `cmake-git-ignore.txt`, `rust-git-ignore.txt`, `swift-git-ignore.txt`, `git-attributes-common.txt`, plus `c-git-ignore.txt`/`c++-git-ignore.txt`, which were already orphaned (unreferenced in `templates.yml` since the `cmake` shared group superseded them, pre-dating this change)
+- no Rust changes: confirmed via full-repo grep that every `.gitignore`/`.gitattributes` reference in `src/` is inside `#[cfg(test)]` fixtures using synthetic names, never production code. `verify.rs`'s per-language duplicate-target exemption stays needed and unaffected — it still covers `.editorconfig` (c, c++, rust, swift) and `.clang-format` (c, c++)
+- updated the "shared ownership" example in `AGENTS.md` and the config-file lists/examples in `README.md` to stop citing `.gitignore`/`.gitattributes`, since neither remains a live example in the shipped catalog; swapped two README `--file`/integration examples that would otherwise reference a filename slopctl no longer manages. left the two illustrative *user-authored* catalog examples (README's "Example V5 structure" and "Example custom language: Elixir") alone — they demonstrate the general mechanism, not the shipped catalog, and the mechanism is unaffected
+- this repo's own `.gitignore`/`.gitattributes` stay on disk unchanged (both were byte-identical to their templates); untracked their `.slopctl/tracker.yml` entries by hand, since there is no `slopctl untrack` command and `remove` would have deleted the files, which was not the intent
+- version bump: 22.6.0 to 22.7.0 (MINOR - removes template outputs from every future `init`/`update`, changing what gets installed; no breaking Rust API change)
+
+### 2026-08-29 (v22.6.0, refresh agent-capabilities doc, restore three instruction stubs)
+
+- refreshed `docs/coding-agent-config-locations-v3.md` from the upstream `heikopanjas/agent-capabilities` reference (last verified here 2026-05-14, now 2026-08-27); grew from 6 to 17 documented agents. slopctl's own `### slopctl agent defaults` section is our addition, not upstream content, so it was re-appended rather than overwritten. kept the `-v3.md` filename: only historical UPDATES.md entries reference it, no code does, and renaming would strand those references
+- the refresh reversed a load-bearing fact: Claude Code does **not** natively read `AGENTS.md` (the documented mechanism is an `@AGENTS.md` import inside `CLAUDE.md`). this invalidates the removal rationale from `ff1ffbf` (v18.3.0), which read "all agents read AGENTS.md natively" and deleted the per-agent `CLAUDE.md`/`copilot-instructions.md`/`cursorrules` stubs on that basis — for Claude Code the stub was never a convenience, it was necessary, and v18.3.0 was wrong to remove it
+- restored all three stubs from **one shared template source**, `templates/v5/agent-instructions-stub.md` — the same slim pointer + `/init-session` guard that was byte-identical across all three before removal, so this answers v18.3.0's other stated reason ("stubs were identical boilerplate") directly instead of ignoring it. wired via `agents.<name>.instructions` in `templates.yml`: `claude` → `$workspace/CLAUDE.md`, `copilot` → `$workspace/.github/copilot-instructions.md`, `cursor` → `$workspace/.cursorrules`. no Rust changes: `AgentConfig.instructions` (`src/bom.rs`) stayed fully wired through `resolve_all_files`, `BillOfMaterials::from_config`, and `verify`, just unused in the v5 catalog until now
+- verified sharing one source across multiple targets is safe before relying on it: `verify.rs`'s duplicate-target check keys on the resolved target, not the source; `file_tracker.rs` never records a source path; `bom.rs` builds agent → target maps, so `remove --agent <name>` stays isolated per agent. `skills/init-session` already shares a source between `codex` and `vibe`, so this is a second instance of an existing, working pattern, not a new one
+- `.cursorrules` is chosen deliberately as an exact restore of what was removed, even though upstream now marks it deprecated-but-still-read; Cursor's current `.cursor/rules/*.mdc` mechanism requires per-rule YAML frontmatter and does not accept a plain shared stub, so it is not a drop-in replacement
+- corrected stale references to the removed stubs in `templates/v5/templates.yml` comments, `templates/v5/core-principles.md`, `AGENTS.md`, and `README.md`
+- `templates/v5/agent-defaults.yml`: flipped `vibe.reads_cross_client_skills` `false` → `true` — upstream now documents `.agents/skills/*/SKILL.md` under Vibe's project scope, and lists Vibe among the cross-client scanners. moves Vibe's language/top-level skill installs to `.agents/skills/`; Vibe's own `agents.vibe.skills` entry (`init-session`) is unaffected, since agent-specific skills always route through the agent's own `skill_dir` regardless of this flag. updated the three doc comments in `src/agent_defaults.rs` (`CROSS_CLIENT_SKILL_DIR`, the `reads_cross_client_skills` field, and the `reads_cross_client_skills()` function) and the README skill-directory table that named Vibe as native-only
+- also attempted, then reverted, repointing `codex.skill_dir`/`userprofile_skill_dir` at `.agents/skills` to match the same upstream change for Codex: `remove.rs`'s per-agent skill-dir filesystem scan (the block that catches untracked skills) has no ownership check at all — it lists every subdirectory under `skill_dir` and queues it for deletion. pointing `skill_dir` at the shared `.agents/skills` tree would make `slopctl remove --agent codex` sweep skills belonging to every other cross-client agent. codex's `skill_dir` stays `.codex/skills`, unchanged; only its agent-specific `init-session` skill still installs there, which was already true before this entry and is not itself a bug
+- caveat: existing workspaces will not pick up the new stubs from a plain `slopctl update` — agent-category files are only created by `update` when already tracked; users on claude, copilot, or cursor need to re-run `slopctl init --agent <name>` once. installs will also fail loudly where `.cursorrules` or `.github/copilot-instructions.md` already exist untracked, same as the existing `AGENTS.md`-already-exists guard
+- version bump: 22.5.8 to 22.6.0 (MINOR - new template files and a skill-routing behavior change for Vibe; no breaking change)
+
+### 2026-08-14 (v22.5.8, protect changelog-marker files like AGENTS.md)
+
+- fixed a silent data-loss bug: after `merge` re-records a changelog-marker file's (e.g. `UPDATES.md`) tracker SHA, the file read as `FileStatus::Unmodified` while still diverging from the template source, so `init --agent <other>` and plain `slopctl update` fell through to an unconditional overwrite and wiped the log with no flag involved. the `SkipModified` guard never fired because the file was never classified as `Modified`
+- changelog-marker files are now blocked in `init` and `update` (full or `--file`) under any flag, the same way `AGENTS.md` is blocked; `update --file UPDATES.md` is now a hard error pointing to `merge`. `merge` remains the only command that refreshes the template half above the marker; `remove --purge --force` keeps its documented ability to delete the file, matching `AGENTS.md`
+- added `template_engine::is_changelog_protected`, a new `PlannedFileActionKind::SkipChangelog`, and a matching guard in `partial_update.rs`'s full-refresh classifier; all key on the marker itself via `file_contains_changelog_marker`, never on `FileStatus`, which is what created the original gap
+- dropped the `FileStatus::Modified` conjunct from `remove.rs`'s `split_changelog_preserved`, closing the same post-merge hole in `remove --all`/`remove --purge` (no force)
+- fixed a second bug found while testing the above: `file_contains_changelog_marker` matched the marker as a raw substring anywhere in a file, so the `recent-updates` skill's own documentation (which shows the marker as literal example text) was mistaken for a real changelog file and silently failed to install for any newly added agent. tightened the check to require the marker on its own trimmed line
+- rationale: README.md already promised "init, update, and merge never overwrite" the log; the code did not match that promise. this closes the gap without requiring an LLM call for the common case (an unmerged template half plus a preserved log), at the cost of the template half also needing `merge` to refresh, same tradeoff already accepted for AGENTS.md
+- added integration coverage for the post-merge regression (init, update full with/without --force, remove --all) and unit coverage for the inline-mention false positive
+- version bump: 22.5.7 to 22.5.8 (PATCH - data-loss bug fix, no API change)
+
+### 2026-08-14 (v22.5.7, drop rustfmt required_version pin)
+
+- removed `required_version` from both `.rustfmt.toml` (this repo's dogfooded copy) and `templates/v5/rust-format-instructions.toml` (the canonical shipped template installed into every downstream workspace's rust language support)
+- rationale: `.rustfmt.toml` is a shared template, not a CI-only file; a hardcoded `required_version` breaks `cargo fmt` for any downstream user whose local rustfmt does not match exactly, since they do not get this repo's `rust-toolchain.toml`. it also desynced this workspace's tracked SHA from the template SHA, tripping the shared-ownership preflight check and blocking `slopctl update`/`init` on this repo's own rust language files
+- version safety for this repo's own CI is now handled solely by the `rust-toolchain.toml` pin added in v22.5.6; the two files no longer need a version assertion to stay in sync
+- documented in AGENTS.md that `required_version` (or any CI-environment-specific setting) must never be reintroduced into `.rustfmt.toml`
+- version bump: 22.5.6 to 22.5.7 (PATCH - template/config fix, no API change)
+
+### 2026-08-14 (v22.5.6, pin nightly toolchain to stop rustfmt drift)
+
+- added `rust-toolchain.toml` pinning `channel = "nightly-2026-08-12"` (rustfmt 1.10.0, clippy) so `rustup` and CI's `dtolnay/rust-toolchain` resolve the identical toolchain build
+- removed the explicit `toolchain: ${{ matrix.rust }}` input from the "Setup Rust toolchain" step in `build.yml` and `release.yml` so both workflows read the pinned channel from `rust-toolchain.toml` instead of a floating `nightly`
+- bumped `.rustfmt.toml` `required_version` 1.9.0 to 1.10.0 to match the pinned toolchain's shipped rustfmt
+- rationale: CI previously ran an unpinned `nightly` channel that silently updates over time, so its `rustfmt` version could drift ahead of the hardcoded `required_version`, breaking `cargo fmt --check` in CI with no local warning; pinning the toolchain makes local dev and CI always match, and future rustfmt bumps become a deliberate one-commit change (toolchain date + `required_version` together)
+- documented the pinning convention and bump procedure in AGENTS.md under a new "Toolchain Pinning" section
+- version bump: 22.5.5 to 22.5.6 (PATCH - CI/build config and doc update, no API change)
+
+### 2026-08-13 (v22.5.5, tool-agnostic versioning skill)
+
+- reworded `semantic-versioning` skill (template, installed `.claude` copy, and the orphaned `templates/v5/semantic-versioning.md` mirror) to reference the project's "version manifest" instead of hardcoding `Cargo.toml`
+- de-branded the remaining CLI-flavored bullets (commands/options, public interface) so the decision rules read correctly for any ecosystem
+- rationale: `semantic-versioning` is a top-level agent- and language-agnostic skill shipped to every workspace regardless of stack; C++/Swift/CMake workspaces were getting Rust-specific instructions
+- bumped skill frontmatter `metadata.version` 1.0 to 1.1
+- version bump: 22.5.4 to 22.5.5 (PATCH - template/doc content, no API change)
+
+### 2026-07-22 (v22.5.4, fix duplicate managed files in status)
+
+- `slopctl status --verbose` no longer lists AGENTS.md (and agent files) twice; candidates from the BoM ('./x'), FileTracker ('x'), and the absolute AGENTS.md path are now canonicalized before deduplication so different spellings of the same file collapse to one entry
+- extracted the collection into `collect_managed_files` and canonicalized the workspace dir for display stripping so symlinked workspaces still show relative paths
+- version bump: 22.5.3 to 22.5.4 (PATCH - status output bug fix)
+
+### 2026-07-22 (v22.5.3, local template update validation and feedback)
+
+- `templates --update --from <local path>` now validates that the source contains a parseable templates.yml before touching the cache (mirroring the URL path) and prints a completion line with the copied file count; previously it ended silently after "Copying templates from local path", which read as a no-op
+- `copy_dir_all` returns the number of files copied and skips macOS Finder junk (.DS_Store) so it no longer lands in the template cache or workspaces
+- investigation note: relative local paths always worked; APFS clonefile preserves source mtimes, which made a successful copy look stale
+- version bump: 22.5.2 to 22.5.3 (PATCH - validation guard and output fix)
+
+### 2026-07-22 (v22.5.2, README overhaul)
+
+- brought README.md up to date with the recent feature work: UPDATES.md log and recent-updates skill in the walkthrough and file trees, full-workspace update semantics, the already-initialized init guard, skip-modified behavior, merge multi-agent union and changelog preservation, remove ownership release and UPDATES.md preservation, and the skill-file selector hint
+- added the missing `models` subcommand section (undocumented since v21.0.0) and the `models.uri`/`models.fallbackUri` config keys
+- removed stale content: CLAUDE.md and .cursorrules instruction-stub references (obsolete since v18.3.0), the removed `list-models` command in the config precedence list, outdated model id examples, and the v20.0.0 footer
+- documented the `preamble` templates.yml section and its insertion marker; corrected the status example to plural installed languages and the current agent/language catalogs; added flate2/tar to the technology stack
+- version bump: 22.5.1 to 22.5.2 (PATCH - documentation update)
+
+### 2026-07-22 (v22.5.1, skill-file selector hint)
+
+- `slopctl update --file <path>` now recognizes when the requested path lives inside a skill directory and errors with a targeted hint naming the owning skill and the correct `--skill <name>` invocation, instead of the generic "No template match" listing
+- rationale: skill files are intentionally not addressable via `--file` (skills refresh as whole units so upstream-removed files get pruned), but the old error did not explain that
+- version bump: 22.5.0 to 22.5.1 (PATCH - error message improvement)
+
+### 2026-07-22 (v22.5.0, native-only agent audit fixes)
+
+- audit of the native-only agent measures (Claude Code, Vibe: `reads_cross_client_skills: false`) found ownership leaks, unsafe path matching, and scoping issues; this release fixes the correctness and scoping tiers
+- `remove --agent`/`remove --lang` now release the removed owner across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`); previously a native-only agent kept ownership of shared `.agents/skills/` copies forever, so `get_installed_agents()` still listed it and the no-op init guard wrongly rejected re-adding the agent
+- replaced `path_belongs_to_agent` substring matching with `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); a workspace path containing a component equal to an agent name could previously force-delete shared cross-client files during `remove --agent`
+- replaced the category-plus-path removal fallback with an owner-based sweep over tracked entries solely owned by the agent (catalog-free, absolute paths, no heuristics)
+- `update` no longer creates agent instruction or prompt files for agents detected only via their marker directory (e.g. `.claude/` created by Claude Code itself); marker presence still drives skill distribution
+- `merge` without `--agent` now unions the resolved content across all detected agents so every agent's native files participate; previously only a single agent was resolved and the `MergeOptions` doc claimed a fallback that did not exist
+- deferred (documented for future work): per-target-dir skill ownership so native-dir copies are owned by their agent, symmetric init hydration when adding a cross-client agent to a native-only workspace, and a doctor check for orphaned owners
+- version bump: 22.4.0 to 22.5.0 (MINOR - update/merge behavior changes plus bug fixes)
+
+### 2026-07-21 (v22.4.0, explicit update path and no-op re-init guard)
+
+- bare `slopctl update` (no `--file`/`--skill`) now performs a full workspace refresh: resolves every installed language and detected agent from the local cache, restores missing/deleted tracked files, overwrites unmodified ones, skips locally modified or untracked files with a report (`--force` overwrites), and prunes tracked skill files removed upstream; AGENTS.md is excluded and `merge` remains its update path
+- `slopctl init` now rejects a no-op re-init: when every requested `--lang`/`--agent` is already installed per the FileTracker, it errors with guidance pointing to `slopctl update`, `slopctl merge`, or `--force` to reinstall; adding anything new (e.g. a second agent) keeps working
+- rationale: init previously doubled as an implicit workspace refresh, which made update intent invisible; the verb separation is now explicit - init installs new, update refreshes, merge reconciles
+- added `FileTracker::get_installed_agents()` (tracker-based, since marker directories are created by agents themselves and do not prove a slopctl install)
+- new `update_full` in partial_update.rs shares scope resolution with `update_partial` via a common helper
+- version bump: 22.3.0 to 22.4.0 (MINOR - new CLI capability and new init guard; precedent v18.2.0)
+
+### 2026-07-21 (v22.3.0, authoritative tracker categories + non-blocking re-init)
+
+- FileTracker categories are now recorded from the templates.yml section a file resolves from, carried on the new `ResolvedFile.category` field; deleted all three path-substring heuristics (`planned_category` in template_engine.rs, `categorize_path` in merge.rs, `categorize_target` in partial_update.rs)
+- rationale: path-based guessing miscategorized files whenever the workspace path contained an installed agent's name (everything became "agent", so `remove --all` swept unrelated files including UPDATES.md) and classified `.github/copilot-instructions.md` as "integration" so the `remove --agent` tracker fallback missed it
+- generalized the v22.2.0 `SkipChangelog` preflight action to `SkipModified`: any tracked, locally modified target that adds no new owners is skipped (local version kept) instead of failing the whole init; fixes `init --agent <second>` erroring with "has local modifications" because of an unrelated edited file such as `.gitattributes`; `merge` remains the update path and `--force` keeps overwrite semantics
+- owner-expanding conflicts ("use slopctl merge") and untracked-collision errors are unchanged; existing trackers self-correct because categories are overwritten on the next record
+- merge and partial update now carry the category through `ResolvedContent` and `FileClass` instead of re-deriving it at record time
+- version bump: 22.2.0 to 22.3.0 (MINOR - user-visible init behavior change plus categorization fix)
+
+### 2026-07-21 (v22.2.0, move log to UPDATES.md + recent-updates skill)
+
+- moved the "Recent Updates & Decisions" log out of AGENTS.md into this new UPDATES.md file so AGENTS.md carries only current-state instructions; all historical entries were migrated verbatim
+- rationale: the log made AGENTS.md ~2300 lines; a dedicated file keeps instructions readable while preserving full history; named UPDATES.md (not CHANGELOG.md) to avoid confusion with release-notes changelogs
+- shipped the same structure in the templates: new `templates/v5/UPDATES.md` (installed to `$workspace/UPDATES.md` via the new `updates` integration group) and `recent-updates-summary.md` AGENTS.md fragment
+- added the agent-agnostic `recent-updates` skill (`templates/v5/skills/recent-updates`) defining the entry format, logging triggers, and append-only rules; registered under top-level `skills:` and copied to `.claude/skills/`
+- init preflight now plans `SkipChangelog` instead of a conflict when a tracked modified target and its source both carry the changelog marker, so re-init preserves user log entries; `--force` keeps overwrite semantics
+- doctor no longer flags modified changelog-marker files; `remove --agent/--lang/--all` and `remove --purge` preserve tracked modified changelog-marker files (purge overrides with `--force`), closing a data-loss path where a workspace path containing an agent name miscategorized UPDATES.md and let `remove --all` delete it
+- changed `TemplateConfig.integration` from `HashMap` to `BTreeMap` so `$instructions` fragment order is deterministic (fixes latent nondeterministic AGENTS.md fragment ordering)
+- moved `CHANGELOG_MARKER` to `template_engine.rs`; the marker string stays `<!-- {changelog} -->` for compatibility with already-installed workspaces
+- restored `.rustfmt.toml` required_version to 1.9.0 to match the active nightly rustfmt component, so plain cargo fmt works again (AGENTS.md already documented 1.9.0)
+- version bump: 22.1.4 to 22.2.0 (MINOR - new skill, new installed file, new preservation behavior)
+
+### 2026-07-21 (v22.1.4, platform-aware shell guidance and no agent co-authorship)
+
+- Replaced the "Windows / PowerShell Guidelines" section with "Shell & Platform Guidelines": development spans macOS, Linux, and Windows; agents must use zsh/bash (POSIX) on macOS/Linux and PowerShell on Windows
+- Rationale: the old section claimed the development environment was PowerShell on Windows only, which no longer matches reality (active development also happens on macOS/zsh); shell syntax guidance is now explicit per platform
+- Added a commit convention prohibiting co-authorship by coding agents: no `Co-Authored-By` trailers, `Generated with` footers, or any other AI-agent attribution in commit messages
+- Mirrored the prohibition into the git-workflow template sources: `skills/git-workflow/SKILL.md` (frontmatter version 1.0 to 1.1, new Footer Rules block), legacy mirror `git-workflow-conventions.md`, summary fragment `git-workflow-summary.md`, and the workspace-installed `.claude/skills/git-workflow/SKILL.md` copy
+- Version bump: 22.1.3 to 22.1.4 (PATCH — documentation and template content change)
+
+### 2026-07-12 (v22.1.3, tracker-backed skill status)
+
+- Changed `slopctl status` to derive installed skills exclusively from existing FileTracker skill entries instead of treating every directory under an agent skill path as installed
+- Empty or manually created untracked skill directories no longer produce phantom installed-skill status
+- `remove` now records discovered skill roots for a final empty-directory cleanup pass after deleting their files, including URL-based skills with nested content
+- Added regressions for tracker-only skill status and empty remote-skill root cleanup
+- Version bump: 22.1.2 to 22.1.3 (PATCH — status and cleanup bug fixes)
+
+### 2026-07-12 (v22.1.2, complete language removal)
+
+- Made FileTracker ownership authoritative for `remove --lang`: every existing tracked non-main file owned by the selected language is now considered, even when the language still exists in the current catalog or a file was removed from its definition
+- Catalog discovery remains supplementary so untracked language files and skill files can still be removed
+- Pointed the external Swift concurrency, testing, and SwiftUI sources at their concrete skill directories so the derived source name matches the installed directory (`swift-concurrency-pro`, `swift-testing-pro`, and `swiftui-pro`)
+- Added regressions for stale tracked files, shared-owner release, URL skill discovery, and a complete remove-then-init language switch
+- Cleared strict all-target Clippy warnings in the GitHub retry test path and template verification tests
+- Version bump: 22.1.1 to 22.1.2 (PATCH — language removal bug fix)
+
+### 2026-07-06 (v22.1.1, rustfmt pin update)
+
+- Updated `.rustfmt.toml` `required_version` from `1.8.0` to `1.9.0` to match the active nightly rustfmt component
+- Rationale: `cargo fmt --check` rejects mismatched rustfmt versions before checking files, so the pin must track the project toolchain
+- Version bump: 22.1.0 to 22.1.1 (PATCH — tooling configuration fix)
+
+### 2026-07-06 (v21.5.0, GitHub rate-limit mitigation)
+
+- Replaced recursive GitHub Contents API skill downloads with **one tarball fetch per repository** during `templates --update` and URL-based `init` skill installs; tarball extraction uses pure-Rust `flate2` + `tar` (macOS/Linux/Windows, no shell `tar`)
+- Added shared `reqwest` HTTP client with 429/503 retry and `Retry-After` backoff; raw file downloads throttled to reduce burst 429s; download failures now propagate instead of being silently skipped
+- Added `RepoTarballCache` for per-run deduplication of tarball downloads; `discover_skills_in_dir()` walks extracted trees locally for `SKILL.md`
+- Corrected Security section: GitHub access is unauthenticated (no tokens); removed inaccurate "GitHub tokens read from environment" line
+- Added regression tests: retry after 429, tarball extract, local skill discovery, tarball-based cache without Contents API listing
+- Version bump: 21.4.0 to 21.5.0 (MINOR — new download strategy + retry behavior)
+
+### 2026-07-06 (v21.4.0, scoped cache-only partial update)
+
+- `slopctl update` now reads only from the local global template cache; it no longer discovers or downloads skills from GitHub during resolve
+- Partial update resolves only the selected `--file` / `--skill` targets instead of the full installed language skill set (eliminates misleading install output and spurious GitHub traffic)
+- `templates --update` now caches URL-based skills into `skills/<name>/` under the global template directory (previously URL skills were skipped and fetched only at `init` time)
+- Added `PartialSelectors` and `local_cache_only` to `UpdateOptions`; `resolve_all_files()` branches on partial scope in `src/template_engine.rs`
+- Added `collect_url_skill_sources()` and `download_url_skill_to_cache()` in `src/download_manager.rs`
+- Added 4 regression tests in `partial_update.rs` (skill-only scope, lang file untouched, missing cache error, no GitHub hooks) plus `collect_url_skill_sources` test
+- Version bump: 21.3.3 to 21.4.0 (MINOR — update behavior change + templates URL skill caching)
+
+### 2026-07-06 (v21.3.3, restore require! in Rust template)
+
+- Restored the `require!` macro usage and definition block in `skills/rust-coding-conventions/SKILL.md` and legacy `rust-coding-conventions.md`
+- Rationale: `require!` is an intentional project convention for top-of-function preconditions without verbose `if` guards
+- Version bump: 21.3.2 to 21.3.3 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.2, de-brand C/C++/Rust template examples)
+
+- Removed remaining cross-project artifacts from C, C++, and Rust coding-convention template examples
+- C: replaced the KString-shaped Foo string tutorial (SSO, encoding bits, `InvalidFoo`) with a simple opaque-handle API using generic flag words
+- C++: replaced media-domain examples (`Episode`, `MediaType`, episode Doxygen) with neutral `Record`/`ContentType` placeholders
+- Rust: removed slopctl-shaped examples (`require!`, `max_width = 167` in conventions doc, backup/cache dirs, `$workspace/AGENTS.md` path example, GitHub test name); kept generic `FooStore`/`foo-cli` vocabulary
+- Applied edits to shipped skills and legacy root mirrors; bumped skill frontmatter versions to 1.1 (C/C++/Rust conventions)
+- Verified with `templates --verify` and `cargo test`; content-only change, no source or behavior changes
+- Version bump: 21.3.1 to 21.3.2 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.1, de-brand Swift template examples)
+
+- Removed cross-project artifacts from Swift coding-convention template examples so installed templates read as project-neutral
+- Replaced DoomKit/TheDrowning branding and environmental-monitoring domain names (Covid*, Weather*, radiation units, Berlin coordinates, etc.) with ultra-generic Foo/Bar-style placeholders in `skills/swift-coding-conventions/SKILL.md` and the legacy root `swift-coding-conventions.md` mirror
+- Renamed bundled example types consistently: `FooManager`, `FooSensor`, `FooPresenter`, `BarController`, `RemoteDataService`, `NetworkMonitor`, `Logger`, and related identifiers; kept Apple SDK imports (`WeatherKit`, `CoreLocation`, etc.) unchanged
+- Bumped shipped skill frontmatter `metadata.version` from 2.1 to 2.2
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (371 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.3.0 to 21.3.1 (PATCH — template content fix)
+
+### 2026-07-06 (v21.3.0, skill refresh stale file pruning)
+
+- Enhanced `slopctl update --skill <name>` to prune slopctl-tracked skill files that were removed upstream from the template source
+- After resolving the new source file set for each requested skill, any tracked skill file whose target is absent from the new set is deleted from disk and removed from the FileTracker
+- User-added untracked files inside the skill directory are preserved; only slopctl-managed tracked files are pruned
+- A locally modified stale tracked file is blocked unless `--force` is given, matching the overwrite guard for refreshed targets
+- Dry-run output includes a separate "would be removed (stale)" section for pruned files
+- Added `collect_stale_skill_files()` helper in `src/template_manager/partial_update.rs`; added 4 regression tests (upstream removal, untracked preservation, modified stale requires force, dry-run)
+- Version bump: 21.2.0 to 21.3.0 (MINOR — new cleanup behavior on skill refresh)
+
+### 2026-07-06 (v21.2.0, partial update command)
+
+- Added a new `update` subcommand that refreshes individual template files (`--file <path>`) or skills (`--skill <name>`) from the global catalog, instead of reinstalling a language's whole set
+- Motivation: users frequently need to bring a single file (e.g. `.rustfmt.toml`) or skill (e.g. `rust-coding-conventions`) up to date without touching the rest of the installed language set
+- Selectors are repeatable; at least one `--file` or `--skill` is required
+- Scope defaults to the installed language (FileTracker) and detected agents; overridable via `--lang`/`--agent`. Selected targets are overwritten directly; a customized or untracked target is skipped unless `--force` is given
+- `AGENTS.md` is rejected as a `--file` target (it is fragment-merged, carried in `ResolvedFiles.context`, not `files`); users are pointed to `merge`/`init`
+- Implementation reuses `TemplateEngine::resolve_all_files()` for correct routing (native vs cross-client skill dirs, includes, shared groups); it resolves once per effective agent and unions candidates by target path, keeping each `ResolvedFiles` alive so GitHub-downloaded temp sources survive until copy
+- New `src/template_manager/partial_update.rs` with `TemplateManager::update_partial`; added `Commands::Update` in `src/cli.rs` and its dispatch arm in `src/main.rs`
+- Added 6 unit tests using synthetic fixtures (bogus agent, Rust++ language): file refresh, skill refresh, force guard, unknown selector, dry-run, AGENTS.md rejection
+- Known limitation: a skill refresh copies current source files over; files removed upstream from a skill are not deleted
+- Version bump: 21.1.8 to 21.2.0 (MINOR — new subcommand)
+
+### 2026-06-21 (v21.1.8, de-brand template example code)
+
+- Removed cross-project artifacts from the example snippets in the shipped coding-convention templates so installed templates read as project-neutral
+- Replaced the external `KString` C string library case study (type, API, `KSTRING_*` macros, `KS_` internal prefix, `KStringEncoding`, `libkstring` outputs, `kstr` locals) with ultra-generic `Foo`/`FOO_*`/`F_`/`libfoo` placeholders in `c-coding-conventions`
+- Replaced slopctl's own `TemplateManager`/`template_manager`/`my-app` and the "manager for coding agent instructions" wording with `FooStore`/`foo_store`/`foo-cli` and neutral prose in `rust-coding-conventions`
+- Replaced the `P3Model` prefix example with `LibModel` in `c++-coding-conventions`
+- Replaced `KStringTrim`/`KString` commit examples with `FooTrim`/`Foo` in `git-workflow`
+- Applied the same edits to both the shipped `skills/*/SKILL.md` files and their unreferenced legacy root `*.md` mirrors so the two copies stay consistent
+- Decision (with user): use ultra-generic `Foo`/`Bar` placeholders, and clean the legacy root duplicates rather than delete them
+- Note: skill `author: Heiko Panjas` frontmatter left intact (genuine template author, not a cross-project artifact); slopctl's own AGENTS.md still uses similar examples and is out of scope
+- Verified with `templates --verify` (40 files present, all checks pass) and `cargo test` (361 + 11 pass); content-only change, no source or behavior changes
+- Version bump: 21.1.7 to 21.1.8 (PATCH — template content fix)
+
+### 2026-06-13 (v22.1.0, agent-aware skill distribution replaces adoption)
+
+- Replaced broad `.agents/skills/` → native-agent adoption with deterministic skill distribution based on installed agents
+- Language and top-level skills with omitted target or bare `target: '$workspace'` now install to all required directories: `.agents/skills/` when cross-client agents are present (or no agents), plus one copy per native-only agent skill dir when native-only agents are present
+- `init --agent <native-only>` after a language install now hydrates language skills from templates into the agent's native skill dir instead of copying arbitrary files from `.agents/skills/`
+- Explicit `target: '$userprofile'` and full path targets remain single-target overrides
+- Added `non_agent_skill_target_dirs`, `install_non_agent_skills`, and `hydrate_language_skills_for_native_agent` in `src/template_engine.rs`
+- Removed obsolete adoption block and `target_already_scheduled` helper
+- Version bump: 22.0.1 → 22.1.0 (MINOR — new distribution/hydration behavior, fully backwards compatible for typical single-agent workflows)
+
+### 2026-06-13 (v22.0.1, fix remove --agent leaving lang skills in agent dir)
+
+- Fixed `remove --agent <name>` not deleting language skills that were installed into the agent's native skill directory (e.g. `.claude/skills/`), causing the agent marker directory to remain non-empty and `slopctl status` to still report the agent as installed after removal
+- Root cause: native-only agents (e.g. Claude, Vibe) receive language skills in their native skill dir instead of `.agents/skills/`; the tracker records these with `lang: [<lang>]` and `agent: []` (no agent owner); `release_agent(file, "claude")` was a no-op, so `is_unreferenced()` stayed `false` and the file was kept with "still referenced"
+- Fix: in the removal loop, added `in_agent_dir` flag — when `true` (file's path matches the agent's directory tree via `path_belongs_to_agent`), force-delete the file regardless of `is_unreferenced`; physical location in the agent's directory is sufficient reason for removal
+- Added regression test `test_remove_agent_removes_lang_skills_in_agent_skill_dir` (was reproducing the bug before the fix)
+- Version bump: 22.0.0 → 22.0.1 (PATCH — bug fix)
+
+### 2026-06-13 (v22.0.0, tracker owner arrays and ref counts)
+
+- **BREAKING**: changed `FileMetadata.lang` and `FileMetadata.agent` from scalar strings to unique owner arrays, and added a stored `ref_count` that must equal `lang.len() + agent.len()`
+- Removed the single-language `init` guard; `init` can now add another language when shared targets such as `.gitignore` or skill files are byte-identical to the tracked template
+- Installation preflight now treats tracked identical files as shared ownership refreshes, while differing template content remains a conflict that must go through merge instead of incrementing `ref_count`
+- `remove --lang` and `remove --agent` now release ownership first and only delete non-main files when no language or agent owners remain
+- Existing scalar `.slopctl/tracker.yml` files are intentionally not migrated; users must recreate tracker state fresh
+- Version bump: 21.1.7 → 22.0.0 (MAJOR — breaking tracker schema and multi-language init behavior)
+
+### 2026-05-16 (v21.1.7, download manager, main.rs, and github test coverage)
+
+- Added 3 `download_manager.rs` tests using GitHub hooks: agent defaults download, model defaults download, skill entries download
+- Added 11 `main.rs` tests: `resolve_mission_content` (inline, file, missing), `resolve_source`/`resolve_agents_source`/`resolve_models_source` defaults and overrides, `handle_config` list/set/get/delete for both workspace and global scopes
+- Coverage: 60.22% to 64.01% (+3.79%); main.rs 0%→18.1%, download_manager.rs 8.2%→41.1%, github.rs 33.6%→45.4%
+- Test count: 358 to 372 (361 lib + 11 main)
+- Version bump: 21.1.6 to 21.1.7 (PATCH — test coverage expansion)
+
+### 2026-05-16 (v21.1.6, Phase 2 test coverage with LLM and catalog mocking)
+
+- Added `CHAT_HOOK` thread-local test injection to `llm.rs` mirroring the existing `github.rs` hook pattern; `set_chat_test_hook()` intercepts `chat()` and `chat_stream()` calls with a canned response, enabling LLM-dependent tests without real API calls
+- Added 3 merge tests using LLM hook: diverged file merge via hook, preview mode sidecar writing, truncated response preserving `.partial` file
+- Added 2 `smart_doctor` tests using LLM hook: parsed issues via hook, empty response handling
+- Added 7 `agents.rs` tests: `has_agent_defaults`, `list_agents`, `verify_agents` (pass + stale detection), `download_or_copy` from local path, `fetch_agent_defaults_yml` local path
+- Added 7 `models.rs` tests: mirror of agents.rs test suite for model-defaults.yml
+- Added 5 `config.rs` tests: `models.uri`/`models.fallbackUri` get/set/unset, `merge.model` unset
+- Coverage: 53.25% to 60.22% (+6.97%); smart.rs reached 100%, agents.rs 0%→62.7%, models.rs 0%→62.0%, merge.rs +20.8%
+- Test count: 334 to 358
+- Version bump: 21.1.5 to 21.1.6 (PATCH — test coverage with mocking infrastructure)
+
+### 2026-05-16 (v21.1.5, cross-command integration tests)
+
+- Added 13 integration tests for doctor, status, merge (dry-run), and verify commands exercised after real init/remove operations
+- Doctor tests (5): clean workspace, missing file detection + fix, modified file detection, unmerged marker stripping, clean after removal
+- Status tests (3): after init, after agent removal, empty workspace detection
+- Merge dry-run tests (3): all unchanged, diverged file detection, new files after lang removal
+- Verify tests (2): full round-trip with local source, missing source file detection
+- Coverage improvement: 47.63% to 53.25% (+5.62%); doctor.rs +29.92%, list.rs +34.97%, merge.rs +15.18%, verify.rs +22.35%, template_engine.rs +2.34%
+- Test count: 321 to 334
+- Version bump: 21.1.4 to 21.1.5 (PATCH — test coverage improvement)
+
+### 2026-05-16 (v21.1.4, init/remove integration tests)
+
+- Added 12 integration tests in new `src/template_manager/integration_tests.rs` exercising init→remove sequences across all three canonical test agent archetypes (bogus, fake, foobar) and both synthetic languages (Rust++, CppScript)
+- Tests cover: single-operation sanity (3), remove-preserves-sibling scope (3), agent switching and coexistence (2), language guard enforcement (2), and cross-client cleanup edge cases (2)
+- Introduced `IntegrationFixture` struct providing a self-contained config_dir with templates.yml, agent-defaults.yml, source files, and helper methods (`init`, `remove_agent`, `remove_lang`) that drive the full `TemplateManager::update()` and `TemplateManager::remove()` pipelines
+- Test count: 309 → 321
+- Version bump: 21.1.3 → 21.1.4 (PATCH — test coverage addition)
+
+### 2026-05-16 (v21.1.3, canonical test agent archetypes)
+
+- Established three canonical test agent archetypes with well-defined attributes for synthetic test catalogs:
+  - **bogus**: `reads_cross_client_skills: false`, native-only (like Claude/Vibe)
+  - **fake**: `reads_cross_client_skills: true`, hybrid with native dir + reads `.agents/skills/` (like Cursor/Codex)
+  - **foobar**: `reads_cross_client_skills: true`, cross-client-only with `skill_dir: $workspace/.agents/skills`
+- Updated `synthetic_catalog()` in `file_tracker.rs`: changed bogus from `true` to `false`, added foobar agent entry
+- Extended `write_synthetic_agent_defaults` helper in `remove.rs` to accept optional `skill_dir` override (4th tuple element); updated all 11 call sites
+- Extended `write_synthetic_agent_defaults` helper in `template_engine.rs` to accept optional `skill_dir` override (3rd tuple element); updated all 10 call sites
+- Updated 3 cross-client removal tests in `remove.rs` to use `fake`/`foobar` instead of `bogus` for semantic clarity
+- Renamed 2 cross-client routing tests in `template_engine.rs` from `*_bogus*` to `*_fake*` and switched to fake agent
+- Updated inline YAML in `list.rs` to use `reads_cross_client_skills: false` for bogus (was `true`)
+- Rationale: test agents should have stable, semantically meaningful attributes so cross-client vs native-only behavior is obvious from the agent name alone
+- Version bump: 21.1.2 → 21.1.3 (PATCH — test infrastructure cleanup)
+
+### 2026-05-16 (v21.1.2, fix adopted skill copies losing lang attribution)
+
+- Fixed `init --agent <native-only-agent>` (Claude, Vibe) silently dropping `lang` attribution when adopting cross-client skills from `.agents/skills/` into the agent's native skill directory; adopted copies were stamped with `lang: LANG_NONE` instead of preserving the original language (e.g. `lang: "swift"`), causing `remove --lang swift` to leave the adopted copies behind
+- Root cause: the cross-client skill adoption block in `resolve_all_files` (`template_engine.rs`) hardcoded `lang: LANG_NONE` for every adopted `ResolvedFile`; now loads the existing `FileTracker` before the adoption loop and carries the original `lang` from each source entry; falls back to `LANG_NONE` when no tracker entry exists
+- Added regression test `test_remove_lang_removes_adopted_native_agent_skill_copies` in `src/template_manager/remove.rs`
+- Test count: 308 → 309
+- Version bump: 21.1.1 → 21.1.2 (PATCH — bug fix)
+
+### 2026-05-16 (v21.1.1, fix remove bugs and improve test coverage)
+
+- Fixed `remove --agent` deleting language skills from `.agents/skills/` when the removed agent was the last cross-client agent; language skills (tracker `lang != LANG_NONE`) are now preserved; only agent-specific and top-level skills (`lang == LANG_NONE`) are removed
+- Fixed `remove --lang` leaving a stale `lang` field on the AGENTS.md tracker entry, causing `status` to report the language as still installed after removal; the `main`-category entry is now reset to `LANG_NONE` before saving the tracker
+- Added `clear_lang_for_category(lang, category)` to `FileTracker` in `src/file_tracker.rs`
+- Added `setup_workspace_with_agent_and_lang()` lifecycle test fixture
+- Added 4 new regression and lifecycle tests; enhanced 2 existing tests with negative assertions and tracker-consistency invariants
+- Test count: 304 → 308
+- Version bump: 21.1.0 → 21.1.1 (PATCH — bug fixes)
+
+### 2026-05-16 (v21.1.0, clean up empty agent dirs after remove)
+
+- After `remove --agent <name>`, `remove --all`, and `remove --purge`, slopctl now attempts to delete each agent's marker directory (e.g. `.claude/`, `.cursor/`) if it is empty after the file-deletion pass
+- Marker directories created by `slopctl init --agent` as empty detection dirs are now fully cleaned up on removal; non-empty dirs (containing user files) are silently skipped
+- Dry-run output annotates each candidate marker dir with `(removed if empty)` so users can preview the cleanup
+- Added `list_agent_names_from_catalog` helper in `src/agent_defaults.rs` to enumerate all agent names from a loaded catalog without re-loading
+- Added 2 regression tests: `test_remove_agent_cleans_up_empty_marker_dir` and `test_remove_agent_keeps_nonempty_marker_dir`
+- Version bump: 21.0.0 → 21.1.0 (MINOR — new cleanup behavior, fully backwards compatible)
+
+### 2026-05-16 (v21.0.0, models catalog subcommand)
+
+- **BREAKING**: removed the `list-models` subcommand; replaced with `models`, a full catalog-management command mirroring `agents` and `templates`
+- Added `templates/v5/model-defaults.yml` as the data source for LLM provider configurations: API endpoints, API key environment variables, and default model identifiers
+- Added `src/model_defaults.rs`: `ModelCatalog`/`ProviderEntry` serde structs, embedded fallback via `include_str!`, three loaders (`from_dir`, `cached_from_dir`, `embedded`), `validate_model_catalog`, `OnceLock`-based fast-path helpers (`get_default_model`, `get_endpoint`, `get_models_endpoint`, `get_api_key_env`, `known_providers`)
+- Added `src/template_manager/models.rs`: `has_model_defaults`, `download_or_copy_model_defaults`, `list_models_catalog`, `verify_models` on `TemplateManager`
+- Updated `src/llm.rs`: `Provider::default_model()`, `endpoint()`, `models_endpoint()`, `api_key_env_var()` now read from the model defaults catalog first and fall back to hardcoded compile-time values; updated OpenAI default from `gpt-4o` to `gpt-4.1`, Ollama default from `llama3` to `llama3.2`
+- Updated `src/config.rs`: added `ModelsConfig { uri, fallback_uri }` and `models: ModelsConfig` to `Config`; wired `models.uri`/`models.fallbackUri` into `get`/`set`/`unset`/`list`/`valid_keys`
+- Updated `src/download_manager.rs`: added `download_model_defaults_from_url` with validate-in-tempdir-before-copy pattern
+- Updated `src/main.rs`: added `DEFAULT_MODELS_SOURCE_URL`, `resolve_models_source`, `download_model_defaults_with_fallback`, `bootstrap_model_defaults_if_missing`; `templates --update` now bootstraps `model-defaults.yml` when missing
+- `slopctl models --list` shows the catalog (providers, default models, endpoints) instead of querying the live API
+- `slopctl models --update` / `--verify` / `--from` / `--dry-run` work identically to `slopctl agents`
+- Added `models.uri` and `models.fallbackUri` as new config keys
+- Version bump: 20.2.7 → 21.0.0 (MAJOR — `list-models` subcommand removed, breaking CLI change)
+
+### 2026-05-16 (v20.2.7, synthetic source fixtures)
+
+- Removed real-world coding-agent and programming-language fixture names from Rust source and tests
+- Replaced source/test agent fixtures with `bogus` and `fake`, and language fixtures with `Rust++` and `CppScript`
+- Added catalog-driven adoption and removal paths so `TemplateManager` and `FileTracker` can use the active `agent-defaults.yml` instead of relying on embedded agent names
+- Updated CLI/help comments to use generic `<agent>` and `<language>` placeholders instead of real catalog entries
+- Version bump: 20.2.6 → 20.2.7 (PATCH — test fixture sanitization and catalog-driven lookup cleanup)
+
+### 2026-05-16 (v20.2.6, clippy lint schema fix)
+
+- Moved the project-level `clippy::bool_comparison` allowance from `Cargo.toml` package lints to crate-level attributes in `src/lib.rs`, `src/main.rs`, and `build.rs`
+- Rationale: Cargo accepts package lint configuration, but the editor TOML schema flags `[lints.clippy]`; crate-level attributes preserve clippy behavior without schema warnings
+- Version bump: 20.2.5 → 20.2.6 (PATCH — metadata schema warning fix)
+
+### 2026-05-16 (v20.2.5, catalog-driven bogus agent tests)
+
+- Added regression tests with an imaginary `bogus_agent` to prove skill routing and status detection come from `agent-defaults.yml`, not hardcoded known-agent names
+- `TemplateEngine` now loads the active `agent-defaults.yml` from its template cache for marker creation, skill directory selection, cross-client support, and userprofile skill routing
+- `slopctl status` now detects installed agents from the active agent-defaults catalog, so custom catalog agents are visible when their marker directories exist
+- Version bump: 20.2.4 → 20.2.5 (PATCH — data-driven agent defaults coverage and lookup fix)
+
+### 2026-05-16 (v20.2.4, marker-based status detection)
+
+- Fixed `slopctl status` reporting no installed agents when an agent only had marker directories and skills installed
+- Status now detects installed agents through `AgentDefaults` workspace markers instead of BoM-managed agent files
+- This makes Codex, Vibe, OpenCode, and other marker-only agent installs visible in workspace status
+- Added regression coverage for detecting a marker-only Codex install
+- Version bump: 20.2.3 → 20.2.4 (PATCH — workspace status detection bug fix)
+
+### 2026-05-16 (v20.2.3, transactional skill installation)
+
+- Made `init` preflight resolved install targets before writing files or creating directories
+- Skill install targets are derived from `AgentDefaults` and skill scope, not from previously installed agents or existing workspace directories
+- Top-level skills for agents that do not read `.agents/skills/` continue to route to the selected agent's native `skill_dir`
+- Existing `.agents/skills/` files are treated as shared targets: identical tracked files refresh tracker metadata without copying, while untracked, modified, or different tracked files stop the install before any writes
+- Cross-client skill adoption now skips native targets already scheduled from the current template set, preventing duplicate target errors
+- Added regression coverage for AgentDefaults-based routing, shared skill conflicts, and atomic preflight failure behavior
+- Version bump: 20.2.2 → 20.2.3 (PATCH — skill routing and install transaction bug fix)
+
+### 2026-05-14 (v20.2.2, commit body bullet guidance)
+
+- Clarified commit message guidance so every commit body item uses a bullet, even when the body contains only one item
+- Mirrored the convention into the git workflow skill sources so future agents do not interpret prose bodies as acceptable
+- Rationale: commit formatting should be deterministic and match the project skill guidance exactly
+
+### 2026-05-14 (v20.2.2, Windows absolute marker test)
+
+- Fixed `test_parse_agent_catalog_rejects_absolute_marker` failing on Windows because the test fixture used Unix-only `/tmp/invalid` as its absolute marker path
+- The test now uses a marker under the Windows `TEMP` or `TMP` directory on Windows and a Unix absolute marker elsewhere
+- Marker validation now checks `Path::is_absolute()` before the colon rule, so Windows drive-qualified absolute markers report the intended "must be relative" error
+- Version bump: 20.2.1 → 20.2.2 (PATCH — cross-platform test fix)
+
+### 2026-05-14 (v20.2.1, single verify failure summary)
+
+- Fixed `slopctl templates --verify` and `slopctl agents --verify` printing duplicate `Verification found N issue(s)` summaries on failure
+- Verification routines now print section details and return the summary error, leaving the top-level CLI error handler as the single place that prints the final failure line
+- Rationale: failed verification output should be clear and non-redundant while preserving the existing non-zero exit behavior
+- Version bump: 20.2.0 → 20.2.1 (PATCH — user-facing output fix)
+
+### 2026-05-14 (v20.2.0, agent marker directory creation)
+
+- Simplified `templates/v5/agent-defaults.yml` marker declarations from `workspace_markers` objects to workspace-relative `markers` directory paths
+- `slopctl init --agent <name>` now creates the selected agent's marker directory, so later detection-based commands can identify the installed agent even when the agent template has no prompts or skills
+- Changed OpenCode's slopctl detection marker from `opencode.json` to `.opencode` to avoid fabricating agent config files
+- Added strict marker validation: markers must be relative directory paths and must not contain placeholders, absolute paths, parent-directory escapes, or file extensions
+- Updated docs to clarify that agent markers are safe slopctl-created directories, not agent config files
+- Version bump: 20.1.0 → 20.2.0 (MINOR — agent init gains a visible marker-directory side effect)
+
+### 2026-05-14 (v20.1.0, YAML-backed agent defaults)
+
+- Added `templates/v5/agent-defaults.yml` as the data source for agent filesystem conventions: workspace markers, prompt directories, skill directories, userprofile skill directories, and cross-client skill support
+- Refactored `src/agent_defaults.rs` to load the cached `agent-defaults.yml` catalog with an embedded fallback, while preserving the existing borrowed lookup helper API for current call sites
+- Added `slopctl agents` as a catalog-management subcommand mirroring `slopctl templates`: `--update`, `--verify`, `--list`, `--from`, and `--dry-run`
+- Added `agents.uri` and `agents.fallbackUri` config keys so agent defaults can be updated independently from templates
+- `slopctl templates --update` now bootstraps `agent-defaults.yml` only when the cached file is missing; existing agent defaults are left untouched so `slopctl agents --update` remains the normal update path
+- Rationale: coding-agent filesystem conventions change independently from slopctl releases, so they should be data-driven and updateable without recompiling the CLI
+- Version bump: 20.0.0 → 20.1.0 (MINOR — new `agents` subcommand and runtime-updateable agent defaults)
+
+### 2026-05-14 (v20.0.0, remove workspace_skill_dir override)
+
+- Removed the `workspace_skill_dir` field from `AgentDefaults`
+- Removed the now-redundant `get_effective_workspace_skill_dir()` helper
+- Rationale: slopctl installs agent-scoped files into the workspace by default whenever the agent supports workspace-local artifacts; userprofile installs are the explicit exception for global or corporate policy use cases
+- `skill_dir` is now the native workspace skill directory for all known agents, while `userprofile_skill_dir` remains available only for explicit `target: '$userprofile'` skill definitions
+- Updated README skill-routing documentation to distinguish agent-specific native workspace skills from cross-client language and top-level skills
+- Version bump: 19.1.1 → 20.0.0 (MAJOR — public `AgentDefaults` field and helper removal)
+
+### 2026-05-14 (v19.1.1, workspace-local Codex defaults)
+
+- Fixed Codex defaults in `agent_defaults.rs` to use workspace-local prompt and skill directories: `$workspace/.codex/prompts` and `$workspace/.codex/skills`
+- Kept Codex's userprofile skill directory available via explicit `target: '$userprofile'` as `$userprofile/.codex/skills`
+- Rationale: Codex supports project-local prompts and native project-local skills, so agent-specific Codex artifacts should install into the workspace by default
+- Updated regression coverage for Codex default directories and workspace skill search directories
+- Version bump: 19.1.0 → 19.1.1 (PATCH — corrected Codex path defaults)
+
+### 2026-05-14 (v19.1.0, init-session parity for Codex, Vibe, and OpenCode)
+
+- Added an `init-session` Agent Skill in `templates/v5/skills/init-session/` and attached it as an agent-specific skill for Codex and Mistral Vibe
+- Rationale: Codex discourages predefined prompts in favor of skills, and Vibe's prompt support is system-prompt oriented rather than a direct user-invoked command flow
+- Added an OpenCode custom command template at `templates/v5/opencode/commands/init-session.md`
+- Updated OpenCode's `prompt_dir` in `agent_defaults.rs` from `$workspace/.opencode` to `$workspace/.opencode/commands` so workspace adoption targets the documented command directory
+- Updated `docs/coding-agent-config-locations-v3.md` to include OpenCode command locations
+- Version bump: 19.0.0 → 19.1.0 (MINOR — new agent-visible init-session support)
+
+### 2026-05-14 (v19.0.0, remove ad-hoc skill CLI flags)
+
+- **BREAKING**: removed the `--skill` option from `init`, `merge`, and `remove`
+- Rationale: ad-hoc skill CLI support was introduced before skills were first-class entries in `templates.yml`; now that templates support agent, language, shared, and top-level skills with explicit `target` routing, the parallel CLI path duplicated behavior and complicated install/remove semantics
+- `init` now requires `--lang` and/or `--agent`; skills are installed only from `templates.yml` as part of the selected language, agent, shared includes, or top-level template set
+- Removed standalone skill install plumbing: `UpdateOptions.skills`, `TemplateEngine::resolve_adhoc_skills()`, `TemplateEngine::install_skills_only()`, the `TemplateManager::install_skills()` wrapper, and the unused GitHub shorthand expansion helper
+- Removed `MergeOptions.skills`; `merge` now compares only the resolved template set selected by `--lang`, `--agent`, and `--mission`
+- Removed named skill deletion from `remove`; skill lifecycle is now tied to the owning template scope:
+- `remove --agent <name>` removes agent files and that agent's skill files
+- `remove --lang <name>` removes language disk files and language-associated skill directories (including skills inherited via `includes`)
+- `remove --all` and `remove --purge` continue to remove all workspace-scoped skills
+- Documented the security rationale for requiring full GitHub URLs in `templates.yml` skill sources: slopctl must not silently reinterpret a missing local path as a remote repository because that creates supply-chain attack risk
+- Added regression coverage for `remove --lang` discovering and deleting template-defined language skill directories
+- Updated README.md to remove all `--skill` usage examples and replace them with templates.yml-based skill guidance
+- Version bump: 18.7.0 → 19.0.0 (MAJOR — incompatible CLI flag removal)
+
+### 2026-05-14 (v18.7.0, unified skill routing for cross-client agents)
+
+- Fixed top-level skills (`config.skills`) and ad-hoc skills (`--skill`) being incorrectly routed to an agent's native skill directory instead of `.agents/skills/` for cross-client agents (Cursor, Codex, Copilot, OpenCode)
+- Root cause: only language skills used the `lang_skill_dir` (cross-client-aware) logic; the top-level and ad-hoc call sites still used `agent_skill_dir` as the default, which for Cursor resolved to `.cursor/skills` and for Codex resolved to `~/.codex/skills`
+- Fix: renamed `lang_skill_dir` → `non_agent_skill_dir` and applied it uniformly to all three non-agent-specific skill call sites (language, top-level, ad-hoc) in `resolve_all_files()`
+- Fixed `install_skills_only()` (standalone `slopctl init --skill foo/bar`) with the same error: it used `get_skill_dir()` for each installed agent (wrong native dirs for cross-client agents); replaced with `reads_cross_client_skills()`-aware lookup that routes cross-client agents to `.agents/skills/` and deduplicates the target dirs so skills are not installed multiple times when e.g. Cursor + Codex are both installed
+- Routing rules are now consistent across all install paths:
+- **Cross-client agents** (Cursor, Codex, Copilot, OpenCode): all non-agent-specific skills → `.agents/skills/` (the agentskills.io standard; avoids duplicates since these agents scan that dir)
+- **Native-only agents** (Claude, Vibe): all non-agent-specific skills → agent's native skill dir (they don't read `.agents/skills/`)
+- **Agent-specific skills** (`agents.<name>.skills:` in templates.yml): always go to the agent's native skill dir regardless of cross-client support
+- Fixed `resolve_skill_target()` in `template_engine.rs`: bare `'$workspace'` previously called `get_effective_workspace_skill_dir(agent)` which returned the native workspace dir (e.g. `.cursor/skills` for Cursor), inconsistent with the `None` default; now returns `default` directly so `target: '$workspace'` is semantically equivalent to omitting `target`
+- `target` field semantics in `templates.yml` skill definitions:
+- `target: '$workspace'` — workspace-scoped install using the smart default (cross-client dir for cross-client agents, native dir for native-only agents); explicit but identical to no `target`
+- `target: '$userprofile'` — userprofile-scoped install (e.g. `~/.codex/skills` for Codex); use when you explicitly want a user-global skill rather than a per-workspace one
+- full path (e.g. `'$workspace/.agents/skills'`) — resolved literally, bypasses smart routing
+- omitted — same as `target: '$workspace'`
+- Fixed latent bug in `agent_defaults.rs`: Cursor's `userprofile_skill_dir` was incorrectly set to `$userprofile/.claude/skills` (copy-paste from the Claude entry); corrected to `None` (Cursor has no userprofile-scoped skill directory)
+- Added 2 new regression tests: `test_toplevel_skills_route_to_cross_client_for_codex` and `test_toplevel_skills_route_to_native_dir_for_claude`; added a second test helper `setup_toplevel_skill_routing_config` for top-level skill routing tests
+- Cleaned up `setup_skill_routing_config` test helper: removed the stale `name:` field from its YAML (field was removed from `SkillDefinition` in v18.6.0; serde ignored it silently but it was confusing)
+- Version bump: 18.6.0 → 18.7.0 (MINOR — corrected skill routing across all install paths)
+
+### 2026-05-14 (v18.6.0, skill target field + name derivation)
+
+- Added `target: Option<String>` field to `SkillDefinition` in `src/bom.rs`; skill install directory can now be declared explicitly in `templates.yml`
+- `"$workspace"` and `"$userprofile"` act as smart shorthands in `target` (semantics corrected in v18.7.0; see that entry for final behaviour)
+- Removed `name: String` from `SkillDefinition`; the skill name is now derived from the last path component of `source` via the new `derive_name()` method (matches the SKILL.md `name` frontmatter per agentskills.io spec)
+- Extended `AgentDefaults` in `src/agent_defaults.rs` with two new fields: `workspace_skill_dir: Option<&'static str>` and `userprofile_skill_dir: Option<&'static str>`; populated for all six known agents
+- Added `get_effective_workspace_skill_dir(agent)` and `get_effective_userprofile_skill_dir(agent)` public helpers
+- Added `resolve_skill_target()` and `group_skills_by_target()` private helpers on `TemplateEngine`
+- Updated the three `install_skills()` call sites in `resolve_all_files()` to use the new grouping and `derive_name()`
+- Removed all `name:` fields from `templates/v5/templates.yml`; added `target: '$workspace'` to the two top-level skills (`git-workflow`, `semantic-versioning`)
+- All 304 tests pass; no breaking CLI changes
+- Version bump: 18.5.2 → 18.6.0 (MINOR — new `target` field and `derive_name()` API)
+
+### 2026-05-14 (v18.5.2, agentskills.io spec compliance for bundled skills)
+
+- Added YAML frontmatter (`name`, `description`, `license`, `metadata`) to all 10 bundled skill files in `templates/v5/skills/` to conform to the [agentskills.io specification](https://agentskills.io/specification)
+- Renamed directory `templates/v5/skills/c++-coding-conventions` to `cpp-coding-conventions` — the `+` character is not allowed in the `name` field (only lowercase letters, numbers, and hyphens); `name` must also match the parent directory name
+- Updated `templates/v5/templates.yml` to reference the renamed skill (`cpp-coding-conventions`) under the `c++` language section
+- All skill names are lowercase, hyphen-separated, and match their parent directory names as required by the spec
+- No Rust source changes; no CLI behavior changes
+- Version bump: 18.5.1 to 18.5.2 (PATCH — template file conformance fix)
+
+### 2026-05-09 (v18.5.1, bug fixes)
+
+- Fixed `templates --update` not downloading `preamble` files — `preamble` loop was missing from `download_templates_from_url` in `download_manager.rs`
+- Fixed `test_adopt_cross_client_skills_to_claude` failing on Windows and macOS symlinked TempDirs — replaced `to_string_lossy().contains("forward/slash")` with `Path::ends_with` / `ancestors()` which match by path components and are separator- and symlink-agnostic
+- Version bump: 18.5.0 to 18.5.1 (PATCH - bug fixes)
+
+### 2026-05-09 (v18.5.0, guard .agents/skills/ in remove --agent)
+
+- Extended `remove --agent <name>` to manage `.agents/skills/` correctly when removing a cross-client agent (`reads_cross_client_skills == true`)
+- New behavior: after collecting the agent's native skill files, detect which other installed agents also support `.agents/skills/`
+  - If **none remain**: also collect `.agents/skills/` contents for deletion — prevents orphaned cross-client skills accumulating when the last cross-client agent is removed
+  - If **others remain**: skip `.agents/skills/` deletion and print `→ Keeping .agents/skills/ (still in use by: <agents>)` — explicit guard so other agents' shared skills are not destroyed
+- Non-cross-client agents (Claude, Vibe) are unaffected; their skills live only in their native directory
+- `remove --all` and `remove --purge` already delete `.agents/skills/` via `get_workspace_skill_search_dirs` and are unchanged
+- Added 2 regression tests: `test_remove_cross_client_agent_preserves_cross_client_skills_when_other_agent_installed` and `test_remove_cross_client_agent_cleans_cross_client_skills_when_last_agent`
+- Version bump: 18.4.0 to 18.5.0 (MINOR — new cleanup + guard behaviour in `remove --agent`)
+
+### 2026-05-09 (v18.4.0, cross-client skill routing for non-compliant agents)
+
+- Added `reads_cross_client_skills: bool` field to `AgentDefaults` in `agent_defaults.rs`
+  - `true` (read `.agents/skills/`): Cursor, Codex, Copilot, OpenCode
+  - `false` (native dir only): Claude Code, Mistral Vibe
+- Added `reads_cross_client_skills(agent: &str) -> bool` public helper; unknown agents default to `true`
+- Updated `CROSS_CLIENT_SKILL_DIR` doc comment to clarify it is not universal
+- Changed language skill routing in `resolve_all_files` (`template_engine.rs`):
+  - Previously lang skills always went to `.agents/skills/` regardless of agent
+  - Now: if `--agent` is specified and the agent has `reads_cross_client_skills = false`, lang skills go to the agent's native skill dir (e.g. `.claude/skills/`, `.vibe/skills/`)
+  - Cursor, Codex, Copilot, OpenCode: unchanged — lang skills still go to `.agents/skills/`
+- Added cross-client adoption step in `resolve_all_files`: when installing an agent that doesn't read cross-client, any existing skill directories in `.agents/skills/` are copied into the agent's native skill dir (skipping files already present); source files remain in `.agents/skills/` for other agents that do read it
+- Reference: `docs/coding-agent-config-locations-v3.md` — cross-agent standards section
+- Added 4 new unit tests: `test_reads_cross_client_skills_per_agent`, `test_lang_skills_route_to_native_dir_for_claude`, `test_lang_skills_route_to_cross_client_for_cursor`, `test_adopt_cross_client_skills_to_claude`
+- Version bump: 18.3.0 → 18.4.0 (MINOR — new routing behaviour, no CLI changes)
+
+### 2026-05-09 (v18.3.0, new agents + preamble + simplified instruction model)
+
+- Added **Mistral Vibe** and **OpenCode** agents to `agent_defaults.rs` and `templates/v5/templates.yml`
+  - Vibe: detected via `.vibe/` directory; skills at `$workspace/.vibe/skills`; prompts at `$userprofile/.vibe/prompts`
+  - OpenCode: detected via `opencode.json`; skills at `$workspace/.opencode/skills`
+- Removed agent-specific instruction stubs (`CLAUDE.md`, `.cursorrules`) from the sample templates — all agents in the spec now read `AGENTS.md` natively; stubs were identical boilerplate
+- Introduced `<!-- {preamble} -->` as a new AGENTS.md insertion point processed before `<!-- {mission} -->`; backed by `preamble.md` template fragment, `preamble:` section in `templates.yml`, new `preamble` field on `TemplateConfig` in `bom.rs`, and a new loop in `resolve_all_files` in `template_engine.rs`; the `/init-session` guard moves from per-agent stubs into this shared preamble fragment
+- Kept `copilot-instructions.md` (★-stable Copilot instruction path) but replaced the init-session guard with a minimal reference to AGENTS.md; content is now a clean hook for future Copilot-specific overrides
+- Renamed `InstructionFile` → `WorkspaceMarker` and `instruction_files` → `workspace_markers` throughout `agent_defaults.rs`; detection markers are now native agent-created paths (directories or config files) rather than slopctl-installed files:
+  - Claude: `.claude/` directory (Claude Code creates this)
+  - Cursor: `.cursor/` directory (Cursor IDE creates this)
+  - Copilot: `.github/copilot-instructions.md` (slopctl-installed; Copilot has no native marker)
+  - Codex: `.codex/` directory (Codex creates this)
+  - Vibe: `.vibe/` directory (Vibe creates this)
+  - OpenCode: `opencode.json` (OpenCode creates this)
+- Updated `adopt_untracked_files` in `file_tracker.rs` to use `workspace_markers` and `is_file()` guard so directory markers are not mistakenly adopted as managed files
+- Reference: `docs/coding-agent-config-locations-v3.md`
+- Version bump: 18.2.1 → 18.3.0 (MINOR — new agents, simplified template model, no CLI changes)
+
+### 2026-05-09 (v18.2.1, relax cross-language verify duplicates)
+
+- Fixed `templates --verify` incorrectly treating duplicate workspace targets across different languages as catalog errors
+- Rationale: `init` and `merge` operate on one language at a time, so `rust` and `swift` both targeting `$workspace/.editorconfig` is valid template catalog data; the conflict is only real when a single resolved language install set contains the duplicate
+- `collect_duplicate_target_issues()` now combines non-language duplicate checks with per-language checks driven by `bom::resolve_language_files(lang, config)`, which expands shared includes and preserves the real same-language duplicate validation used during install
+- `$instructions` remains exempt because it is a cumulative AGENTS.md fragment target
+- Added regression tests covering allowed cross-language duplicate targets and rejected same-language duplicate targets
+- Version bump: 18.2.0 to 18.2.1 (PATCH - verifier bug fix)
+
+### 2026-05-09 (v18.2.0, guard init against second language)
+
+- Added explicit policy for language installation conflicts: `init` remains single-language and does not silently add a second language to an already initialized workspace
+- Rationale: language templates can write exclusive workspace files such as `.editorconfig`, `.gitignore`, `.clang-format`, `.rustfmt.toml`, and `.swift-format`; these files can contain singleton or contradictory configuration and should not be merged by appending or resolved by implicit first-wins ordering
+- `TemplateManager::update()` now checks the workspace-local `FileTracker` after migration/adoption and before template resolution; if `options.lang` differs from the tracked installed language, it returns actionable guidance instead of writing files
+- Guidance points users to `slopctl merge --lang <new>` for AI-assisted conflict resolution when adding another language, or `slopctl remove --lang <old>` before replacing the language
+- Same-language re-init remains allowed; agent-only and skill-only flows are unchanged; tracker entries with `lang: none` do not block language init
+- Kept `--lang` as a single-value option on both `init` and `merge`; no repeatable multi-language CLI was introduced
+- Added tests for blocking a different installed language, allowing the same language, and ignoring `lang: none` entries
+- Version bump: 18.1.0 to 18.2.0 (MINOR - new user-facing init guard and policy)
+
+### 2026-05-09 (v18.1.0, templates --verify)
+
+- Added `--verify` (`-V`) flag to the `templates` subcommand
+- Performs three sequential checks printed with colored output:
+  - **C – YAML structure**: parses `templates.yml`, validates version in `2..=5`, checks `main.source` is set, checks for duplicate targets across all sections
+  - **A – Local file integrity**: every non-URL `source` file referenced in `templates.yml` (main, agent instructions/prompts, language files, shared groups, integration files, principles, mission) and every local-path skill directory must exist in the local template cache; URL-based sources are skipped (fetched at install time)
+  - **B – Source freshness**: fetches `templates.yml` from the configured source (GitHub URL or local path) and byte-compares it with the local copy; a mismatch recommends `slopctl templates --update`; network failures are reported as warnings, not hard errors
+- Returns non-zero exit code if any issue is found (useful for CI)
+- `--from` flag now applies to both `--update` and `--verify` (manual guard in `main.rs` replaces the clap `requires = "update"` attribute)
+- All three flags (`--update`, `--verify`, `--list`) can be combined freely; execution order is `--update` → `--verify` → `--list`
+- New `src/template_manager/verify.rs` with `verify()`, `verify_yaml_structure()`, `verify_local_integrity()`, `verify_source_freshness()` on `TemplateManager`, plus free functions `collect_duplicate_target_issues`, `fetch_remote_templates_yml`, `check_source_file`, `check_source_skill`
+- 9 new unit tests covering all sections
+- Version bump: 18.0.0 to 18.1.0 (MINOR - new CLI flag)
+
+### 2026-05-09 (v18.0.0, merge purge subcommand into remove --purge)
+
+- **BREAKING**: removed the `purge` subcommand; its functionality is now `slopctl remove --purge`
+- Design rationale: `remove --all` and `purge` were nearly identical; the only difference is that `purge` also removes AGENTS.md. Adding `--purge` to `remove` makes the relationship explicit in a single command with layered semantics: `--all` removes agent files and skills (keeps AGENTS.md); `--purge` removes everything including AGENTS.md (customized AGENTS.md is preserved unless `--force` is also given)
+- `--purge` is mutually exclusive with `--agent`, `--lang`, `--skill`, and `--all` (enforced by clap `conflicts_with`)
+- `--force` semantics are now layered: alone it skips the confirmation prompt; combined with `--purge` it additionally overrides the customized-AGENTS.md preservation guard
+- Implementation: deleted `src/template_manager/purge.rs`; `remove_purge()` and `collect_purge_targets()` moved into `src/template_manager/remove.rs`; `mod purge` removed from `mod.rs`; `Purge` variant removed from `cli.rs`; `Commands::Purge` dispatch arm removed from `main.rs`
+- All purge tests ported to `remove.rs` under `test_remove_purge_*` names
+- `init-session` decision: keep as custom prompt/command (not converted to skill) — the `/init-session` slash command UX in Cursor and Claude Code is better than skill invocation for a user-triggered session-start ritual; agent-specific variations (Cursor vs Claude vs Copilot) are also natural in the command format
+- Version bump: 17.1.1 to 18.0.0 (MAJOR - breaking CLI change: subcommand removed)
+
+### 2026-05-05 (v17.1.1, fix purge silently deleting customized AGENTS.md)
+
+- Fixed `purge` deleting a customized (user-modified) AGENTS.md while simultaneously printing the "AGENTS.md has been customized and was not deleted" preservation message
+- Root cause: AGENTS.md is normally tracked in `FileTracker` (and may also appear in the BoM agent-file sweep), so it was added to `files_to_purge` *before* the AGENTS.md skip-decision block ran. The skip block only set the `agents_md_skipped` flag and never removed the file from the deletion queue, so the deletion loop happily unlinked the customized file and the user got a contradictory success message
+- Also fixed an incidental brittleness: the prior "already in list?" check used `f.ends_with("AGENTS.md")` which would match any path whose final component happens to be `AGENTS.md` (e.g. nested workspace files); replaced with canonical-path equality so symlinked workspace roots (macOS `/var` -> `/private/var`) and unrelated `AGENTS.md` files behave correctly
+- Implementation in [src/template_manager/purge.rs](src/template_manager/purge.rs):
+  - Extracted file-collection + AGENTS.md decision into a new private helper `TemplateManager::collect_purge_targets(current_dir, force) -> Result<(Vec<PathBuf>, bool, PathBuf)>` returning `(files_to_purge, agents_md_skipped, agents_md_path)`. Splitting collection from deletion makes the logic unit-testable without hitting the interactive `confirm_action` stdin prompt that `purge(false, false)` would otherwise trigger
+  - When `agents_md_customized == true && force == false`: set `agents_md_skipped = true` AND `files_to_purge.retain(|f| canonical(f) != canonical(agents_md))` so any prior tracker/BoM-sourced entry is dropped
+  - When AGENTS.md is *not* being skipped, the "already in list?" guard uses canonical-path equality instead of `ends_with`
+  - Canonicalization wrapped with `unwrap_or_else(|_| path.clone())` so a missing/inaccessible file does not panic; it simply falls through to an unequal comparison
+- Added regression test `test_purge_preserves_customized_agents_md_when_tracked`: writes a customized AGENTS.md (no `TEMPLATE_MARKER`), records it in `FileTracker`, then asserts that `collect_purge_targets(force=false)` returns `agents_md_skipped == true` AND no canonical match for AGENTS.md in the queue; also asserts `force=true` queues the file as expected. Verified to fail under the buggy code and pass under the fix
+- Test uses the helper directly to avoid the `confirm_action` stdin read that would otherwise short-circuit `purge(false, false)` to "Operation cancelled" before reaching the deletion loop, masking the bug
+- No CLI flags, options, or output formats changed; `--dry-run` output is also corrected as a side effect (previously listed AGENTS.md under "Files that would be deleted" *and* under the skip line)
+- Version bump: 17.1.0 to 17.1.1 (PATCH - bug fix)
+
+### 2026-05-05 (v17.1.0, skill-aware AGENTS.md merge)
+
+- Extended the `merge` command to make AGENTS.md skill-aware: when AGENTS.md is diverged, the LLM additionally receives every SKILL.md in the resolved template set and is instructed to drop AGENTS.md content already covered by a skill (skill becomes the canonical source)
+- Rationale: as more conventions migrate from inline AGENTS.md prose into skills (per the 2026-04-03 templates-to-skills migration), users' customised AGENTS.md files keep duplicating content the skills now own; the merge step is the natural place to deduplicate
+- Behaviour is purely additive: all existing merge functionality (classification, changelog marker handling, streaming, `--preview`/`--dry-run`/`--verbose`, partial recovery, token accounting, FileTracker updates) is unchanged; non-AGENTS.md diverged files still use the legacy prompt verbatim
+- Implementation in [src/template_manager/merge.rs](src/template_manager/merge.rs):
+  - New free fn `collect_skills(content_map)` filters entries whose target file name is `SKILL.md`, takes the parent directory name as the skill name, and returns sorted `(name, content)` pairs
+  - Added `is_main: bool` field to `FileClass::Diverged`; set inside `classify_files()` via `target.file_name() == Some("AGENTS.md")`
+  - `build_merge_messages()` signature changed to take `skills: &[(String, String)]`; an empty slice produces a byte-identical message to v17.0.4 (proven by `test_build_merge_messages_no_skills_matches_legacy`); a non-empty slice appends an `<available_skills>` block listing each `### name` plus full SKILL.md content and a closing instruction to remove duplicates
+  - Added rule 9 to `MERGE_SYSTEM_PROMPT` describing skill-priority deduplication; tweaked rule 1's parenthetical to permit removals when content is now covered by a skill while reaffirming rule 8's append-only changelog guarantee
+  - In `merge()` loop: `collect_skills()` is called once after `classify_files()`; the diverged arm passes `&skills` only when `is_main == true`, otherwise `&[]`
+- Decisions (from clarifying questions): scope = AGENTS.md only; skills considered = every SKILL.md in the resolved template set (regardless of disk state); skill payload = full SKILL.md content per skill (no referenced sub-files)
+- Added 5 new tests: `test_collect_skills_filters_skill_md_only`, `test_collect_skills_extracts_parent_dir_name`, `test_collect_skills_empty_map_returns_empty`, `test_build_merge_messages_includes_skills_block`, `test_build_merge_messages_no_skills_matches_legacy`, `test_classify_files_marks_agents_md_as_main`
+- No CLI flags, options, or output formats changed
+- Version bump: 17.0.4 to 17.1.0 (MINOR - additive merge behaviour, fully backwards compatible)
+
+### 2026-05-01 (v17.0.4, fix multi-m commit body formatting guidance)
+
+- Fixed misleading guidance in the Windows/PowerShell section that recommended `git commit -m subject -m bullet1 -m bullet2 -m bullet3`; each `-m` flag creates a separate paragraph with a blank line between it and the next, which breaks bullet lists in the body
+- Replaced with: subject in the first `-m`, **entire body** with embedded newlines in a second `-m` (PowerShell here-string `@"..."@`, or `git commit -F <file>` for cross-shell safety)
+- Mirrored the fix into [templates/v5/skills/git-workflow/SKILL.md](templates/v5/skills/git-workflow/SKILL.md) under a new "Invoking git commit safely" subsection covering zsh/bash (`$'...'`), PowerShell (here-string), and cross-shell (`-F file`) approaches
+- Triggered by an actual occurrence: commit `a159c5c` (later amended to `634a2c8`) had blank lines between every bullet because the guidance was followed literally
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.3 to 17.0.4 (PATCH - documentation fix)
+
+### 2026-05-01 (v17.0.3, prefer Option over sentinel enum variants)
+
+- Added new convention to the Enums and Pattern Matching section: prefer `Option<T>` over adding `Invalid`/`Unknown`/`None` sentinel variants to enums
+- Rationale: `Option<T>` is niche-optimized (zero runtime cost for most enums) and forces callers to handle absence at compile time; sentinel variants move that guarantee to a runtime convention and pollute every match site with a defensive arm, working against Rust's "make illegal states unrepresentable" principle
+- Documented narrow exception: when "unknown" is a meaningful domain state (e.g. forward-compatible protocol parsing where unrecognized variants must round-trip), model it explicitly with a payload-carrying variant like `HttpVersion::Unknown(String)`
+- Mirrored the rule into [templates/v5/skills/rust-coding-conventions/SKILL.md](templates/v5/skills/rust-coding-conventions/SKILL.md) so future installs receive it
+- Documentation/convention only; no Rust source changes
+- Version bump: 17.0.2 to 17.0.3 (PATCH - convention addition, no behavior change)
+
+### 2026-05-01 (v17.0.2, fix TempDir dropped before GitHub-sourced files copied)
+
+- Fixed `init` (and `merge`) failing with bare `os error 2` (No such file or directory) whenever a skill or template entry was sourced from a GitHub URL
+- Root cause: `TemplateEngine::resolve_all_files()` created a `tempfile::TempDir`, downloaded GitHub sources into it, pushed the temp paths into `ResolvedFiles.files`, and then returned. The `TempDir` was dropped at function exit, deleting all downloaded files before `copy_files_with_tracking()` ran. The same flaw silently truncated `build_target_content_map()` (used by `merge`), which skipped GitHub-sourced entries via `if entry.source.exists()`
+- Reproduced with `slopctl init --lang swift`: local skills (`swift-coding-conventions`, `swift-build-commands`) succeeded because they live in `config_dir`, but the GitHub-fetched `swift-concurrency-pro` skill failed at copy time
+- Fix: added `_temp_dir: tempfile::TempDir` field to `ResolvedFiles` so the temp directory is owned by the result struct and lives until the consumer (init or merge) finishes. RAII guard with leading underscore signals "holds resource alive, never read"
+- Hardened `utils::copy_file_with_mkdir` to wrap `fs::create_dir_all` and `fs::copy` errors with `anyhow::anyhow!` context including the source and target paths, so future failures show which file failed instead of a bare ENOENT
+- Added test injection infrastructure for GitHub HTTP calls in `github.rs`:
+  - Two thread-local hooks (`LIST_CONTENTS_HOOK`, `DOWNLOAD_FILE_HOOK`) checked at the top of `list_directory_contents()` and `download_file()` before any real `reqwest` call. In production both stay `None` and the cost is one thread-local read per call
+  - `pub fn set_test_hooks(list, download) -> TestHookGuard`: tests install the hooks; the returned RAII guard clears them on drop so they cannot leak between tests
+  - Tests can drive the entire GitHub-skill code path (discover_skills, download_directory_from_entries, download_file) without network I/O
+- Added regression test `test_resolve_all_files_keeps_github_skill_temp_files_alive` that mocks the GitHub Contents API and raw download endpoint, calls `resolve_all_files()` with a `--skill foo/bar` ad-hoc skill, and asserts every GitHub-sourced `entry.source.exists()` is `true` after the function returns. Verified to fail loudly under the buggy code (panics with the temp path that no longer exists) and pass under the fix
+- Test isolation: uses `CWD_LOCK` and an inline `CwdGuard` Drop helper to restore cwd even on assertion panic
+- Pre-existing test-suite flakiness (~25% failure rate under parallel execution due to other tests mutating process-global cwd/env without consistent locking) is unchanged by this work and remains a known issue
+- Version bump: 17.0.1 to 17.0.2 (PATCH - bug fix)
+
+### 2026-04-25 (v17.0.1, fix CI flaky test + shared ENV_LOCK)
+
+- Fixed `test_resolve_provider_auto_detects_from_env` failing in CI when the runner has API keys or a global config with `merge.provider` set
+- Root cause: the test relied on the host environment (ambient env vars and config files) to predict expected outcome, violating test isolation
+- Replaced with two fully deterministic tests that control their own environment:
+  - `test_resolve_provider_no_env_no_config_returns_error`: CWD to temp dir + clear all API key env vars, asserts `Err` with "No LLM provider" message
+  - `test_resolve_provider_detects_openai_from_env`: CWD to temp dir + set `OPENAI_API_KEY`, asserts `Ok` with provider "openai"
+- Both tests acquire `CWD_LOCK` then `ENV_LOCK` (consistent order to prevent deadlocks), save/restore all process-global state
+- Promoted `ENV_LOCK` from `llm.rs` test-local static to shared `pub(crate) static ENV_LOCK` in `lib.rs`; all env-var-manipulating tests now use the same lock across modules
+- Updated 4 tests in `llm.rs` to use `crate::ENV_LOCK` instead of the removed local static
+- Version bump: 17.0.0 to 17.0.1 (PATCH - test fix)
+
+### 2026-04-25 (v17.0.0, config overhaul: key renames + workspace-scoped config)
+
+**Config key renames:**
+
+- **BREAKING**: renamed config keys `source.url` and `source.fallback` to `templates.uri` and `templates.fallbackUri`
+- Established convention: all configuration keys follow `<command>.<parameter>`, aligning the prefix with the subcommand that consumes it (`templates.uri` is consumed by `templates`, `merge.provider` by `merge`)
+- Chose `uri` (not `url`) and `fallbackUri` because both values can be either a remote URL (`https://...`) or a local filesystem path (`/path/to/templates`); `URI` is the umbrella term that covers both
+- Renamed `Config.source` field to `Config.templates` and `SourceConfig` struct to `TemplatesConfig` in `src/config.rs`; renamed `TemplatesConfig.url` -> `uri` and `TemplatesConfig.fallback` -> `fallback_uri` (with `#[serde(rename = "fallbackUri")]` so the on-disk YAML key matches the CLI key exactly)
+- No automatic migration: existing `~/.config/slopctl/config.yml` files with a `source:` stanza are silently ignored on load (serde drops unknown fields). Users with a configured `source.url` must re-set it with `slopctl config --set templates.uri <value>`
+
+**Workspace-scoped config:**
+
+- **BREAKING**: `slopctl config` now defaults to the **workspace** config (`.slopctl/config.yml`) for writes (`--set`, `--delete`). Pass `--global` (`-g`) to target the global config (`~/.config/slopctl/config.yml`)
+- Reads (`<key>` get, `--list`) without `--global` return the effective merged view: for each key, the workspace value wins; if not set there, the global value is used. With `--global`, only the global file is read
+- `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
+- `--delete` prints a cross-scope hint when the key is not found in the targeted scope but exists in the other scope
+- New `ConfigScope` enum and `EffectiveConfig` struct in `src/config.rs`: `EffectiveConfig::load(workspace)` returns both files merged; `get_with_origin` returns the value and its scope; `list_with_origin` returns a deterministic `BTreeMap`
+- `Config::load`/`save` split into `load_global`/`save_global`/`load_workspace`/`save_workspace`; old `load`/`save` kept as compatibility shims delegating to the global variants
+- Switched all consumer call sites to `EffectiveConfig`: `main.rs::resolve_source`, `merge.rs::resolve_provider_and_model`, `merge.rs::list_models`
+- `.slopctl/config.yml` is committed to the repo alongside `.slopctl/tracker.yml`
+**Tracker format switch (JSON to YAML):**
+
+- Switched FileTracker storage from `.slopctl/tracker.json` (JSON) to `.slopctl/tracker.yml` (YAML) so all slopctl-managed files use a single format (templates YAML, config YAML, tracker YAML)
+- Changed `TRACKER_FILE` constant, `serde_json` calls to `serde_yaml` in `FileTracker::new()` and `save()`
+- Updated `TemplateManager::is_workspace_initialized()` to check for `tracker.yml`
+- No auto-migration: existing workspaces with `tracker.json` need manual conversion
+- Legacy global tracker (`installed_files.json`) migration path remains JSON-based
+- Version bump: 16.1.1 to 17.0.0 (MAJOR - breaking config key rename + scope default change + tracker format change)
+
+**File provenance: `lang` and `agent` fields on tracked files:**
+
+- `FileMetadata.lang` changed from `Option<String>` to `String`; new `FileMetadata.agent: String` field added
+- Sentinel constants `LANG_NONE` ("none") and `AGENT_ALL` ("all") replace `None`/`Some` for language-agnostic and agent-agnostic files respectively
+- New `ResolvedFile` struct carries `source`, `target`, `lang`, `agent` through the template resolution pipeline; `ResolvedFiles.files` changed from `Vec<(PathBuf, PathBuf)>` to `Vec<ResolvedFile>`
+- New `ResolvedContent` struct wraps content + `lang` + `agent` in `build_target_content_map()` return value; merge command's `classify_files()` and both `record_installation` call sites now use per-file provenance instead of blindly stamping `options.lang`
+- `record_installation`, `try_adopt`, `migrate_from_global` signatures updated to accept `lang: String` and `agent: String`
+- `get_installed_language()` now checks `meta.lang != LANG_NONE` instead of `meta.lang.is_some()`
+- `remove --lang` guard updated to compare `meta.lang == lang_name` (String equality) instead of `meta.lang.as_deref() == Some(lang_name)`
+- Fixed `.slopctl/tracker.yml`: corrected `lang` on language-agnostic skills (`git-workflow`, `semantic-versioning` → `lang: none`), replaced `lang: null` with `lang: none`, added `agent` field to all entries
+- `validate_no_duplicate_targets`, `show_dry_run_files`, `copy_files_with_tracking`, `install_skills`, `collect_local_skill_files` updated to work with `ResolvedFile`
+
+### 2026-04-25 (v16.1.1, config CLI option rename)
+
+- Renamed `--add` (`-a`) to `--set` (`-s`) and `--remove` (`-r`) to `--delete` (`-d`) on the `config` subcommand for clearer semantics
+- Updated `handle_config` parameters and dispatch destructuring in `src/main.rs` to match the new field names
+- Updated inline help text, the empty-config hint, and the post-delete success message
+- Updated the LLM provider hint in `src/template_manager/merge.rs` to reference `config --set merge.provider`
+- Updated README.md config command section: usage, options table, and all examples
+- No behavior changes beyond the option names; follows the same precedent as v13.2.1 (`--unset` to `--remove`)
+- Version bump: 16.1.0 to 16.1.1 (PATCH - CLI option rename, matches v13.2.1 precedent)
+
+### 2026-04-25 (v16.1.0, merge --verbose chat tracing)
+
+- Extended `merge --verbose` to dump the full LLM conversation per file in addition to the existing token usage and unchanged-file reporting
+- Before each diverged file is sent, prints a "Merging <file>" header followed by an "Outgoing messages" block listing every `ChatMessage` (system + user) tagged by role
+- During streaming, the response body is written to stdout chunk-by-chunk instead of the in-line "Merging X... Ns (chars)" progress line; the per-chunk progress line continues to render in non-verbose mode
+- After the stream ends, prints an "End response" footer to separate the model output from the next status line
+- Added `print_outgoing_messages()` and `print_incoming_footer()` helpers in `src/template_manager/merge.rs`
+- Updated CLI help text in `src/cli.rs` to describe the new behavior
+- No new dependencies; no changes to non-verbose output
+- Version bump: 16.0.0 to 16.1.0 (MINOR - additional verbose behavior, fully backwards compatible)
+
+### 2026-04-19 (v16.0.0, workspace-local file tracker)
+
+- **BREAKING**: FileTracker storage moved from global `installed_files.json` to workspace-local `.slopctl/tracker.yml`
+- FileTracker now takes a workspace path instead of global data dir; all paths stored as relative to workspace root
+- Removed `workspace` field from `FileMetadata` (no longer needed since tracker is workspace-scoped)
+- Removed `is_template_updated` method (unused)
+- Renamed workspace-scoped query methods: `get_workspace_entries` to `get_entries`, `get_workspace_entries_by_category` to `get_entries_by_category`, `get_installed_language_for_workspace` to `get_installed_language`
+- Added auto-migration: on first command in a workspace, entries are extracted from the global tracker, converted to relative paths, and saved locally; migrated entries are pruned from the global file
+- Added adoption of untracked files: after migration, scans workspace for known slopctl-managed files (agent instructions, skills, commands) and adopts any not yet tracked with `template_version: 0`
+- Added `TemplateManager::try_migrate_tracker()` called at all command entry points (update, list, doctor, purge, remove, merge, smart)
+- Added `TemplateManager::slopctl_dir()` and `is_workspace_initialized()` workspace helpers
+- Version bump: 15.4.4 to 16.0.0 (MAJOR - breaking tracker format and storage location)
+
+### 2026-04-19 (v15.4.4, extract shared CLI module and fix man page generation)
+
+- Extracted CLI definitions (Cli, Commands, ShellType) into shared `src/cli.rs` module
+- Both `main.rs` and `build.rs` now use the same CLI struct, keeping man pages in sync with the actual CLI
+- `build.rs` uses `#[path = "src/cli.rs"]` to include the shared module at build time
+- Man pages now generated per-subcommand: `slopctl.1` plus `slopctl-init.1`, `slopctl-merge.1`, etc.
+- Previously `build.rs` had a stale duplicate CLI struct missing most subcommands and flags
+- Removed `cargo:warning` output during release builds for cleaner build output
+- Added `clap_complete` to `[build-dependencies]` (needed by shared `cli.rs`)
+- Version bump: 15.4.3 to 15.4.4 (PATCH - internal refactor)
+
+### 2026-04-18 (v15.4.3, fix Anthropic API temperature rejection on newer models)
+
+- Removed `temperature: 0.0` from the Anthropic Messages API request body in `stream_anthropic()`
+- Anthropic deprecated sampling parameters (`temperature`, `top_p`, `top_k`) starting with Claude Opus 4.7; any explicit value returns a 400 error
+- No replacement parameter exists; Anthropic recommends using prompting to guide model behavior instead
+- OpenAI-compatible path (`stream_openai_compatible`) retains `temperature: 0.0` since OpenAI, Mistral, and Ollama still support it
+- Updated Anthropic default model from `claude-sonnet-4-20250514` to `claude-sonnet-4-6`
+- Version bump: 15.4.2 to 15.4.3 (PATCH - bug fix)
+
+### 2026-04-18 (v15.4.2, protect userprofile skill directories from filesystem scans)
+
+- Fixed `remove`, `purge`, and `list` commands scanning userprofile-based skill directories (e.g. codex `~/.codex/skills`), which picked up agent-internal files (`.system/`) and skills belonging to other workspaces
+- Added `get_workspace_skill_search_dirs()` to `agent_defaults.rs`: returns only `$workspace`-prefixed skill directories, excluding `$userprofile`-based ones (currently codex)
+- `remove --agent`, `remove --all`, `purge`, and `list` now use the workspace-only function for filesystem scanning; FileTracker continues to cover userprofile skills that slopctl installed
+- `remove --agent` additionally checks the `$workspace` prefix before scanning an agent's skill dir
+- `remove --skill` still uses `get_all_skill_search_dirs` since it targets a specific skill name (safe)
+- Added 3 new tests: `get_workspace_skill_search_dirs_excludes_codex`, `remove_agent_codex_skips_userprofile_skill_scan`, `purge_skips_userprofile_skill_dir_scan`
+- Version bump: 15.4.1 to 15.4.2 (PATCH - bug fix)
+
+### 2026-04-18 (v15.4.1, fix remove command not discovering untracked agent skills)
+
+- Fixed `remove --agent` and `remove --all` not discovering untracked/manually placed skill files in agent skill directories
+- Root cause: both code paths only consulted the FileTracker for skill files, missing any skills not recorded in the tracker (e.g. manually placed or installed by other tools)
+- `remove --agent <name>` now scans the agent's skill directory on the filesystem (e.g. `.cursor/skills/`) via `collect_files_recursive`, matching the approach used by `purge`
+- `remove --all` now scans all agent skill directories and the cross-client `.agents/skills/` directory via `get_all_skill_search_dirs`, same as `purge`
+- FileTracker sweep is retained as a supplement to catch tracked skill files outside standard directory trees
+- `purge` command was already correct (filesystem scan was present since v12.3.2)
+- Added 2 new tests: `test_remove_agent_discovers_untracked_skill_files`, `test_remove_all_discovers_untracked_skill_files`
+- Version bump: 15.4.0 to 15.4.1 (PATCH - bug fix)
+
+### 2026-04-18 (v15.4.0, merge command optimization: streaming, changelog marker, partial recovery)
+
+- Added `<!-- {changelog} -->` marker to AGENTS.md template and user file to split template-managed content from user-owned changelog
+- `classify_files()` now splits at the changelog marker: only the template half is compared, so changelog-only diffs are classified as `Unchanged` (no LLM call)
+- When the template half differs, only it is sent to the LLM; the user's changelog is re-attached verbatim after merge, preventing truncation
+- Replaced blocking `chat()` with streaming `chat_stream()` on `LlmClient`: tokens arrive incrementally via SSE
+- Per-provider SSE parsing: OpenAI/Mistral (`data: {...}` lines with `stream_options.include_usage`), Anthropic (`content_block_delta`/`message_delta` events), Ollama (newline-delimited JSON with `done: true`)
+- `chat()` reimplemented as a thin wrapper around `chat_stream()` with a no-op callback (DRY)
+- Added `max_tokens: 32768` to all providers (was missing for OpenAI/Mistral, was 16384 for Anthropic)
+- Live progress display during merge: character count and elapsed time updated on each streaming chunk
+- Partial file recovery: `.partial` sidecar written during streaming; on success it is deleted, on error or truncation it is preserved for user inspection
+- Truncation detection: if `stop_reason` indicates `max_tokens`/`length`, the `.partial` file is kept and the target is not overwritten
+- Hoisted `LlmClient` construction out of the per-file loop; single client reuses TCP connection pool across all diverged files
+- Added 7 new tests: `partial_path`, `split_at_changelog` (present/absent), `reassemble` (with/without changelog), `classify_files_changelog_only_diff_is_unchanged`, `classify_files_template_half_differs_is_diverged`
+- Version bump: 15.3.0 to 15.4.0 (MINOR - streaming LLM, changelog marker optimization, partial recovery)
+
+### 2026-04-18 (v15.3.0, merge command redesign: DRY shared pipeline)
+
+- Redesigned merge command to follow the same file-resolution pipeline as init (DRY)
+- Extracted `resolve_all_files()` from `TemplateEngine::update()` into a reusable public method; both init and merge now call it
+- Added `ResolvedFiles` struct grouping `TemplateContext`, files-to-copy, and directories-to-create
+- Added `build_target_content_map()` on `TemplateEngine` that resolves all files and reads sources into `HashMap<PathBuf, String>`
+- Moved `generate_fresh_main()` from merge.rs into template_engine.rs as an associated function (pure template logic)
+- Refactored `merge_fragments()` to delegate content generation to `generate_fresh_main()`, eliminating duplicate fragment-merging code
+- Added `normalize_path()` as a public function in template_engine.rs
+- Merge now classifies files into three categories: New (write directly), Unchanged (skip), Diverged (LLM merge)
+- New files are created without LLM involvement; only diverged files are sent to the AI
+- LLM provider resolution is deferred until diverged files are actually found (no API key needed for new-only merges)
+- Deleted ~400 lines of duplicated code from merge.rs: build_target_source_map, find_merge_candidates, generate_fresh_main, insert_source_content, insert_skill_sources, insert_skill_dir_recursive, resolve_target, normalize_path, sha256_string
+- Added `categorize_path()` helper for FileTracker category detection during merge
+- Added 8 new tests: classify_files (new, unchanged, diverged, mixed, sorted), categorize_path (main, skill, integration, agent, language), plural helper
+- All written files (New + Diverged) are now recorded in FileTracker during merge
+- Version bump: 15.2.0 to 15.3.0 (MINOR - behavioral redesign of merge command)
+
+### 2026-04-18 (v15.2.0, init/merge redesign: AI-free init, AI-powered merge)
+
+- Removed --smart flag from init command: init is now pure template installation with no AI involvement; users resolve conflicts manually
+- Removed --provider and --model CLI flags from merge command: provider/model are resolved only from config (merge.provider, merge.model) and environment API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY)
+- Added --lang, --agent, --mission, --skill options to merge command (mirror init's options): these override the auto-detected installed language, agent, and allow specifying a custom mission or extra skills when generating the fresh template for AI comparison
+- Introduced MergeOptions<'a> struct in src/template_manager/merge.rs grouping lang/agent/mission/skills; re-exported via template_manager::MergeOptions and slopctl::MergeOptions
+- generate_fresh_main now accepts a mission override that takes precedence over template-defined mission fragments
+- build_target_source_map now accepts MergeOptions; lang override falls back to tracker.get_installed_language_for_workspace(); agent override falls back to agent_defaults::detect_all_installed_agents(); extra --skill sources are added to the target→content map (URL-based sources skipped)
+- Removed generate_smart_mission from smart.rs (no longer needed); smart.rs now only contains smart_doctor + parse_smart_issues + SmartIssueKind/SmartIssue
+- resolve_provider_and_model simplified to take no arguments (priority: config merge.provider > env auto-detect > error)
+- collect_workspace_context and its four tests removed (no production callers after generate_smart_mission removal)
+- Updated doctor.rs to call smart_doctor() without arguments
+- Version bump: 15.1.0 to 15.2.0 (MINOR - behavioural change to merge, CLI flag removals from init and merge, new CLI flags on merge)
+
+### 2026-04-18 (v15.1.0, smart features for init and doctor)
+
+- Added --smart flag to init command: generates mission statement from workspace context using LLM
+- Added --smart flag to doctor command: AI-assisted linting of AGENTS.md for contradictions, stale references, and unclear instructions
+- New src/template_manager/smart.rs: collect_workspace_context, generate_smart_mission, smart_doctor, parse_smart_issues
+- collect_workspace_context gathers directory listing, README.md (2000 chars), and project manifest (500 chars)
+- Smart mission generation uses LLM to produce a 2-4 sentence mission paragraph; skipped in dry-run mode
+- Smart doctor sends AGENTS.md to LLM and parses JSON array of issues with three kinds: contradiction, stale_reference, unclear_instruction
+- JSON parsing is tolerant of surrounding prose in LLM responses
+- init --smart and init --mission are mutually exclusive (enforced by clap conflicts_with)
+- Provider/model resolution reuses merge command priority chain: CLI > config merge.provider/merge.model > env auto-detect
+- resolve_provider_and_model changed to pub(super) for access from smart.rs sibling module
+- doctor() restructured to remove early returns; smart analysis always runs at the end when --smart is set
+- Added 8 new tests in smart.rs covering context collection, JSON parsing, edge cases
+- Version bump: 15.0.0 to 15.1.0 (MINOR - new CLI flags)
+
+### 2026-04-18 (v15.0.0, rebrand to slopctl)
+
+- MAJOR version bump: 14.0.0 to 15.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from slopcop to slopctl across entire codebase
+- Binary name: slopcop to slopctl
+- Config path: ~/.config/slopcop/ to ~/.config/slopctl/
+- Data path: ~/.local/share/slopcop/templates to ~/.local/share/slopctl/templates
+- Template marker: SLOPCOP-TEMPLATE to SLOPCTL-TEMPLATE
+- User-Agent header: slopcop to slopctl
+- Default template source URL updated to heikopanjas/slopctl (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
+
+### 2026-04-18 (v14.0.0, rebrand to slopcop)
+
+- MAJOR version bump: 13.3.0 to 14.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from vibe-cop to slopcop across entire codebase
+- Binary name: vibe-cop to slopcop
+- Config path: ~/.config/vibe-cop/ to ~/.config/slopcop/
+- Data path: ~/.local/share/vibe-cop/templates to ~/.local/share/slopcop/templates
+- Template marker: VIBE-COP-TEMPLATE to SLOPCOP-TEMPLATE
+- User-Agent header: vibe-cop to slopcop
+- Default template source URL updated to heikopanjas/slopcop (pending GitHub repo rename)
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md, ROADMAP.md, and templates/v5/AGENTS.md with new tool name
+
+### 2026-04-10 (v13.3.0, merge --verbose token usage)
+
+- Added `--verbose` (`-v`) flag to the `merge` command for token usage reporting
+- New `ChatResponse` struct in `llm.rs` returning content, input/output token counts, and stop reason
+- Updated `chat()`, `chat_openai_compatible()`, `chat_anthropic()` to return `ChatResponse` instead of `String`
+- Token extraction: Anthropic `usage.input_tokens`/`usage.output_tokens`/`stop_reason`; OpenAI/Mistral `usage.prompt_tokens`/`usage.completion_tokens`/`choices[0].finish_reason`; Ollama `prompt_eval_count`/`eval_count`/`done_reason`
+- Merge accumulates token counts across all files; prints summary with `--verbose`
+- Detects `max_tokens`/`length` stop reasons and warns about truncated files
+- Added `accumulate_usage()` and `format_number()` helpers with 5 new tests
+- Version bump: 13.2.3 to 13.3.0 (MINOR - new CLI flag)
+
+### 2026-04-10 (v13.2.3, merge writes to original by default)
+
+- Changed `merge` default behavior: merged content now replaces the original file directly
+- Previously, `merge` always wrote `.merged` sidecar files requiring manual review
+- Added `--preview` flag to opt into the old sidecar behavior when manual review is desired
+- Added HTTP timeouts to the LLM client: 30s connect, 5min read (prevents OS-level TCP timeout killing large requests)
+- Updated README.md merge command documentation with examples and new `--preview`/`--list-models` flags
+- Version bump: 13.2.2 to 13.2.3 (PATCH - behavioral fix)
+
+### 2026-04-10 (v13.2.2, fix merge command ignoring skills)
+
+- Fixed `merge` command not detecting changes in skill files (e.g. git-workflow)
+- Root cause: `find_merge_candidates()` explicitly skipped `category == "skill"` entries, and `build_target_source_map()` never included skill files
+- Removed skill exclusion from `find_merge_candidates()`; skills are now treated like any other tracked file
+- Added skill file mapping to `build_target_source_map()`: walks local skill source directories for top-level, agent, and language skills and maps each file to its installed workspace target
+- Uses `detect_all_installed_agents()` to cover multi-agent workspaces; top-level skills mapped to each agent's skill dir, falling back to cross-client dir when no agents detected
+- Added `insert_skill_sources()` helper: resolves skill base dir from placeholder, iterates skill definitions, skips URL-based sources (not cached locally)
+- Added `insert_skill_dir_recursive()` helper: recursively reads skill source directories and inserts file content into the target-source map
+- Added 4 new tests: recursive dir mapping, subdirectory handling, URL skip, local skill inclusion
+- Fixed merge ignoring untracked files (e.g. AGENTS.md customized before tracking, or skipped by init); merge now also checks files from the target-source map that exist on disk but are not in the FileTracker
+- For untracked files, merge compares current file SHA against template SHA directly (no original_sha needed)
+- Known limitation: ad-hoc CLI skills (`--skill user/repo`) have no template source in templates.yml, so they cannot be merge candidates
+- Version bump: 13.2.1 to 13.2.2 (PATCH - bug fix)
+
+### 2026-04-10 (v13.2.1, config CLI option rename)
+
+- Replaced positional `<key> <value>` set syntax with `--add <key> <value>` (`-a`) flag
+- Renamed `--unset` (`-u`) to `--remove` (`-r`) for consistency
+- Updated `handle_config` function, CLI struct, dispatch, and inline help text
+- Updated README.md config command documentation and examples
+- Version bump: 13.2.0 to 13.2.1 (PATCH - CLI option rename)
+
+### 2026-04-10 (v13.2.0, merge --list-models)
+
+- Added `--list-models` (`-L`) flag to the `merge` command for querying available models from the selected LLM provider
+- Added `Provider::models_endpoint()` returning the model listing URL per provider
+  - OpenAI: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Anthropic: `GET /v1/models` (`x-api-key` + `anthropic-version` headers, `data[].id`)
+  - Mistral: `GET /v1/models` (Bearer auth, `data[].id`)
+  - Ollama: `GET /api/tags` (no auth, `models[].name`)
+- Added `LlmClient::list_models()` with three parsing paths: OpenAI-compatible, Anthropic, and Ollama
+- Added `TemplateManager::list_models()` encapsulating provider resolution and API call
+- Output lists models alphabetically; the active default model is marked with `(default)`
+- Added `test_provider_models_endpoint` unit test
+- Version bump: 13.1.0 to 13.2.0 (MINOR - new CLI flag)
+
+### 2026-04-10 (v13.1.0, AI-assisted merge command)
+
+- Implemented `merge` command: LLM-assisted merge of customized workspace files with updated templates
+- New `src/llm.rs`: LLM provider abstraction supporting OpenAI, Anthropic, Ollama, and Mistral
+- Auto-detection of LLM provider from environment API key variables
+  - Priority: CLI `--provider` > config `merge.provider` > env auto-detect > error
+  - Checks `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY` in order
+  - Ollama not auto-detected (requires no key, would always match)
+  - `Provider` enum with `from_name()`, `default_model()`, `endpoint()`, API key env var lookup
+  - `LlmClient` struct with `chat()` method; OpenAI-compatible path for OpenAI/Ollama/Mistral, dedicated Anthropic Messages API path
+  - API keys read from environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`); Ollama requires no key
+  - Temperature fixed at 0.0 for deterministic merge output
+- New `src/template_manager/merge.rs`: merge command logic
+  - Finds merge candidates: tracked files that are both user-modified AND have updated template sources
+  - Generates fresh AGENTS.md by re-merging base template with all fragments (principles, mission, languages, integration)
+  - Builds target-to-source map from templates.yml for non-main files (agent, language, integration entries)
+  - Writes `.merged` sidecar files; skips if sidecar already exists
+  - Dry-run mode shows candidates without calling the LLM
+- Extended `Config` with `merge.provider` and `merge.model` keys
+  - New `MergeConfig` struct in `config.rs` with `provider` and `model` fields
+  - Priority: CLI `--provider`/`--model` > config values > error (provider required)
+- Added `resolve_target()` public method on `TemplateEngine` (exposes placeholder resolution for merge module)
+- Wired merge dispatch in `main.rs`: passes CLI args to `TemplateManager::merge()`
+- Added 21 new tests across `llm.rs`, `merge.rs`, and `config.rs`
+- Version bump: 13.0.0 to 13.1.0 (MINOR - new feature)
+
+### 2026-04-10 (v13.0.0, Codex modernization, CLI rename, merge skeleton)
+
+- MAJOR version bump: 12.4.0 to 13.0.0 (breaking CLI rename, template changes)
+- Renamed `install` command to `init` across CLI, source, README, and user-facing strings
+- Removed stale Codex template files: `codex/CODEX.md` and `codex/prompts/init-session.md`
+- Codex reads AGENTS.md natively; redirect file and prompt are no longer needed
+- Codex agent entry in templates.yml is now empty (`codex: {}`)
+- Added Session Protocol section to AGENTS.md template for agents that read it directly
+- Added `merge` command skeleton with `--provider`, `--model`, `--dry-run` flags (not yet implemented)
+- Updated README.md: migration guide v12-to-v13, removed Codex directory from repo tree, added merge command docs
+- Updated ROADMAP.md with completed items and future considerations
+
+### 2026-04-10 (v12.4.0, CLI rework: templates and status commands)
+
+- Replaced `update` command with `templates` command that consolidates global template management
+- `templates --update` downloads/updates global templates (replaces `slopctl update`)
+- `templates --list` shows available agents, languages, and skills (replaces `slopctl list --global`)
+- Both flags can be combined: `templates --update --list` updates then shows the catalog
+- Running `slopctl templates` with neither flag prints an error with usage examples
+- `--from` and `--dry-run` now require `--update` (enforced by clap)
+- Renamed `list` command back to `status` (workspace-only; `--global` moved to `templates --list`)
+- Made `list_global()` public on `TemplateManager` for use by the templates command path
+- Updated all user-facing strings referencing `slopctl update` and `slopctl list` across codebase
+- Updated README.md CLI docs and examples
+- Version bump: 12.3.4 to 12.4.0 (MINOR - new commands, removed old commands)
+
+### 2026-04-10 (docs update, CI badge and AGENTS.md placeholders)
+
+- Added CI status badge to README.md linking to the Build and Test workflow on develop branch
+- Updated README.md footer version from v12.2.0 to v12.3.4
+- Filled in all placeholder sections in the project AGENTS.md with actual project information:
+  - Mission Statement: describes slopctl purpose and supported agents
+  - Technology Stack: Rust 2024, clap, reqwest, serde, GitHub Actions CI/CD, MIT license
+  - Development Guidelines: debug builds, branch model, dry-run testing, module organization
+  - Code Review: cargo fmt, clippy, and test before committing
+  - Security: environment-only token access, template marker protection
+  - Testing: in-file unit tests, CWD_LOCK mutex, cross-platform CI
+  - Documentation: doc comments, cargo doc, README update policy, changelog location
+
+### 2026-04-09 (v12.3.4, fix skill directories not downloaded during update)
+
+- Fixed `download_templates_from_url` not downloading skill directories from the remote repository
+- Root cause: download loops processed `files` entries for all sections but never iterated over `skills` entries
+- Local-path skills (e.g. `skills/rust-coding-conventions`) were missing from the global template cache after `update`, causing "Skill source not found" errors at install time
+- Added `collect_local_skill_sources()`: gathers deduplicated local-path skill sources from all config sections (top-level, agents, languages, shared); skips URL-based skills (fetched at install time)
+- Added `download_skill_directory()`: uses GitHub Contents API to download a skill directory tree into the global cache, preserving directory structure
+- Added `download_skill_entries()`: recursive helper for downloading nested skill directory contents
+- Added `Default` derive to `AgentConfig`, `LanguageConfig`, `SharedConfig` for test ergonomics
+- Added 5 unit tests: empty config, top-level skills, URL filtering, deduplication, all-sections collection
+- Version bump: 12.3.3 to 12.3.4 (PATCH - bug fix)
+
+### 2026-04-09 (v12.3.3, clippy collapsible-if fix)
+
+- Collapsed nested `if let` into a single let-chain in `template_engine.rs` update() agent config block
+- Resolves clippy `collapsible_if` warning using idiomatic Rust 2024 let-chain syntax
+- Version bump: 12.3.2 to 12.3.3 (PATCH - lint fix)
+
+### 2026-04-07 (v12.3.2, fix purge path dedup and skill discovery)
+
+- Fixed `purge` and `remove --all` attempting to delete the same file twice when it appeared in both BoM (relative path) and FileTracker (absolute path)
+- Root cause: BoM returns relative paths (e.g. `./.cursorrules`), FileTracker returns absolute paths; `sort()` + `dedup()` could not reconcile the two formats
+- BoM-sourced paths are now canonicalized to absolute paths before collection in both `purge.rs` and `remove.rs` (`--agent` and `--all` branches)
+- Added filesystem skill directory scanning to `purge` via `get_all_skill_search_dirs` + `collect_files_recursive`, matching the behavior already present in `list` (v12.2.1) and `remove --skill` (v11.6.0)
+- Previously, manually placed or untracked skills survived `purge`; they are now discovered and removed
+- Added 3 new purge tests: empty workspace dry-run, BoM/tracker deduplication, untracked skill discovery
+- Consolidated CWD_LOCK mutex from per-module statics in purge and remove tests to a single shared static in `template_manager/mod.rs`, preventing test race conditions on `set_current_dir`
+- Version bump: 12.3.1 to 12.3.2 (PATCH - bug fix)
+
+### 2026-04-06 (v12.3.1, remove falls back to FileTracker)
+
+- Made `remove --agent` and `remove --lang` fall back to FileTracker when the entry no longer exists in templates.yml
+- Previously, removing an agent/language that was deleted from templates.yml after installation returned a hard error, orphaning installed files
+- `remove --agent`: tries BoM first; if agent not found, queries FileTracker for category "agent" entries filtered by `path_belongs_to_agent`
+- `remove --lang`: tries templates.yml first; if language not found, queries FileTracker for entries where `meta.lang` matches, excluding "main" and "skill" categories
+- `remove --all`: now supplements BoM agent files with FileTracker-tracked agent entries, catching agents no longer in BoM
+- Removed hard `require!(config_file.exists())` guards; BoM loading is now optional/graceful
+- Renamed test `test_remove_lang_unknown_errors` to `test_remove_lang_unknown_no_error` (no longer an error)
+- Added 3 new tests: agent fallback to tracker, lang fallback to tracker, lang fallback excludes main/skill
+- Added CWD_LOCK mutex for test serialization (process-global `set_current_dir` safety)
+- Version bump: 12.3.0 to 12.3.1 (PATCH - bug fix)
+
+### 2026-04-06 (v12.3.0, validate agent and language before install)
+
+- Added early validation in `TemplateEngine::update()` that rejects unknown agent/language names before any work begins
+- Previously, unknown agent printed a soft warning and continued the install (main template, principles, integration still installed)
+- Unknown language was caught by `resolve_language_files` but only after principles/mission had already been processed
+- Both now fail immediately after loading templates.yml, listing available names in the error message
+- Removed the unreachable soft-warning `else` branch for unknown agents
+- Error format matches existing `remove --lang` pattern with newline-separated available list
+- Added 4 new tests: unknown agent rejected, unknown language rejected, known agent accepted, known language accepted
+- Version bump: 12.2.1 to 12.3.0 (MINOR - new validation behavior)
+
+### 2026-04-06 (v12.2.1, filesystem skill detection in list)
+
+- Enhanced `list` (workspace mode) to discover installed skills by scanning agent skill directories on disk
+- Previously relied solely on FileTracker, missing manually placed or externally installed skills
+- Uses `agent_defaults::get_all_skill_search_dirs` to find all skill directories for installed agents + cross-client dir
+- Enumerates subdirectories in each skill dir; merges with FileTracker entries as fallback
+- Added "No skills installed" message when no skills found (consistent with agents/language sections)
+- Fixed `continue` guard in skill detection loop to use combined conditions per coding conventions
+- Version bump: 12.2.0 to 12.2.1 (PATCH - improved skill detection)
+
+### 2026-04-06 (v12.2.0, agent directories)
+
+- Added `DirectoryEntry` struct with `target` field in `bom.rs`
+- Added `directories: Vec<DirectoryEntry>` to `AgentConfig` for agent-declared workspace directories
+- Agent directories created with `create_dir_all` during install
+- Dry-run output now shows directories that would be created
+- Updated `templates/v5/templates.yml`: cursor agent gets `directories` with `.cursor/plans`
+- Added 3 new tests: DirectoryEntry serde, AgentConfig directories defaults and parsing
+- Version bump: 12.1.1 to 12.2.0 (MINOR - new feature)
+
+### 2026-04-06 (v12.1.1, fix workspace scoping in FileTracker)
+
+- Fixed `list`, `purge`, `remove`, and `doctor` commands matching files from other workspaces when run from a parent directory (e.g. home)
+- Root cause: `get_workspace_entries` used `Path::starts_with` prefix matching, so `/Users/me` matched entries from `/Users/me/projects/app/`
+- Added `workspace: Option<String>` field to `FileMetadata` to record the exact workspace root at install time
+- Changed `record_installation()` to accept a `workspace: &Path` parameter and store its canonicalized path
+- Changed `get_workspace_entries()`, `get_workspace_entries_by_category()`, and `get_installed_language_for_workspace()` to exact-match on `meta.workspace` instead of `starts_with`
+- Legacy entries without workspace field (`None`) are silently skipped; they get a workspace assigned on next `install` or `update`
+- `workspace` field uses `serde(default, skip_serializing_if)` for backwards-compatible JSON serialization
+- Added 2 new tests: parent dir exclusion and legacy entry handling
+- Version bump: 12.1.0 to 12.1.1 (PATCH - bug fix)
+
+### 2026-04-06 (v12.1.0, merge list and status commands)
+
+- Removed `status` command; `list` now serves both roles
+- `list` (default): shows workspace state (global templates, AGENTS.md, installed agents/language/skills, managed files with `-v`)
+- `list --global` / `list -g`: shows available template catalog (agents, languages, skills from templates.yml)
+- Added `--global` (`-g`) and `--verbose` (`-v`) flags to `List` command
+- Enhanced `--global` view to show language/shared-group skill names inline under each language
+- Deleted `src/template_manager/status.rs`; moved logic into `list.rs` split across `list_workspace()` and `list_global()` helpers
+- Updated README.md references from `slopctl status` to `slopctl list`
+- Version bump: 12.0.0 to 12.1.0 (MINOR - merged commands, new --global flag)
+
+### 2026-04-06 (v12.0.0, template version V5)
+
+- MAJOR version bump: 11.11.0 to 12.0.0 (template format version change)
+- Bumped template version from 4 to 5
+- Renamed `templates/v4` directory to `templates/v5`
+- Updated default source URL, migration error message, and accepted version range (2..=5)
+- Updated `default_version()` return value and all related tests
+- Updated all V4/v4 references in README.md to V5/v5
+- No migration path from V4 provided
+
+### 2026-04-06 (v11.11.0, short CLI options)
+
+- Added short option aliases to all CLI flags across every command
+- install: `-l` (lang), `-a` (agent), `-m` (mission), `-s` (skill), `-f` (force), `-n` (dry-run)
+- update: `-f` (from), `-n` (dry-run)
+- purge: `-f` (force), `-n` (dry-run)
+- remove: `-a` (agent), `-l` (lang), `-s` (skill), `-f` (force), `-n` (dry-run); `--all` stays long-only (dangerous operation)
+- doctor: `-f` (fix), `-n` (dry-run), `-v` (verbose)
+- status: `-v` (verbose)
+- config: `-l` (list), `-u` (unset)
+- Version bump: 11.10.0 to 11.11.0 (MINOR - new CLI ergonomics)
+
+### 2026-04-06 (v11.10.0, status --verbose flag)
+
+- Managed file list in `status` command is now hidden by default; shown only with `--verbose`
+- Added `--verbose` flag to `Status` variant in `main.rs`
+- Changed `status()` signature to accept `verbose: bool`
+- Moved managed file collection and display into a `verbose`-gated block
+- Separated agent detection from file collection to avoid dead writes when non-verbose
+- Version bump: 11.9.0 to 11.10.0 (MINOR - new CLI option)
+
+### 2026-04-03 (templates-to-skills migration)
+
+- Converted all coding-convention files to skills to reduce AGENTS.md context pressure
+- Created `templates/v4/skills/` with 10 skill directories: `rust-coding-conventions`, `c-coding-conventions`, `c++-coding-conventions`, `swift-coding-conventions`, `rust-build-commands`, `cmake-build-commands`, `swift-build-commands`, `make-build-commands`, `git-workflow`, `semantic-versioning`
+- Removed all `$instructions` entries for coding-conventions and build-commands from `templates.yml`; replaced with `skills:` entries on their respective languages and shared groups
+- For `git-workflow` and `semantic-versioning` (Tier 3): kept slim anchor fragments (`git-workflow-summary.md`, `semantic-versioning-summary.md`) as `$instructions`; added full-detail skills to top-level `skills:` section
+- Added `make-build-commands` skill to top-level `skills:` section (was not previously in templates.yml)
+- AGENTS.md template now receives no language convention blocks; agents load conventions on demand via the skill system
+- Context window savings: ~81 KB from coding conventions alone removed from AGENTS.md per install
+
+### 2026-04-02 (v11.9.0, language-to-language skill propagation)
+
+- Changed `resolve_language_skills` to propagate skills from included *languages* in addition to shared groups
+- Extracted `resolve_language_skills_inner` recursive helper with cycle detection (mirrors `resolve_language_files_inner`)
+- A language that `includes` another language now inherits its skills depth-first; own skills always come last
+- Updated test `test_resolve_language_skills_no_inherit_from_language` → `test_resolve_language_skills_inherit_from_language` to assert propagation
+- Added `test_resolve_language_skills_multilevel_language_inherit` (3-level chain) and `test_resolve_language_skills_cycle_detection`
+- Updated README.md and AGENTS.md to reflect new behaviour
+- Version bump: 11.8.0 to 11.9.0 (MINOR - new skill propagation feature)
+
+### 2026-04-02 (v11.8.0, remove --lang flag)
+
+- Added `--lang <name>` option to the `remove` subcommand
+- Resolves the language's full file list via `bom::resolve_language_files` (honours `includes` chains)
+- Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths (user-global)
+- Validates that the given language name exists in templates.yml; reports available languages on error
+- `--all` is now mutually exclusive with both `--agent` and `--lang`
+- Made `BillOfMaterials::resolve_workspace_path` public for reuse in remove.rs
+- Added 4 new tests: instructions/userprofile skipping, workspace path resolution, unknown lang error
+- Version bump: 11.7.0 to 11.8.0 (MINOR - new flag)
+
+### 2026-04-02 (v11.7.0, doctor command)
+
+- Added `doctor` subcommand to check workspace for stale or broken managed files
+- Detects three issue categories: missing files (tracker entry exists, file deleted), unmerged templates (main file still has TEMPLATE_MARKER), and modified files (SHA changed since install, informational)
+- Added `--fix` flag: prunes stale FileTracker entries for missing files and strips TEMPLATE_MARKER from unmerged files
+- Added `--dry-run` flag: shows what would be fixed without applying changes; works independently of `--fix`
+- Created `src/template_manager/doctor.rs` with `DoctorIssue`, `IssueKind`, `collect_issues`, `fix_unmerged_template`, and `doctor()` on `TemplateManager`
+- Added `Doctor { fix, dry_run }` variant to `Commands` enum in `main.rs` with dispatch arm
+- Added 5 unit tests covering: marker stripping, content preservation, empty tracker, missing file detection, unmerged template detection
+- Version bump: 11.6.1 to 11.7.0 (MINOR - new command)
+
+### 2026-04-02 (v11.6.1, fix phantom skills in status)
+
+- Fixed `status` reporting phantom skill names (e.g. `.agents`) from stale FileTracker entries whose files no longer exist on disk
+- `status` now filters both skill name extraction and managed file listing by `path.exists()`
+- Fixed `remove --skill <name>` to silently prune stale tracker entries (tracked but missing from disk) for the given skill name; previously stale entries were never cleaned up because `path.exists()` was false
+- Stale entries are cleaned whether or not real files are also being removed: when there are no real files to delete, the stale entries are pruned directly; when there ARE real files, stale entries are pruned alongside them
+- Version bump: 11.6.0 to 11.6.1 (PATCH - bug fixes)
+
+### 2026-04-02 (v11.6.0, multi-agent skill remove)
+
+- Changed `remove --skill <name>` to scan the filesystem in every installed agent's skill directory AND the cross-client `.agents/skills/` directory
+- Previously only the FileTracker was consulted, missing untracked or manually placed skill files
+- Added `resolve_placeholder_path()` free function to `agent_defaults.rs` (extracts logic from the private `TemplateEngine::resolve_placeholder` method)
+- Added `get_all_skill_search_dirs(workspace, userprofile) -> Vec<PathBuf>` to `agent_defaults.rs`: returns agent skill dirs for all detected agents + cross-client dir, deduplicated
+- Added `collect_files_recursive(dir, files)` to `utils.rs` and exported from `lib.rs`
+- Updated `remove.rs` skill block: for each skill name, scans `<search_dir>/<skill_name>/` on disk in all candidate dirs; falls back to FileTracker sweep for any tracked files outside standard dirs; deduplicates before removal
+- Added 7 new tests: `resolve_placeholder_path` (workspace, userprofile, literal), `get_all_skill_search_dirs` (no agents, with agent), `collect_files_recursive` (flat, nested)
+- Version bump: 11.5.0 to 11.6.0 (MINOR - new multi-agent skill removal)
+
+### 2026-04-02 (v11.5.0, multi-agent skill install)
+
+- Changed `install --skill` (without `--agent`) to detect all installed agents in the workspace
+- Skills are now installed into each detected agent's skill directory (e.g. `.cursor/skills/`, `.claude/skills/`)
+- Falls back to cross-client `.agents/skills/` only when no agents are detected
+- Added `detect_all_installed_agents()` to `agent_defaults.rs`; returns all agents whose instruction files exist (vs. `detect_installed_agent` which returns only the first)
+- Updated `install_skills_only()` in `template_engine.rs` to iterate over all detected agent skill dirs
+- Updated skill-only log message in `main.rs` from "to cross-client directory" to generic "Installing skills"
+- Added 3 new tests: `test_detect_all_installed_agents_none`, `_single`, `_multiple`
+- Version bump: 11.4.0 to 11.5.0 (MINOR - new multi-agent skill install behavior)
+
+### 2026-03-26 (v11.4.0, shared group skills propagation)
+
+- Introduced `SharedConfig` struct in `bom.rs` with `files` and `skills` fields
+- Changed `TemplateConfig.shared` from `HashMap<String, Vec<FileMapping>>` to `HashMap<String, SharedConfig>`
+- Skills defined on shared groups propagate to including languages via `includes`
+- Added `resolve_language_skills()` function: collects language own skills + shared group skills
+- Skills from included *languages* are still NOT propagated (only shared groups)
+- Updated `template_engine.rs` to use `resolve_language_skills` for language skill install
+- Updated `download_manager.rs` shared download loop for new `SharedConfig` format
+- Updated `list.rs` to use `resolve_language_skills` for accurate skill counts
+- Updated `templates/v4/templates.yml` shared section to use `files:` key
+- Added `make_shared()` test helper in `bom.rs`
+- Added tests: `SharedConfig` serde, `resolve_language_skills` (own, shared, combined, no-inherit, not-found)
+- Version bump: 11.3.0 to 11.4.0 (MINOR - shared skills feature)
+
+### 2026-03-26 (v11.3.0, V4 template format with agent/language skills)
+
+- Bumped template version from 3 to 4 (V4 format)
+- Renamed `templates/v3` directory to `templates/v4`; updated default source URL
+- Added `skills: Vec<SkillDefinition>` to `LanguageConfig` for language-associated skills
+- Changed `AgentConfig.skills` from `Vec<FileMapping>` to `Vec<SkillDefinition>` (name+source instead of source+target)
+- Agent skills install to agent-specific directory (e.g. `.cursor/skills/`)
+- Language skills install to cross-client `.agents/skills/` directory; NOT inherited via `includes`
+- Top-level and ad-hoc skills continue using existing logic (agent dir if agent specified, cross-client otherwise)
+- Removed agent skills from `BillOfMaterials` file chain (skills tracked via `FileTracker` instead)
+- Removed agent skills from `download_templates_from_url` (skills resolved at install time, not during update)
+- Updated `list` command to show language skill counts alongside agent skill counts
+- Updated version match in `update.rs` to accept `2..=4`
+- Added `make_lang()` test helper in `bom.rs` for concise `LanguageConfig` construction
+- Added tests for `LanguageConfig` skills serde, `AgentConfig` skills as `SkillDefinition`, and full V4 round-trip
+- Updated all version references from 3 to 4 across tests and source
+- Version bump: 11.2.0 to 11.3.0 (MINOR - V4 template format)
+
+### 2026-03-26 (v11.2.0, independent skill installation)
+
+- Made `--skill` independent from `--lang` and `--agent` in the `install` command
+- `--skill` alone now installs skills without requiring global templates, AGENTS.md, or an agent
+- Skills installed without `--agent` go to the cross-client `$workspace/.agents/skills/` directory per the agentskills.io specification
+- Skills installed with `--agent` continue using the agent-specific path (e.g. `.cursor/skills/`)
+- When `--skill` is used with `--lang` (no agent), skills also use the cross-client path
+- Added `CROSS_CLIENT_SKILL_DIR` constant in `agent_defaults.rs`
+- Added `install_skills_only()` method to `TemplateEngine` for standalone skill installation
+- Added `install_skills()` method to `TemplateManager` for skill-only routing
+- Refactored `install_skills()` to accept `skill_base_dir` directly instead of deriving from agent name (DRY)
+- Refactored `copy_files_with_tracking()` to accept `template_version: u32` instead of `&TemplateContext`
+- Extracted `resolve_adhoc_skills()` helper to eliminate duplication between `update()` and `install_skills_only()`
+- Updated `main.rs` to route skill-only mode directly, skipping template download
+- Added 8 new tests covering cross-client dir, resolve_adhoc_skills, and install_skills
+- Version bump: 11.1.1 to 11.2.0 (MINOR - independent skill install feature)
+
+### 2026-03-21 (Windows/PowerShell guidelines)
+
+- Added "Windows / PowerShell Guidelines" section to AGENTS.md
+- Covers shell syntax (no bash heredocs, use PowerShell here-strings or multi -m flags)
+- Covers path handling (drive letters required for absolute, cfg-gated test assertions)
+- Covers line ending awareness (CRLF vs LF, .gitattributes)
+- Prevents agents from attempting bash-only syntax in PowerShell terminals
+
+### 2026-03-21 (v11.1.1, fix Windows CI test failure)
+
+- Fixed `test_resolve_local_skill_path_absolute` failing on Windows CI
+- Unix-style `/opt/skills/my-skill` is not absolute on Windows (no drive letter), causing path resolution to prepend cwd
+- Test now uses `#[cfg(windows)]` / `#[cfg(not(windows))]` with platform-appropriate absolute paths
+- Version bump: 11.1.0 to 11.1.1 (PATCH - test fix)
+
+### 2026-03-21 (v11.1.0, local ad-hoc skill installation)
+
+- Added support for installing skills from local filesystem paths via `--skill`
+- Previously `--skill` only accepted GitHub URLs and `user/repo` shorthand
+- Now also accepts absolute paths (`/path/to/skill`), relative paths (`./skill`, `../skill`), and home-relative paths (`~/skills/my-skill`)
+- Added `is_local_path()` to detect filesystem path syntax before GitHub shorthand expansion
+- Added `resolve_local_skill_path()` to expand `~`, resolve relative paths against cwd
+- In `install_skills()`, absolute source paths are used directly instead of joining with config_dir
+- Updated CLI help text and `UpdateOptions` doc comment
+- Added 10 unit tests covering path detection, resolution, and edge cases
+- Version bump: 11.0.2 to 11.1.0 (MINOR - new feature)
+
+### 2026-03-20 (v11.0.2, cross-section duplicate target detection)
+
+- Added `validate_no_duplicate_targets()` in `template_engine.rs` to catch cross-section conflicts
+- Previously, if two sections (e.g. language + integration) targeted the same workspace file, the last one silently overwrote the first
+- Now returns a clear error naming both sources and the conflicting target path
+- Extracted as standalone public function for testability
+- Added 4 unit tests covering empty, unique, duplicate, and same-source-different-target cases
+- Version bump: 11.0.1 to 11.0.2 (PATCH - defensive validation)
+
+### 2026-03-20 (v11.0.1, fix shared template download)
+
+- Fixed `download_templates_from_url` in `download_manager.rs` skipping `shared` section of templates.yml
+- Shared file groups (e.g. cmake files used by C and C++ via `includes`) were never downloaded from remote
+- This caused `resolve_language_files` to silently skip shared files during install (source not found on disk)
+- Added download loop for `config.shared` values before the language download loop
+- Version bump: 11.0.0 to 11.0.1 (PATCH - bug fix)
+
+### 2026-03-19 (v11.0.0, rebrand to slopctl)
+
+- MAJOR version bump: 10.0.0 to 11.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from regulator to slopctl across entire codebase
+- Binary name: `regulator` to `slopctl`
+- Config path: `~/.config/regulator/` to `~/.config/slopctl/`
+- Data path: `~/.local/share/regulator/` to `~/.local/share/slopctl/`
+- Template marker: `REGULATOR-TEMPLATE` to `VIBE-COP-TEMPLATE`
+- User-Agent header: `regulator` to `slopctl`
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md with new tool name
+- Man page renamed to slopctl.1
+
+### 2026-03-13 (v10.0.0, rebrand to regulator)
+
+- MAJOR version bump: 9.1.0 to 10.0.0 (breaking: binary, config paths, data paths all renamed)
+- Renamed tool from vibe-check to regulator across entire codebase
+- Binary name: `vibe-check` to `regulator`
+- Config path: `~/.config/vibe-check/` to `~/.config/regulator/`
+- Data path: `~/.local/share/vibe-check/` to `~/.local/share/regulator/`
+- Template marker: `VIBE-CHECK-TEMPLATE` to `REGULATOR-TEMPLATE`
+- User-Agent header: `vibe-check` to `regulator`
+- Updated all CLI help text, error messages, and user-facing strings
+- Updated CI workflows (build.yml, release.yml) artifact names
+- Updated README.md with new tool name
+- GitHub repo URL unchanged (rename pending); TODO markers left at URL references
+- Template examples in rust-coding-conventions.md made generic (my-app)
+- Man page renamed to regulator.1
+
+### 2026-03-07 (v9.1.0, skill-aware subcommands)
+
+- Upgraded status, purge, remove, and list commands to handle all skill sources correctly
+- Previously only BoM-defined agent skills (templates.yml) were visible; top-level and ad-hoc skills were missed
+- Added `FileTracker::get_workspace_entries()` and `get_workspace_entries_by_category()` query methods
+- **status**: uses FileTracker to show all installed skills grouped by name (replaces SKILL.md path heuristic)
+- **purge**: merges FileTracker entries into file collection so ad-hoc and top-level skills are also purged
+- **remove**: added `--skill <name>` repeatable flag for targeted skill removal
+- **remove**: `--agent` now also removes ad-hoc skill files under that agent's skill directory
+- **remove**: `--all` now removes all tracked skill files in the workspace
+- **list**: shows ad-hoc installed skills from FileTracker marked as "(ad-hoc)"
+- Extracted shared `extract_skill_name_from_path()` helper in `template_manager/mod.rs` (DRY)
+- Added `path_belongs_to_agent()` helper in `remove.rs` for agent-specific skill matching
+- Added 13 new tests covering FileTracker queries, skill name extraction, and agent path matching
+- Version bump: 9.0.4 to 9.1.0 (MINOR - new CLI flag, new FileTracker API)
+
+### 2026-03-07 (v9.0.4, reduce GitHub API calls in skill install)
+
+- Eliminated redundant `list_directory_contents` API calls during GitHub skill installation
+- `discover_skills()` now carries pre-fetched directory entries in `DiscoveredSkill.entries`
+- Added `download_directory_from_entries()` to accept pre-fetched entries, skipping re-listing
+- Extracted shared `download_entries()` helper used by both download functions (DRY)
+- `install_skills()` passes discovery entries to download phase instead of re-fetching
+- Saves N GitHub API calls per install (one per discovered skill), reducing rate-limit pressure
+- Version bump: 9.0.3 to 9.0.4 (PATCH - performance fix)
+
+### 2026-03-07 (v9.0.3, fix GitHub skill installation)
+
+- Fixed GitHub skill installation failing for repos without standardized directory structure
+- Added `discover_skills()` to `github.rs`: recursively scans for SKILL.md to find skills in repos
+- Added `download_directory_recursive()` to `github.rs`: downloads all files including subdirectories
+- Added `GitHubUrl::child()` and `GitHubUrl::skill_name()` helper methods
+- Fixed `skill_name_from_url` bug: bare `user/repo` shorthand returned branch name instead of repo name
+- Reworked `install_skills` in `template_engine.rs` to use discovery + recursive download
+- Local skill sources now also copied recursively (supports `scripts/`, `references/`, `assets/` subdirs)
+- Added `collect_local_skill_files()` helper for recursive local skill collection
+- Added tests for `skill_name`, `child`, and `skill_name_from_url` bare-repo cases
+- Version bump: 9.0.2 to 9.0.3 (PATCH - bug fix)
+
+### 2026-02-25 (anyhow migration)
+
+- Migrated error handling from custom `Result<T>` type alias (`Box<dyn Error>`) to `anyhow` crate
+- `lib.rs` now re-exports `pub use anyhow::Result;` instead of defining type alias
+- Replaced all `Err(format!(...).into())` with `Err(anyhow!(...))`
+- Replaced all `Err("literal".into())` with `Err(anyhow!(...))`
+- Updated `.ok_or()` patterns for anyhow compatibility
+- Updated `file_tracker.rs` signatures from `Box<dyn Error>` to anyhow
+- Updated all test return types to `anyhow::Result`
+- Fixed config test race condition with static Mutex
+- Retrofitted `require!` macro at function-top preconditions across codebase
+- Updated AGENTS.md error handling section to reflect anyhow patterns
+
+### 2026-02-24 (require! macro)
+
+- Added `require!(condition, return_expr)` precondition macro in `lib.rs`
+- Returns expression when condition is false; works with `Result`, `Option`, and bare values
+- Added unit tests for all three return type variants
+- Documented convention in AGENTS.md error handling section
+
+### 2026-02-24 (v9.0.2, coding conventions)
+
+- Added "Loop Flow Control" coding convention: avoid `continue` guards, prefer combined conditions
+- Added "No Option-wrapped collections" convention: use `Vec<T>` / `HashMap<K,V>` with `serde(default)` instead of `Option<Vec<T>>` / `Option<HashMap<K,V>>`
+- Added convention: expose internal `Vec<T>` as `&[T]` slice, not `&Vec<T>`
+- Replaced all `.unwrap()` with `?` operator across tests and library code
+- Converted all `Option<Vec<T>>` and `Option<HashMap<K,V>>` struct fields to plain collections
+- Changed `get_agent_files` return type from `Option<&Vec<PathBuf>>` to `Option<&[PathBuf]>`
+- Eliminated all `continue` guard patterns in loop bodies
+- Simplified consumers: removed `if let Some(...)` wrappers, used `.chain()` and `if/else if/else`
+- Applied `cargo fmt` formatting fixes
+- Version bump: 9.0.1 to 9.0.2 (PATCH - conventions and internal refactor)
+
+### 2026-02-24 (v9.0.1)
+
+- Decoupled `--lang` and `--agent` CLI flags: each now operates independently
+- Removed `--no-lang` flag (redundant: omitting `--lang` has the same effect)
+- Changed `UpdateOptions.lang` from `&str` to `Option<&str>`; removed `no_lang: bool` field
+- Removed auto-resolution of language when only `--agent` is specified
+- `--agent cursor` alone now installs only agent files; `--lang rust` alone installs only language files
+- Simplified `template_manager/update.rs`: removed lang resolution block, pass options through
+- Simplified CLI message branching in `main.rs`
+- Version bump: 9.0.0 to 9.0.1 (PATCH - behavioral refinement)
+
+### 2026-02-24 (v9.0.0, post-release)
+
+- Added duplicate disk-file target validation in `resolve_language_files()`
+- Two entries targeting the same workspace file now produce a clear error
+- Entries targeting `$instructions` (AGENTS.md fragments) are exempt since multiple fragments are expected
+
+### 2026-02-24 (v9.0.0)
+
+- MAJOR version bump: 8.0.0 to 9.0.0 (V1 removed, V3 template format)
+- Removed V1 template engine and all V1 templates (deprecated since v7.0.0)
+- Deleted `src/template_engine_v1.rs` and entire `templates/v1/` directory (39 files)
+- Introduced V3 template format: `shared` file groups and `includes` directive on languages
+- New `shared` section in templates.yml for reusable file groups (e.g. cmake files shared by C and C++)
+- New `includes` field on `LanguageConfig`: compose shared groups or extend other languages
+- Recursive include resolution with cycle detection via `resolve_language_files()` in `bom.rs`
+- Merged `template_engine_v2.rs` into `template_engine.rs`: dissolved `TemplateEngine` trait into struct
+- Single `TemplateEngine` struct replaces the old trait + `TemplateEngineV2` struct
+- Default template version changed from 2 to 3
+- V2 templates remain backward-compatible (V3 is a superset)
+- Updated `list` command to show includes annotations on composed languages
+- DRY: cmake-build-commands.md and cmake-git-ignore.txt now defined once in shared section
+
+### 2026-02-24 (v8.0.0)
+
+- MAJOR version bump: 7.0.0 to 8.0.0 (breaking CLI change)
+- Renamed `init` command to `install` for clearer semantics
+- Added `--skill` repeatable CLI flag for ad-hoc GitHub skill installation
+- Supports `user/repo` shorthand and full GitHub URLs
+- Added GitHub URL support in templates.yml `source` fields (full URLs only, no shorthand)
+- New `src/agent_defaults.rs`: single source of truth for agent paths (instructions, prompts, skills)
+- New `src/github.rs`: GitHub API integration (Contents API, URL parsing, shorthand expansion)
+- New top-level `skills` section in templates.yml for agent-agnostic skills
+- Added `SkillDefinition` struct to `bom.rs` and `skills` field to `TemplateConfig`
+- Skills downloaded on-the-fly during `install` (no local cache)
+- Automatic agent detection via `detect_installed_agent()` when `--agent` not specified
+- Moved `tempfile` from dev-dependencies to runtime dependency
+- Updated all user-facing messages from `init` to `install`
+- DRY refactoring: eliminated duplicate `download_file` and `parse_github_url` from `download_manager.rs` (now uses `github.rs`)
+- DRY refactoring: collapsed repeated agent instructions/prompts/skills resolve-and-copy pattern into single loop
+- Removed dead code: `github::download_directory()` (install_skills handles it directly)
+- Added `skills` field to `UpdateOptions` and refactored all `update()` methods to accept `&UpdateOptions` instead of 7-8 individual parameters
+- Removed `#[allow(clippy::too_many_arguments)]` suppressions
+- Added DRY principle to Rust coding conventions in AGENTS.md
+
+### 2026-02-17 (evening, v7.0.0)
+
+- MAJOR version bump: 6.6.0 to 7.0.0
+- Switched default template version from 1 to 2 (agents.md standard)
+- V1 deprecation warning updated: no longer references v7.0.0, says future release
+- This was planned since v6.2.0 (2026-01-24)
+
+### 2026-02-17 (evening)
+
+- Added Agent Skills infrastructure to V2 template engine (agentskills.io spec)
+- New `skills` field in `AgentConfig` alongside `instructions` and `prompts`
+- Skills are agent-specific: defined per-agent in templates.yml, installed to agent-specific locations
+- Download, install, track, list, and status commands all support skills
+- Skill files tracked with "skill" category in file tracker
+- Infrastructure only: no pre-built skills ship yet; users can add their own
+- Version bump: 6.5.7 to 6.6.0 (MINOR - new feature)
+
+### 2026-02-17
+
+- Added CLAUDE.md instruction file to V2 templates (references AGENTS.md)
+- V2 engine now processes agent `instructions` alongside `prompts`
+- Updated V2 templates.yml with claude instructions section
+- Fixed misleading comments claiming V2 has no agents section
+- Version bump: 6.5.5 to 6.5.6 (PATCH - bug fix, missing CLAUDE.md in V2)
+- Added instruction files for all V2 agents: copilot (.github/copilot-instructions.md), cursor (.cursorrules), codex (CODEX.md)
+- All instruction files redirect to AGENTS.md as single source of truth
+- Version bump: 6.5.6 to 6.5.7 (PATCH - add remaining agent instruction files)
+
+### 2026-02-16
+
+- Introduced `UpdateOptions` struct in `template_engine.rs` to aggregate CLI parameters
+- Introduced `TemplateContext` struct to aggregate source, target, and fragments
+- Reduced `handle_main_template` from 11 to 6 params, `merge_fragments` from 6 to 3 params
+- `copy_files_with_tracking` reduced from 8 to 5 params, `show_dry_run_files` uses both new structs
+- v1/v2 engines construct both structs in `update()` and pass through
+- Renamed `config_version` to `template_version` and moved into `TemplateContext`
+- `handle_main_template` reduced from 6 to 5 params (version now in context)
+- `copy_files_with_tracking` param renamed from `config_version` to `template_version`
+- Made `TemplateContext` non-optional: fail early if `config.main` missing
+- `show_dry_run_files` takes `&TemplateContext` instead of `Option<&TemplateContext>`
+- `copy_files_with_tracking` takes `&TemplateContext` instead of `template_version: u32`
+- Removed dead `files_to_copy.is_empty() && main_template.is_none()` early return
+- Split `template_manager.rs` (713 lines) into directory module with per-command files
+- `src/template_manager/mod.rs` holds struct, constructor, and helpers (~100 lines)
+- Commands extracted to `update.rs`, `purge.rs`, `remove.rs`, `status.rs`, `list.rs`
+- Changed `config_dir` visibility to `pub(crate)` for submodule access
+- Version bump: 6.5.0 to 6.5.5 (PATCH - internal refactor, no public API change)
+- Fixed `get_installed_language_for_workspace` failing on Windows CI (path separator mismatch)
+
+### 2026-02-15 (evening)
+
+- Major DRY refactoring across the codebase to eliminate 11 code duplication violations
+- Introduced `TemplateEngine` trait in new `template_engine.rs` with shared default implementations
+- Extracted `load_template_config` and `is_file_customized` as free functions (were triplicated across v1, v2, template_manager)
+- Moved `resolve_placeholder`, `merge_fragments`, `show_dry_run_files`, `handle_main_template`, `copy_files_with_tracking`, `show_skipped_files_summary` into trait default methods
+- Slimmed `template_engine_v1.rs` and `template_engine_v2.rs` to orchestration-only (removed ~300 duplicate lines)
+- Extracted `DEFAULT_SOURCE_URL` const, `resolve_source()`, and `download_with_fallback()` helpers in `main.rs`
+- Extracted `resolve_absolute_path()` helper in `file_tracker.rs` (was repeated 5 times)
+- Reused `download_entry` closure in `download_manager.rs` for agent files
+- Removed redundant `get_template_version()` from `template_manager.rs`
+- Version bump: 6.4.2 to 6.5.0 (MINOR - new TemplateEngine trait, internal refactor)
+- Fixed `resolve_placeholder` producing mixed path separators on Windows; use `Path::join()` instead of string replace
+- Use `Path::starts_with()` instead of string-based prefix check for cross-platform correctness
+- Added Rust coding convention: use `Path::starts_with()` for path comparison, not string prefix
+- Version bump: 6.4.0 → 6.4.2 (PATCH - bug fixes)
+
+### 2026-02-15
+
+- Added `--no-lang` option to skip language-specific setup (AGENTS.md + agent prompts only, no coding-conventions)
+- Use for language-independent setup: `slopctl init --no-lang` or `--no-lang --agent cursor`
+- Mutually exclusive with `--lang`; valid with `--agent` for agent prompts without language fragments
+- Made `--lang` and `--agent` optional; user must specify at least one of --lang, --agent, or --no-lang
+- When only `--agent` specified: prefers existing installation language (e.g. switch Cursor to Claude, keep Rust)
+- Fallback: first available language from templates.yml (fresh init with agent only)
+- Version bump: 6.3.0 → 6.4.0 (MINOR - new features)
+- V1 templates still require both (error if only one specified)
+- Version bump: 6.2.0 → 6.3.0 (MINOR - new CLI behavior)
+
+### 2026-01-24
+
+- Added `--mission` option to `init` command for custom mission statements
+- Supports inline text or file input via `@filename` syntax (e.g., `--mission @mission.md`)
+- Custom mission overrides default template mission statement in AGENTS.md
+- Implemented in both v1 and v2 template engines
+- Version bump: 6.1.1 → 6.2.0 (MINOR - new feature)
+- **Done in v7.0.0:** Switched default template version from 1 to 2 (see `default_version()` in `src/bom.rs`)
+
+### 2025-12-28
+
+- Fixed Swift format template JSON formatting and typos
+- Corrected indentation issues on `respectsExistingLineBreaks` and `ValidateDocumentationComments` properties
+- Fixed typo: removed erroneous colon from `NeverUseImplicitlyUnwrappedOptionals` property name
+- Applied fixes to both v1 and v2 template versions
+- Version bump: 6.1.0 → 6.1.1 (PATCH - bug fix)
+
+### 2025-12-23
+
+- Fixed gitattributes line ending conflict with Rust formatting
+- Enforced LF line endings for Rust source files (*.rs) in .gitattributes to match rustfmt configuration (newline_style = "Unix")
+- Updated both v1 and v2 template versions to prevent future conflicts
+
+### 2025-10-05
+
+- Initial AGENTS.md setup
+- Established core coding standards and conventions
+- Created agent-specific reference files
+- Defined repository structure and governance principles

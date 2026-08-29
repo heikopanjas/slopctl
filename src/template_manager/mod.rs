@@ -15,7 +15,7 @@ mod verify;
 
 use std::{
     ffi::OsStr,
-    fs, io,
+    fs,
     path::{Path, PathBuf}
 };
 
@@ -32,9 +32,9 @@ use crate::{
 /// Manages template files for coding agent instructions
 ///
 /// The `TemplateManager` handles all operations related to template storage,
-/// verification, and synchronization. Templates are stored in the
-/// local data directory (e.g., `$HOME/.local/share/slopctl/templates` on Linux,
-/// `$HOME/Library/Application Support/slopctl/templates` on macOS).
+/// verification, and synchronization. Templates are stored in the global
+/// cache directory (`$XDG_CACHE_HOME/slopctl/templates`, or
+/// `$HOME/.cache/slopctl/templates` — same on all platforms).
 pub struct TemplateManager
 {
     pub(crate) config_dir: PathBuf
@@ -44,17 +44,15 @@ impl TemplateManager
 {
     /// Creates a new TemplateManager instance
     ///
-    /// Initializes path to local data directory using the `dirs` crate.
-    /// Templates are stored in the local data directory.
+    /// Initializes path to the global cache directory via
+    /// [`crate::utils::global_cache_dir`].
     ///
     /// # Errors
     ///
-    /// Returns an error if the local data directory cannot be determined
+    /// Returns an error if the cache directory cannot be determined
     pub fn new() -> Result<Self>
     {
-        let data_dir = dirs::data_local_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Could not determine local data directory"))?;
-
-        let config_dir = data_dir.join("slopctl/templates");
+        let config_dir = crate::utils::global_cache_dir()?;
 
         Ok(Self { config_dir })
     }
@@ -103,9 +101,19 @@ impl TemplateManager
                 return Err(anyhow::anyhow!("Source path does not exist: {}", source));
             }
 
+            // Validate the catalog before touching the cache, mirroring the URL path.
+            let source_config = source_path.join("templates.yml");
+            if source_config.exists() == false
+            {
+                return Err(anyhow::anyhow!("Source path '{}' does not contain a templates.yml; a template source must include one", source));
+            }
+            serde_yaml::from_str::<crate::bom::TemplateConfig>(&fs::read_to_string(&source_config)?)
+                .map_err(|e| anyhow::anyhow!("Invalid templates.yml in source '{}': {}", source, e))?;
+
             println!("{} Copying templates from local path...", "→".blue());
             fs::create_dir_all(&self.config_dir)?;
-            copy_dir_all(source_path, &self.config_dir)?;
+            let copied = copy_dir_all(source_path, &self.config_dir)?;
+            println!("{} Copied {} template file(s) from {}", "✓".green(), copied, source_path.display().to_string().yellow());
         }
 
         Ok(())
@@ -179,6 +187,12 @@ impl TemplateManager
 
         None
     }
+
+    /// Returns the `skills/<name>` root directory containing a skill path.
+    pub(crate) fn skill_root_from_path(path: &Path) -> Option<PathBuf>
+    {
+        path.ancestors().find(|candidate| candidate.parent().and_then(Path::file_name) == Some(OsStr::new("skills"))).map(Path::to_path_buf)
+    }
 }
 
 /// Serializes tests that call `std::env::set_current_dir` (process-global state).
@@ -236,6 +250,53 @@ mod tests
     use super::*;
 
     #[test]
+    fn test_download_or_copy_templates_local_missing_templates_yml_errors() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("stray.md"), "# not a catalog\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.download_or_copy_templates(&source.path().to_string_lossy());
+
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("templates.yml") == true);
+        assert!(config_dir.path().join("stray.md").exists() == false, "nothing must be copied when validation fails");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_local_invalid_yaml_errors() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("templates.yml"), "languages: [not, a, map\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        let result = manager.download_or_copy_templates(&source.path().to_string_lossy());
+
+        assert!(result.is_err() == true);
+        assert!(result.unwrap_err().to_string().contains("Invalid templates.yml") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_local_valid_source_copies() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let config_dir = tempfile::TempDir::new()?;
+        fs::write(source.path().join("templates.yml"), "version: 5\nlanguages: {}\n")?;
+        fs::write(source.path().join("AGENTS.md"), "# Template\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.path().to_path_buf() };
+        manager.download_or_copy_templates(&source.path().to_string_lossy())?;
+
+        assert!(config_dir.path().join("templates.yml").exists() == true);
+        assert!(config_dir.path().join("AGENTS.md").exists() == true);
+        Ok(())
+    }
+
+    #[test]
     fn test_extract_skill_name_from_bogus_path()
     {
         let path = PathBuf::from("/home/user/project/.bogus/skills/my-skill/SKILL.md");
@@ -268,5 +329,19 @@ mod tests
     {
         let path = PathBuf::from("/project/.bogus/skills");
         assert_eq!(TemplateManager::extract_skill_name_from_path(&path), None);
+    }
+
+    #[test]
+    fn test_skill_root_from_nested_path()
+    {
+        let path = PathBuf::from("/project/.bogus/skills/my-skill/references/topic.md");
+        assert_eq!(TemplateManager::skill_root_from_path(&path), Some(PathBuf::from("/project/.bogus/skills/my-skill")));
+    }
+
+    #[test]
+    fn test_skill_root_from_non_skill_path()
+    {
+        let path = PathBuf::from("/project/.bogus/commands/my-prompt.md");
+        assert_eq!(TemplateManager::skill_root_from_path(&path), None);
     }
 }
