@@ -8,7 +8,8 @@ use super::TemplateManager;
 use crate::{
     Result,
     file_tracker::FileTracker,
-    llm::{ChatMessage, LlmClient, Provider}
+    llm::{ChatMessage, LlmClient, Provider},
+    model_defaults
 };
 
 /// Kind of issue detected by the smart doctor analysis
@@ -83,9 +84,10 @@ impl TemplateManager
     /// Returns an error if provider resolution, file reading, or the LLM call fails
     pub fn smart_doctor(&self) -> Result<Vec<SmartIssue>>
     {
-        let (provider_name, model_name) = Self::resolve_provider_and_model()?;
+        let catalog = model_defaults::load_model_catalog_from_dir(&self.config_dir).map_err(|e| anyhow::anyhow!("{}\nRun: slopctl templates --update", e))?;
+        let (provider_name, model_name) = Self::resolve_provider_and_model(&catalog)?;
         let provider = Provider::from_name(&provider_name)?;
-        let client = LlmClient::new(provider, model_name.as_deref())?;
+        let client = LlmClient::new(provider, model_name.as_deref(), &catalog)?;
 
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
@@ -190,6 +192,11 @@ mod tests
             "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
              '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
         )?;
+        std::fs::write(
+            config_dir.path().join(crate::model_defaults::MODEL_DEFAULTS_FILE),
+            "version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+             default_model: test-ollama-model\n"
+        )?;
 
         let mut tracker = crate::FileTracker::new(workspace.path())?;
         tracker.record_installation(
@@ -238,6 +245,11 @@ mod tests
             config_dir.path().join(crate::agent_defaults::AGENT_DEFAULTS_FILE),
             "version: 1\nagents:\n  - name: bogus\n    markers:\n      - .bogus\n    prompt_dir: '$workspace/.bogus/prompts'\n    skill_dir: \
              '$workspace/.bogus/skills'\n    reads_cross_client_skills: false\n"
+        )?;
+        std::fs::write(
+            config_dir.path().join(crate::model_defaults::MODEL_DEFAULTS_FILE),
+            "version: 1\nproviders:\n  - name: ollama\n    endpoint: http://localhost:11434/api/chat\n    models_endpoint: http://localhost:11434/api/tags\n    \
+             default_model: test-ollama-model\n"
         )?;
 
         let mut tracker = crate::FileTracker::new(workspace.path())?;

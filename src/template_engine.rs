@@ -2381,6 +2381,7 @@ languages:
 "#;
         fs::write(dir.join("templates.yml"), yml)?;
         fs::write(dir.join("AGENTS.md"), TEMPLATE_BASE)?;
+        write_synthetic_agent_defaults(dir, &[("bogus", false, None), ("fake", true, None)])?;
         Ok(())
     }
 
@@ -2441,7 +2442,11 @@ languages:
     #[test]
     fn test_update_accepts_known_agent() -> anyhow::Result<()>
     {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let workspace = tempfile::TempDir::new()?;
         let config_dir = tempfile::TempDir::new()?;
+        let original_cwd = std::env::current_dir()?;
+        std::env::set_current_dir(workspace.path())?;
         write_minimal_templates_yml(config_dir.path())?;
 
         fs::create_dir_all(config_dir.path().join("bogus"))?;
@@ -2459,7 +2464,8 @@ languages:
         };
 
         let result = engine.update(&options);
-        assert!(result.is_ok() == true);
+        let _ = std::env::set_current_dir(&original_cwd);
+        assert!(result.is_ok() == true, "{:?}", result.err());
         Ok(())
     }
 

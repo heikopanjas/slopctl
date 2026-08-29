@@ -14,6 +14,7 @@ use crate::{
     EffectiveConfig, Result,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
+    model_defaults::{self, ModelCatalog},
     template_engine::{self, CHANGELOG_MARKER, ResolvedContent, TemplateEngine, UpdateOptions}
 };
 
@@ -165,9 +166,12 @@ impl TemplateManager
         let needs_llm = diverged_count > 0 && dry_run == false;
         let client = if needs_llm == true
         {
-            let (provider_name, model_name) = Self::resolve_provider_and_model()?;
+            let catalog = model_defaults::load_model_catalog_from_dir(&self.config_dir).map_err(|e| anyhow::anyhow!("{}\nRun: slopctl templates --update", e))?;
+            let (provider_name, model_name) = Self::resolve_provider_and_model(&catalog)?;
             let provider_enum = Provider::from_name(&provider_name)?;
-            Some(LlmClient::new(provider_enum, model_name.as_deref())?)
+            let client = LlmClient::new(provider_enum, model_name.as_deref(), &catalog)?;
+            println!("{} Using provider: {} ({})", "→".blue(), client.provider_name().green(), client.model_name().yellow());
+            Some(client)
         }
         else
         {
@@ -411,7 +415,7 @@ impl TemplateManager
     /// Priority: config `merge.provider` > auto-detect from environment API keys
     /// (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`).
     /// Model: config `merge.model` > None (provider default used later).
-    pub(super) fn resolve_provider_and_model() -> Result<(String, Option<String>)>
+    pub(super) fn resolve_provider_and_model(catalog: &ModelCatalog) -> Result<(String, Option<String>)>
     {
         let config = std::env::current_dir().ok().and_then(|cwd| EffectiveConfig::load(&cwd).ok());
 
@@ -420,7 +424,7 @@ impl TemplateManager
         {
             p
         }
-        else if let Some(detected) = Provider::detect_from_env()
+        else if let Some(detected) = Provider::detect_from_env(catalog)
         {
             detected.name().to_string()
         }
@@ -440,9 +444,6 @@ impl TemplateManager
         {
             None
         };
-
-        let effective_model = model.clone().unwrap_or_else(|| Provider::from_name(&provider).map(|p| p.default_model().to_string()).unwrap_or_default());
-        println!("{} Using provider: {} ({})", "→".blue(), provider.green(), effective_model.yellow());
 
         Ok((provider, model))
     }
@@ -735,6 +736,35 @@ mod tests
         ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() }
     }
 
+    /// Synthetic model catalog covering the real `Provider` enum's supported
+    /// providers, for tests exercising `Provider::detect_from_env` /
+    /// `resolve_provider_and_model` against real provider names.
+    fn test_model_catalog() -> ModelCatalog
+    {
+        model_defaults::parse_model_catalog(
+            r#"
+version: 1
+providers:
+  - name: openai
+    api_key_env: OPENAI_API_KEY
+    endpoint: https://api.openai.com/v1/chat/completions
+    models_endpoint: https://api.openai.com/v1/models
+    default_model: test-openai-model
+  - name: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    endpoint: https://api.anthropic.com/v1/messages
+    models_endpoint: https://api.anthropic.com/v1/models
+    default_model: test-anthropic-model
+  - name: mistral
+    api_key_env: MISTRAL_API_KEY
+    endpoint: https://api.mistral.ai/v1/chat/completions
+    models_endpoint: https://api.mistral.ai/v1/models
+    default_model: test-mistral-model
+"#
+        )
+        .expect("synthetic model catalog should parse")
+    }
+
     #[test]
     fn test_sidecar_path()
     {
@@ -776,7 +806,7 @@ mod tests
         let config_temp = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
-        let result = TemplateManager::resolve_provider_and_model();
+        let result = TemplateManager::resolve_provider_and_model(&test_model_catalog());
         assert!(result.is_err() == true);
         assert!(result.unwrap_err().to_string().contains("No LLM provider") == true);
 
@@ -822,7 +852,7 @@ mod tests
         let config_temp = tempfile::tempdir().unwrap();
         unsafe { std::env::set_var("XDG_CONFIG_HOME", config_temp.path()) };
 
-        let result = TemplateManager::resolve_provider_and_model();
+        let result = TemplateManager::resolve_provider_and_model(&test_model_catalog());
         assert!(result.is_ok() == true);
         let (provider, _model) = result.unwrap();
         assert_eq!(provider, "openai");

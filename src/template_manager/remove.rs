@@ -971,6 +971,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let stale_file = workspace.path().join(".rpp-legacy.toml");
         fs::write(&stale_file, "legacy = true")?;
@@ -998,6 +999,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    files: []\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let shared_file = workspace.path().join(".gitignore");
         fs::write(&shared_file, "target/\n")?;
@@ -1066,6 +1068,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: skills/rpp-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/rpp-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -1091,6 +1094,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -1120,6 +1124,7 @@ mod tests
 
         let yaml = "version: 5\nlanguages:\n  Rust++:\n    skills:\n      - source: https://example.com/fake/repo/tree/main/skills/fake-remote-skill\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/fake-remote-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -1174,6 +1179,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         // Place an untracked skill in the cross-client directory
         let skill_dir = workspace.path().join(".agents/skills/my-skill");
@@ -1204,6 +1210,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1249,6 +1256,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let skill_dir = workspace.path().join(".agents/skills/my-skill");
         fs::create_dir_all(&skill_dir)?;
@@ -1271,6 +1279,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         // Track an agent file; purge should delete it without scanning userprofile skills.
         let agent_file = workspace.path().join(".bogus/instructions.md");
@@ -1297,6 +1306,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let agents_md = workspace.path().join("AGENTS.md");
         fs::write(&agents_md, "# My customized instructions\n")?;
@@ -1329,6 +1339,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         // Tracked with a stale SHA so the file reads as Modified; the marker
         // means the local changes are user-owned log entries.
@@ -1356,6 +1367,7 @@ mod tests
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
         let updates = workspace.path().join("UPDATES.md");
         fs::write(&updates, format!("# Log\n\n{}\n\n### 2026-01-01 (v1.0.0, entry)\n\n- user entry\n", template_engine::CHANGELOG_MARKER))?;

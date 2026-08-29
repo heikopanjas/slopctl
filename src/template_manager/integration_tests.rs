@@ -8,6 +8,7 @@ use super::cwd_test_guard;
 use crate::{
     FileTracker, MergeOptions, TemplateManager, UpdateOptions,
     agent_defaults::AGENT_DEFAULTS_FILE,
+    model_defaults::MODEL_DEFAULTS_FILE,
     template_engine::{CHANGELOG_MARKER, TEMPLATE_MARKER}
 };
 
@@ -136,6 +137,18 @@ agents:
     prompt_dir: '$workspace/.foobar/commands'
     skill_dir: '$workspace/.agents/skills'
     reads_cross_client_skills: true
+"#
+        )?;
+
+        // ── model-defaults.yml ───────────────────────────────────────────
+        fs::write(
+            d.join(MODEL_DEFAULTS_FILE),
+            r#"version: 1
+providers:
+  - name: ollama
+    endpoint: http://localhost:11434/api/chat
+    models_endpoint: http://localhost:11434/api/tags
+    default_model: test-ollama-model
 "#
         )?;
 
