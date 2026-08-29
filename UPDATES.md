@@ -4,6 +4,46 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 15:29 (v23.1.2, add shell language for bash/zsh conventions)
+
+- added a `shell` language to the catalog in the sibling `slopctl-templates`
+  repo: `templates/templates.yml` gained a `shell:` entry between `rust` and
+  `swift`, with a new `shell-skills-hint.md` fragment and two new skills,
+  `skills/shell-coding-conventions` and `skills/shell-build-commands`
+- `shell` ships no `.editorconfig`, unlike `c`/`rust`/`swift`; those three
+  templates differ byte-for-byte, and `preflight_installation`
+  (`src/template_engine.rs:1324-1352`) hard-fails when a new language owner
+  claims a shared target whose source content differs from what is tracked.
+  shell is the language most likely to be installed alongside another, so
+  giving it its own `.editorconfig` would make that collision the common
+  case rather than the rare one; `shfmt` settings are documented as flags
+  in the build-commands skill instead. Verified end-to-end: `init --lang
+  rust` followed by `init --lang shell` in the same workspace no longer
+  hits the preflight conflict, and `remove --lang shell` leaves rust's
+  files (including `.editorconfig`) untouched
+- the conventions themselves are derived from ~11,900 lines across 77
+  `fx-*.sh` scripts in `~/_repos/FX/` (a separate project, Python files
+  there excluded): strict mode (`set -euo pipefail`), the two-tier
+  help/argument-parsing shape, a three-value exit-code scheme (0/1/2), the
+  no-color `✓`/`✗`/`→` message vocabulary, `snake_case` variables, and a
+  `mktemp` + `trap ... EXIT` cleanup idiom, standardized to 2-space indent
+  and lowercase `error:` prefixes where the corpus itself was split
+- rationale: unlike that corpus, which is bash-only (`shopt`,
+  `BASH_REMATCH`, 0-based array indices, `${BASH_SOURCE[0]}`, unquoted
+  word-splitting), the new skill targets scripts portable to both bash and
+  zsh, and documents each bash-only idiom next to its portable replacement
+  rather than silently adopting or ignoring the incompatibility
+- updated this repo's `README.md` (supported-languages list, sample
+  `status` output, `--lang` example lists on `init` and `remove`) to
+  reflect `shell`; also fixed a stale Swift bullet that omitted the
+  `swift-testing-pro` skill already installed by `templates.yml:179`
+- no Rust source changed: `--lang` is a free-form `String` in `src/cli.rs`
+  with no `value_parser`, validated at runtime against `templates.yml`
+  keys, so adding a language is pure catalog data plus docs
+- version bump: 23.1.1 to 23.1.2 (PATCH - documentation update only; the
+  new language definition lives in the separate slopctl-templates repo,
+  not in this repo's Rust source)
+
 ### 2026-08-29 15:09 (v23.1.1, document pi/kiro/goose/cline agent support)
 
 - added four agents to the catalog in the sibling `slopctl-templates` repo:

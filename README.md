@@ -465,7 +465,7 @@ slopctl init --agent <agent> [--mission <text|@file>] [--force] [--dry-run]
 
 **Options:**
 
-- `--lang <string>` - Programming language or framework (e.g., c++, rust, swift, c). Optional; omit for language-independent setup.
+- `--lang <string>` - Programming language or framework (e.g., c++, rust, shell, swift, c). Optional; omit for language-independent setup.
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor). Optional; when specified alone, preserves existing language when switching agents.
 - `--mission <string>` - Custom mission statement to override the template default. Use `@filename` to read from a file (e.g., `--mission @mission.md`)
 - `--force` - Force overwrite of local files without confirmation; also bypasses the already-initialized guard for reinstalls
@@ -542,7 +542,7 @@ slopctl remove --purge [--force] [--dry-run]
 **Options:**
 
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
-- `--lang <string>` - Language to remove disk files and language-associated skills for (e.g., rust, c++, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths unless tracked in the workspace.
+- `--lang <string>` - Language to remove disk files and language-associated skills for (e.g., rust, c++, shell, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths unless tracked in the workspace.
 - `--all` - Remove all agent-specific files and skills (keeps AGENTS.md). Mutually exclusive with `--agent`, `--lang`, and `--purge`.
 - `--purge` - Remove all slopctl files including AGENTS.md (full cleanup). Mutually exclusive with `--agent`, `--lang`, and `--all`.
 - `--force` - Force removal without confirmation; combined with `--purge`, also overrides the customized-AGENTS.md preservation guard.
@@ -704,7 +704,7 @@ Global Templates:
   ✓ Installed at: /Users/.../slopctl/templates
   → Template version: 5
   → Available agents: claude, cline, codex, copilot, cursor, goose, kiro, opencode, pi, vibe
-  → Available languages: c, c++, rust, swift, swiftui
+  → Available languages: c, c++, rust, shell, swift, swiftui
 
 Project Status:
   ✓ AGENTS.md: exists (customized)
@@ -982,7 +982,8 @@ Currently configured in the default template catalog:
 - **C** - C programming language (skills: `c-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
 - **C++** - C++ programming language (skills: `cpp-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
 - **Rust** - Rust programming language (skills: `rust-coding-conventions`, `rust-build-commands`; config files: `.rustfmt.toml`, `.editorconfig`)
-- **Swift** - Swift programming language (skills: `swift-coding-conventions`, `swift-build-commands`, `swift-concurrency-pro`; config files: `.swift-format`, `.editorconfig`)
+- **Shell** - Shell scripting for bash and zsh (skills: `shell-coding-conventions`, `shell-build-commands`; no config files)
+- **Swift** - Swift programming language (skills: `swift-coding-conventions`, `swift-build-commands`, `swift-concurrency-pro`, `swift-testing-pro`; config files: `.swift-format`, `.editorconfig`)
 - **SwiftUI** - SwiftUI framework (includes all Swift skills and config files plus `swiftui-pro` skill)
 
 Coding conventions and build commands are installed as [Agent Skills](https://agentskills.io) rather than fragments merged into AGENTS.md. A slim hint fragment is merged into AGENTS.md to inform agents that skills are available. Additional language templates can be added to `templates.yml` configuration.
