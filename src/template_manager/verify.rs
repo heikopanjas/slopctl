@@ -461,7 +461,7 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.verify("https://github.com/heikopanjas/slopctl-templates/tree/main/templates");
+        let result = manager.verify("https://github.com/heikopanjas/slopctl-templates/tree/develop/templates");
 
         assert!(result.is_err() == true);
         Ok(())

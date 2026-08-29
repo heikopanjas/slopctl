@@ -55,7 +55,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 - GitHub URL support: `source` fields in templates.yml accept full GitHub URLs for remote files
 - Skills are declared in `templates.yml` and installed automatically with the selected language, agent, or top-level template set
 - Cross-client skill directory: template-defined non-agent skills install to `.agents/skills/` for agents that support the agentskills.io convention
-- URL: `https://github.com/heikopanjas/slopctl-templates/tree/main/templates`
+- URL: `https://github.com/heikopanjas/slopctl-templates/tree/develop/templates`
 
 **Usage:**
 
@@ -406,7 +406,7 @@ slopctl templates --update --verify --list
 
 - Downloads templates from specified source or default GitHub repository
 - If `--from` is not specified, downloads from:
-  - **Default**: `https://github.com/heikopanjas/slopctl-templates/tree/main/templates` (agents.md standard)
+  - **Default**: `https://github.com/heikopanjas/slopctl-templates/tree/develop/templates` (agents.md standard)
 - Downloads `templates.yml` configuration file and all template files
 - Stores templates in the global cache directory: `$HOME/.cache/slopctl/templates`
   (`$XDG_CACHE_HOME/slopctl/templates` if `XDG_CACHE_HOME` is set) — same on all platforms
@@ -899,7 +899,7 @@ slopctl config --delete templates.uri
 slopctl config --global --delete templates.uri
 
 # Set fallback source for resilience (global)
-slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl-templates/tree/main/templates
+slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl-templates/tree/develop/templates
 
 # Set an independent agent defaults source
 slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/templates
@@ -969,7 +969,7 @@ One AGENTS.md for all agents. Agent-specific files (e.g. command prompts) refere
 
 ## Supported Languages
 
-The default [`templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/main/templates/templates.yml) is a starter catalog, not a hard-coded language list. It ships useful examples for common languages, but language support is data-driven: add a new entry under `languages:` and provide the referenced files or skills in your template source.
+The default [`templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/develop/templates/templates.yml) is a starter catalog, not a hard-coded language list. It ships useful examples for common languages, but language support is data-driven: add a new entry under `languages:` and provide the referenced files or skills in your template source.
 
 Currently configured in the default template catalog:
 
@@ -1136,7 +1136,7 @@ Each entry in `directories` has a single field:
 
 The `templates.yml` file defines the template structure with a version field and multiple sections:
 
-The [bundled `templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/main/templates/templates.yml) should be read as an example catalog. It demonstrates how to model languages, shared groups, agent prompts, integrations, and skills. You can replace or extend the language section for your own stack without changing slopctl itself, as long as the referenced source files exist in your template cache or use explicit full GitHub URLs.
+The [bundled `templates.yml`](https://github.com/heikopanjas/slopctl-templates/blob/develop/templates/templates.yml) should be read as an example catalog. It demonstrates how to model languages, shared groups, agent prompts, integrations, and skills. You can replace or extend the language section for your own stack without changing slopctl itself, as long as the referenced source files exist in your template cache or use explicit full GitHub URLs.
 
 **Version Field:**
 

@@ -4,6 +4,18 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 (v23.0.0, point default catalog sources at develop)
+
+- repointed `DEFAULT_SOURCE_URL`, `DEFAULT_AGENTS_SOURCE_URL`, and
+  `DEFAULT_MODELS_SOURCE_URL` (and every doc reference to them) from
+  `slopctl-templates/tree/main/...` to `slopctl-templates/tree/develop/...`
+- rationale: `slopctl-templates` now follows this repo's own branch convention —
+  `develop` is where active work lands and is merged into `main` via PR (the user
+  pushed the templates-catalog commits to `develop` and merged that into `main`
+  through PR #1, mirroring how this repo's own `develop`/`main` split works)
+- no version bump: a source-URL correction within the same unreleased 23.0.0 line
+  of work, not new behavior
+
 ### 2026-08-29 (v23.0.0, extract template catalog to slopctl-templates, relocate cache)
 
 - moved the entire `templates/` directory out of this repo into the separate
