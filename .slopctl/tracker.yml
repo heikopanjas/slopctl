@@ -1,12 +1,3 @@
-.claude/commands/init-session.md:
-  original_sha: 0d2fd81c4fbae776c4b4f050bd0394e913796c6e597297487ca34d8e78ec5d7d
-  template_version: 5
-  installed_date: 2026-07-21T22:21:41.477616+00:00
-  lang: []
-  agent:
-  - claude
-  ref_count: 1
-  category: agent
 .claude/skills/semantic-versioning/SKILL.md:
   original_sha: d313d5c1a851aaf9b8cebc250e280cbe37bc70fdb06d95f74de6b60eafdf5f4d
   template_version: 5
@@ -26,16 +17,14 @@
   agent: []
   ref_count: 1
   category: skill
-.claude/skills/recent-updates/SKILL.md:
-  original_sha: 27fbb14192738a4e76042bf7322b4b529f4996354fa427700624deccd3ef6dc9
+UPDATES.md:
+  original_sha: ff56fd563cb60b9073230b3b0721e5687c98fd7888129b47f2bbc557e9c9c940
   template_version: 5
-  installed_date: 2026-08-13T22:17:05.922621+00:00
-  lang:
-  - rust
-  agent:
-  - claude
-  ref_count: 2
-  category: skill
+  installed_date: 2026-08-13T22:17:05.924897+00:00
+  lang: []
+  agent: []
+  ref_count: 0
+  category: integration
 .claude/skills/git-workflow/SKILL.md:
   original_sha: e77221a6957de986cdd456c69f80d4009ac8bf5e118a3e926c47260746ae92be
   template_version: 5
@@ -46,14 +35,15 @@
   - claude
   ref_count: 2
   category: skill
-UPDATES.md:
-  original_sha: ff56fd563cb60b9073230b3b0721e5687c98fd7888129b47f2bbc557e9c9c940
+.claude/commands/init-session.md:
+  original_sha: 0d2fd81c4fbae776c4b4f050bd0394e913796c6e597297487ca34d8e78ec5d7d
   template_version: 5
-  installed_date: 2026-08-13T22:17:05.924897+00:00
+  installed_date: 2026-07-21T22:21:41.477616+00:00
   lang: []
-  agent: []
-  ref_count: 0
-  category: integration
+  agent:
+  - claude
+  ref_count: 1
+  category: agent
 CLAUDE.md:
   original_sha: eb7e86a5cd044d553afc7d464e33eea906f229a5637979cde2e864e0cf573cfa
   template_version: 5
@@ -90,11 +80,21 @@ AGENTS.md:
   ref_count: 1
   category: language
 .rustfmt.toml:
-  original_sha: 3cd36b434eef756854beec4e5dfc59f52f06fee47dfd6e20f264caa6ed50a113
+  original_sha: 56d331abd13694029c81488026f0f525b2cd8acc4392e64d8d9b5da57a177b6c
   template_version: 5
-  installed_date: 2026-08-13T22:17:05.924293+00:00
+  installed_date: 2026-08-29T12:57:22.861928+00:00
   lang:
   - rust
   agent: []
   ref_count: 1
   category: language
+.claude/skills/recent-updates/SKILL.md:
+  original_sha: 27fbb14192738a4e76042bf7322b4b529f4996354fa427700624deccd3ef6dc9
+  template_version: 5
+  installed_date: 2026-08-13T22:17:05.922621+00:00
+  lang:
+  - rust
+  agent:
+  - claude
+  ref_count: 2
+  category: skill
