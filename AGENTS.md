@@ -1,12 +1,12 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-14 (v22.5.8)
+**Last updated:** 2026-08-29 (v22.6.0)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md, .cursorrules, CODEX.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, OpenCode) following the agents.md and agentskills.io community standards.
+slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, OpenCode) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
@@ -37,7 +37,7 @@ confirmed your understanding.
 
 ### Working Together
 
-This file (`AGENTS.md`) is the primary instructions file for AI coding assistants working on this project. Agent-specific instruction files (such as `.github/copilot-instructions.md`, `CLAUDE.md`) reference this document, maintaining a single source of truth.
+This file (`AGENTS.md`) is the primary instructions file for AI coding assistants working on this project. Agent-specific instruction files (such as `CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`) reference this document, maintaining a single source of truth.
 
 When initializing a session or analyzing the workspace, refer to instruction files in this order:
 

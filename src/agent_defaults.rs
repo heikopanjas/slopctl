@@ -29,9 +29,9 @@ pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 
 /// Cross-client skill directory per the agentskills.io specification.
 ///
-/// Scanned by Codex, Copilot, OpenCode, Gemini CLI, and Cursor in addition to
-/// their native skill directories. Claude Code and Mistral Vibe do **not** read
-/// this path — they only scan their own native skill directories.
+/// Scanned by Codex, Copilot, OpenCode, Mistral Vibe, Gemini CLI, and Cursor in
+/// addition to their native skill directories. Claude Code does **not** read
+/// this path — it only scans its own native skill directory.
 pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 
 /// A directory whose presence indicates a particular agent is active in the workspace.
@@ -67,9 +67,9 @@ pub struct AgentDefaults
     pub userprofile_skill_dir:     Option<&'static str>,
     /// Whether this agent scans `.agents/skills/` in addition to its native skill dir.
     ///
-    /// When `false` (Claude Code, Mistral Vibe), slopctl routes skill installation
-    /// directly to `skill_dir` and migrates any pre-existing cross-client skills
-    /// into that directory so they remain visible to the agent.
+    /// When `false` (Claude Code), slopctl routes skill installation directly to
+    /// `skill_dir` and migrates any pre-existing cross-client skills into that
+    /// directory so they remain visible to the agent.
     pub reads_cross_client_skills: bool
 }
 
@@ -364,9 +364,9 @@ pub fn get_skill_dir(agent: &str) -> Option<&'static str>
 
 /// Return whether an agent scans `.agents/skills/` for skills
 ///
-/// Returns `true` for Cursor, Codex, Copilot, and OpenCode (which all follow the
-/// agentskills.io cross-client convention). Returns `false` for Claude Code and
-/// Mistral Vibe, which only scan their own native skill directories.
+/// Returns `true` for Cursor, Codex, Copilot, Mistral Vibe, and OpenCode (which
+/// all follow the agentskills.io cross-client convention). Returns `false` for
+/// Claude Code, which only scans its own native skill directory.
 /// Unknown agents default to `true` (assume cross-client compliance).
 pub fn reads_cross_client_skills(agent: &str) -> bool
 {

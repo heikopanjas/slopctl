@@ -38,7 +38,7 @@ agents:
     prompt_dir: '$userprofile/.vibe/prompts'
     skill_dir: '$workspace/.vibe/skills'
     userprofile_skill_dir: '$userprofile/.vibe/skills'
-    reads_cross_client_skills: false
+    reads_cross_client_skills: true
 
   - name: opencode
     markers:
