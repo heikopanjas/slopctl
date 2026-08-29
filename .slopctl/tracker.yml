@@ -43,15 +43,6 @@ AGENTS.md:
   agent: []
   ref_count: 1
   category: language
-.gitignore:
-  original_sha: a38caa829ecdc7fdc18ad40bdb9d7e3da08b93cd712a558aabf524ac6e36037e
-  template_version: 5
-  installed_date: 2026-07-21T19:14:56.324443+00:00
-  lang:
-  - rust
-  agent: []
-  ref_count: 1
-  category: integration
 .rustfmt.toml:
   original_sha: 3cd36b434eef756854beec4e5dfc59f52f06fee47dfd6e20f264caa6ed50a113
   template_version: 5
@@ -70,14 +61,6 @@ AGENTS.md:
   agent: []
   ref_count: 1
   category: skill
-.gitattributes:
-  original_sha: b06645d6d1fca42aa742230b5ea0875ba8b996198073db1872402a9ca7ac6356
-  template_version: 5
-  installed_date: 2026-07-21T19:14:56.324559+00:00
-  lang: []
-  agent: []
-  ref_count: 0
-  category: integration
 .claude/commands/init-session.md:
   original_sha: 0d2fd81c4fbae776c4b4f050bd0394e913796c6e597297487ca34d8e78ec5d7d
   template_version: 5

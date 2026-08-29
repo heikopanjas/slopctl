@@ -98,8 +98,6 @@ shared:
     files:
       - source: cmake-skills-hint.md
         target: "$instructions"
-      - source: cmake-git-ignore.txt
-        target: "$workspace/.gitignore"
     skills:
       - source: "skills/cmake-build-commands"
         target: "$workspace"
@@ -138,8 +136,6 @@ languages:
         target: "$workspace/.rustfmt.toml"
       - source: rust-editor-config.ini
         target: "$workspace/.editorconfig"
-      - source: rust-git-ignore.txt
-        target: "$workspace/.gitignore"
     skills:
       - source: "skills/rust-coding-conventions"
         target: "$workspace"
@@ -153,8 +149,6 @@ languages:
         target: "$workspace/.swift-format"
       - source: swift-editor-config.ini
         target: "$workspace/.editorconfig"
-      - source: swift-git-ignore.txt
-        target: "$workspace/.gitignore"
     skills:
       - source: "skills/swift-coding-conventions"
         target: "$workspace"
@@ -177,8 +171,6 @@ integration:
     files:
       - source: git-workflow-summary.md
         target: "$instructions"
-      - source: git-attributes-common.txt
-        target: "$workspace/.gitattributes"
   versioning:
     files:
       - source: semantic-versioning-summary.md

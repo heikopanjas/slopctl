@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-29 (v22.6.0)
+**Last updated:** 2026-08-29 (v22.7.0)
 
 <!-- {mission} -->
 
@@ -102,7 +102,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Tracker entries use `lang: Vec<String>` and `agent: Vec<String>` owner arrays, plus a stored `ref_count`
 - `ref_count` must always equal `lang.len() + agent.len()`; add/remove operations increment or decrement only when a unique owner is added or released
 - Legacy scalar tracker values (`lang: none`, `agent: all`) are obsolete; old `.slopctl/tracker.yml` files are not migrated and workspaces should recreate tracker state fresh
-- Shared ownership only applies to identical files, such as shared `.gitignore`, formatter config files, and skill files; if the incoming template SHA differs from the tracked SHA, `init` must fail preflight and point users to merge instead of incrementing `ref_count`
+- Shared ownership only applies to identical files, such as shared `.editorconfig`, other formatter config files, and skill files; if the incoming template SHA differs from the tracked SHA, `init` must fail preflight and point users to merge instead of incrementing `ref_count`
 - `AGENTS.md` is a special main file: ownership can be tracked, but normal `remove --lang` and `remove --agent` must not delete it
 - Files carrying the changelog marker (`<!-- {changelog} -->`, e.g. `UPDATES.md`) are protected like `AGENTS.md`: `init` and `update` (full or `--file`) never write them, under any flag, and `update --file` on one is a hard error pointing to `merge`; `merge` is the only command that may refresh the template half above the marker, and `remove`/`remove --purge` preserve the whole file (purge overrides with `--force`). Protection is keyed on `template_engine::is_changelog_protected`/`file_contains_changelog_marker` finding the marker as its own trimmed line on the target, never on `FileStatus` — keying on `Modified` alone misses a file whose tracker SHA was re-recorded by `merge`, and matching the marker as a raw substring false-positives on docs that mention it as example text (e.g. the `recent-updates` skill)
 - Tracker categories (`main`/`agent`/`language`/`skill`/`integration`) are recorded from the templates.yml section a file resolves from, carried on `ResolvedFile.category`; they must never be derived from path substrings
