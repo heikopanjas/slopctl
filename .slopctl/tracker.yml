@@ -1,66 +1,3 @@
-UPDATES.md:
-  original_sha: ff56fd563cb60b9073230b3b0721e5687c98fd7888129b47f2bbc557e9c9c940
-  template_version: 5
-  installed_date: 2026-08-13T22:17:05.924897+00:00
-  lang: []
-  agent: []
-  ref_count: 0
-  category: integration
-AGENTS.md:
-  original_sha: 6c2c495763c6106fe46001a7826766599861bc27538de9acef372149a48fbac9
-  template_version: 0
-  installed_date: 2026-07-21T19:14:56.321763+00:00
-  lang: []
-  agent: []
-  ref_count: 0
-  category: main
-.claude/skills/git-workflow/SKILL.md:
-  original_sha: e77221a6957de986cdd456c69f80d4009ac8bf5e118a3e926c47260746ae92be
-  template_version: 5
-  installed_date: 2026-08-13T22:16:40.244524+00:00
-  lang:
-  - rust
-  agent:
-  - claude
-  ref_count: 2
-  category: skill
-.claude/skills/recent-updates/SKILL.md:
-  original_sha: 27fbb14192738a4e76042bf7322b4b529f4996354fa427700624deccd3ef6dc9
-  template_version: 5
-  installed_date: 2026-08-13T22:17:05.922621+00:00
-  lang:
-  - rust
-  agent:
-  - claude
-  ref_count: 2
-  category: skill
-.editorconfig:
-  original_sha: 2cdf8de1f750e1c41bb875838dc70caa8dc99b06def6caff7a61bbcb201d59fb
-  template_version: 5
-  installed_date: 2026-07-21T19:14:56.324329+00:00
-  lang:
-  - rust
-  agent: []
-  ref_count: 1
-  category: language
-.rustfmt.toml:
-  original_sha: 3cd36b434eef756854beec4e5dfc59f52f06fee47dfd6e20f264caa6ed50a113
-  template_version: 5
-  installed_date: 2026-08-13T22:17:05.924293+00:00
-  lang:
-  - rust
-  agent: []
-  ref_count: 1
-  category: language
-.claude/skills/rust-coding-conventions/SKILL.md:
-  original_sha: 35c301f0d83f09e5259b500e910c858dc4a5f687d433476a0e7b53f9935a31c1
-  template_version: 5
-  installed_date: 2026-07-21T19:14:56.324954+00:00
-  lang:
-  - rust
-  agent: []
-  ref_count: 1
-  category: skill
 .claude/commands/init-session.md:
   original_sha: 0d2fd81c4fbae776c4b4f050bd0394e913796c6e597297487ca34d8e78ec5d7d
   template_version: 5
@@ -89,3 +26,75 @@ AGENTS.md:
   agent: []
   ref_count: 1
   category: skill
+.claude/skills/recent-updates/SKILL.md:
+  original_sha: 27fbb14192738a4e76042bf7322b4b529f4996354fa427700624deccd3ef6dc9
+  template_version: 5
+  installed_date: 2026-08-13T22:17:05.922621+00:00
+  lang:
+  - rust
+  agent:
+  - claude
+  ref_count: 2
+  category: skill
+.claude/skills/git-workflow/SKILL.md:
+  original_sha: e77221a6957de986cdd456c69f80d4009ac8bf5e118a3e926c47260746ae92be
+  template_version: 5
+  installed_date: 2026-08-13T22:16:40.244524+00:00
+  lang:
+  - rust
+  agent:
+  - claude
+  ref_count: 2
+  category: skill
+UPDATES.md:
+  original_sha: ff56fd563cb60b9073230b3b0721e5687c98fd7888129b47f2bbc557e9c9c940
+  template_version: 5
+  installed_date: 2026-08-13T22:17:05.924897+00:00
+  lang: []
+  agent: []
+  ref_count: 0
+  category: integration
+CLAUDE.md:
+  original_sha: eb7e86a5cd044d553afc7d464e33eea906f229a5637979cde2e864e0cf573cfa
+  template_version: 5
+  installed_date: 2026-08-29T12:53:28.451552+00:00
+  lang: []
+  agent:
+  - claude
+  ref_count: 1
+  category: agent
+.claude/skills/rust-coding-conventions/SKILL.md:
+  original_sha: 35c301f0d83f09e5259b500e910c858dc4a5f687d433476a0e7b53f9935a31c1
+  template_version: 5
+  installed_date: 2026-07-21T19:14:56.324954+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: skill
+AGENTS.md:
+  original_sha: 6c2c495763c6106fe46001a7826766599861bc27538de9acef372149a48fbac9
+  template_version: 0
+  installed_date: 2026-07-21T19:14:56.321763+00:00
+  lang: []
+  agent: []
+  ref_count: 0
+  category: main
+.editorconfig:
+  original_sha: 2cdf8de1f750e1c41bb875838dc70caa8dc99b06def6caff7a61bbcb201d59fb
+  template_version: 5
+  installed_date: 2026-07-21T19:14:56.324329+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: language
+.rustfmt.toml:
+  original_sha: 3cd36b434eef756854beec4e5dfc59f52f06fee47dfd6e20f264caa6ed50a113
+  template_version: 5
+  installed_date: 2026-08-13T22:17:05.924293+00:00
+  lang:
+  - rust
+  agent: []
+  ref_count: 1
+  category: language

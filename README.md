@@ -791,6 +791,8 @@ Run `slopctl templates --update` first to refresh the global catalog (including 
 
 Files and skills are routed to the same workspace locations as `init`. The scope defaults to the installed languages (from the FileTracker) and the agents detected in the workspace; override with `--lang`/`--agent`. Explicitly selected targets are overwritten directly, but a customized or untracked selected target is an error unless `--force` is given; in full-workspace mode such files are skipped with a report instead.
 
+In full-workspace mode, a missing agent instruction or prompt file is only recreated for an agent that owns at least one tracker entry — never for an agent known solely from its marker directory. Files it refuses to create for that reason are reported per agent with a `slopctl init --agent <name>` hint, and `--force` does not override this. An explicit `--agent <name>` that owns nothing in the tracker errors immediately with the same hint, rather than silently doing nothing.
+
 When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
 
 This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs something *new*: a language or an agent). `AGENTS.md` and changelog-marker files (e.g. `UPDATES.md`) are never refreshed by `update`, under any flag; use `merge`.

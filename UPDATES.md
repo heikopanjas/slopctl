@@ -4,6 +4,54 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 (v23.1.0, fix update silently skipping missing agent files)
+
+- `slopctl update`/`update --agent <name>` no longer silently drops a missing
+  agent-category file (e.g. `CLAUDE.md`) that is untracked because an older
+  init/remove cycle deleted it from both disk and `tracker.yml`. The gate in
+  `update_full` (`src/template_manager/partial_update.rs`) asked a per-file
+  question (`tracker.get_metadata(target).is_some()`) where the real question
+  is per-agent: it now also creates the file when the owning agent has at
+  least one other tracker entry, via the new `may_create_missing` helper and
+  a hoisted `installed_agents` set from `FileTracker::get_installed_agents()`
+- refusals are now reported instead of dropped silently: a new
+  `agent_skipped: BTreeMap<String, usize>` accumulator feeds a new
+  `report_agent_skipped` helper (mirroring `report_skipped`/
+  `report_changelog_skipped`), wired into the up-to-date branch, the dry-run
+  preview, and the post-refresh branch; the "file(s) checked" count includes
+  the refused files
+- `update_full` now hard-errors when an explicit `--agent <name>` owns
+  nothing in the tracker ("Agent 'X' is not installed in this workspace. Use
+  'slopctl init --agent X' to install it.") instead of quietly resolving
+  scope and doing nothing for that agent. `effective_agent_scope` itself is
+  unchanged (its other callers, `update_partial` and `merge`, keep today's
+  behavior); the check is a short-circuit added at the top of `update_full`
+- rationale: an explicit `--agent` deliberately still does NOT authorize
+  creation on its own (only tracker ownership does) - that would turn
+  `update --agent <name>` into a de-facto `init` for a never-installed
+  agent, bypassing init's no-op guard and untracked-collision preflight, and
+  would contradict the verb separation already documented for `init` vs
+  `update`. `update --file`/`--skill` selectors remain intentionally
+  ungated - they are explicit per-file intent and already hard-error on an
+  unmatched selector rather than failing silently
+- added seven integration tests in `integration_tests.rs` covering: recreate
+  via bare `update` and via explicit `--agent`, discrimination against a
+  marker-only sibling agent, a newly catalogued file for an already-installed
+  agent, revocation after `remove --agent`, dry-run writing nothing, and the
+  new hard-error path; plus a `forget_tracker_entry` helper reproducing the
+  exact untracked-and-missing precondition
+- updated the `AGENTS.md` "File Tracker Ownership" bullet and the README
+  `update` section to describe the per-agent check, the report, and the new
+  error, replacing the now-inaccurate "never creates agent-category files
+  for agents that were not slopctl-installed" wording
+- verified end-to-end in this workspace: `slopctl update --agent claude`
+  previously reported success without creating `CLAUDE.md`; it now creates
+  it, and `tracker.yml` records `CLAUDE.md` with `agent: [claude]`,
+  `ref_count: 1`, `category: agent`
+- version bump: 23.0.0 to 23.1.0 (MINOR - beyond the fix, this adds a new
+  hard-error path and new stdout reporting to an existing command, not just
+  a corrected internal behavior)
+
 ### 2026-08-29 (v23.0.0, point default catalog sources at develop)
 
 - repointed `DEFAULT_SOURCE_URL`, `DEFAULT_AGENTS_SOURCE_URL`, and
