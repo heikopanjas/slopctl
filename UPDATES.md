@@ -4,6 +4,16 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-08-29 (v22.7.0, drop .gitignore/.gitattributes from the template catalog)
+
+- removed `.gitignore` and `.gitattributes` from `templates/v5/templates.yml`: `shared.cmake.files`, `languages.rust.files`, and `languages.swift.files` no longer map anything to `.gitignore` (dropping it from `c`/`c++`/`swiftui` too, via `includes`); `integration.git.files` no longer maps `git-attributes-common.txt` to `.gitattributes`
+- rationale: project scaffolders (`cargo new`, `npm init`, `swift package init`, etc.) commonly generate their own `.gitignore` before `slopctl init` ever runs; `preflight_installation` then refuses with "target '...' already exists but is not tracked" (`template_engine.rs:1358`), the same friction hit earlier today restoring the agent instruction stubs over pre-existing `.cursorrules`/`copilot-instructions.md`. slopctl no longer needs to own these files at all
+- deleted the six now-unreferenced source files: `cmake-git-ignore.txt`, `rust-git-ignore.txt`, `swift-git-ignore.txt`, `git-attributes-common.txt`, plus `c-git-ignore.txt`/`c++-git-ignore.txt`, which were already orphaned (unreferenced in `templates.yml` since the `cmake` shared group superseded them, pre-dating this change)
+- no Rust changes: confirmed via full-repo grep that every `.gitignore`/`.gitattributes` reference in `src/` is inside `#[cfg(test)]` fixtures using synthetic names, never production code. `verify.rs`'s per-language duplicate-target exemption stays needed and unaffected — it still covers `.editorconfig` (c, c++, rust, swift) and `.clang-format` (c, c++)
+- updated the "shared ownership" example in `AGENTS.md` and the config-file lists/examples in `README.md` to stop citing `.gitignore`/`.gitattributes`, since neither remains a live example in the shipped catalog; swapped two README `--file`/integration examples that would otherwise reference a filename slopctl no longer manages. left the two illustrative *user-authored* catalog examples (README's "Example V5 structure" and "Example custom language: Elixir") alone — they demonstrate the general mechanism, not the shipped catalog, and the mechanism is unaffected
+- this repo's own `.gitignore`/`.gitattributes` stay on disk unchanged (both were byte-identical to their templates); untracked their `.slopctl/tracker.yml` entries by hand, since there is no `slopctl untrack` command and `remove` would have deleted the files, which was not the intent
+- version bump: 22.6.0 to 22.7.0 (MINOR - removes template outputs from every future `init`/`update`, changing what gets installed; no breaking Rust API change)
+
 ### 2026-08-29 (v22.6.0, refresh agent-capabilities doc, restore three instruction stubs)
 
 - refreshed `docs/coding-agent-config-locations-v3.md` from the upstream `heikopanjas/agent-capabilities` reference (last verified here 2026-05-14, now 2026-08-27); grew from 6 to 17 documented agents. slopctl's own `### slopctl agent defaults` section is our addition, not upstream content, so it was re-appended rather than overwritten. kept the `-v3.md` filename: only historical UPDATES.md entries reference it, no code does, and renaming would strand those references

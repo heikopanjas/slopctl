@@ -99,7 +99,7 @@ With `--lang rust` this will:
 
 1. Copy main AGENTS.md template to your project
 2. Merge skill hint fragments into AGENTS.md (tells agents about available coding skills)
-3. Copy language config files (.rustfmt.toml, .editorconfig, .gitignore)
+3. Copy language config files (.rustfmt.toml, .editorconfig)
 4. Create `UPDATES.md`, the append-only "Recent Updates & Decisions" log (entries below its changelog marker are preserved on re-init and merge)
 5. Install language skills (rust-coding-conventions, rust-build-commands) and the top-level skills (git-workflow, semantic-versioning, recent-updates) to `.agents/skills/`
 6. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode)
@@ -160,7 +160,6 @@ slopctl init --lang rust
 4. **Installs language config files**:
    - Copies `.rustfmt.toml` for Rust formatting
    - Copies `.editorconfig` for editor configuration
-   - Copies `.gitignore` for Rust artifacts
 
 5. **Creates `UPDATES.md`** — the append-only "Recent Updates & Decisions" log; everything below its changelog marker is user-owned and preserved by later init, update, and merge runs
 
@@ -183,8 +182,6 @@ my-rust-project/
 ├── UPDATES.md                         # Append-only Recent Updates & Decisions log
 ├── .rustfmt.toml                      # Rust formatting configuration
 ├── .editorconfig                      # Editor configuration
-├── .gitignore                         # Git ignore file
-├── .gitattributes                     # Git attributes (line endings)
 └── .agents/skills/                    # Cross-client Agent Skills directory
     ├── rust-coding-conventions/       # Rust coding standards skill
     ├── rust-build-commands/           # Cargo build commands skill
@@ -296,7 +293,7 @@ slopctl remove --agent claude
 **Scenario: Remove language config files (switch languages)**
 
 ```bash
-# Remove Rust config files (.rustfmt.toml, .editorconfig, .gitignore, etc.)
+# Remove Rust config files (.rustfmt.toml, .editorconfig, etc.)
 slopctl remove --lang rust
 
 # Then install C++ config files
@@ -808,7 +805,7 @@ slopctl update --dry-run                            # Preview the full refresh
 slopctl update --force                              # Also overwrite customized files
 slopctl update --skill rust-coding-conventions      # Refresh a single skill
 slopctl update --file .rustfmt.toml                 # Refresh a single file
-slopctl update --skill git-workflow --file .gitattributes  # Refresh several at once
+slopctl update --skill git-workflow --file .editorconfig   # Refresh several at once
 slopctl update --file .editorconfig --lang rust     # Override the language scope
 slopctl update --skill init-session --agent cursor  # Override the agent scope
 slopctl update --file .rustfmt.toml --force         # Overwrite a customized file
@@ -979,8 +976,8 @@ Currently configured in the default template catalog:
 
 - **C** - C programming language (skills: `c-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
 - **C++** - C++ programming language (skills: `cpp-coding-conventions`, `cmake-build-commands`; config files: `.clang-format`, `.editorconfig`)
-- **Rust** - Rust programming language (skills: `rust-coding-conventions`, `rust-build-commands`; config files: `.rustfmt.toml`, `.editorconfig`, `.gitignore`)
-- **Swift** - Swift programming language (skills: `swift-coding-conventions`, `swift-build-commands`, `swift-concurrency-pro`; config files: `.swift-format`, `.editorconfig`, `.gitignore`)
+- **Rust** - Rust programming language (skills: `rust-coding-conventions`, `rust-build-commands`; config files: `.rustfmt.toml`, `.editorconfig`)
+- **Swift** - Swift programming language (skills: `swift-coding-conventions`, `swift-build-commands`, `swift-concurrency-pro`; config files: `.swift-format`, `.editorconfig`)
 - **SwiftUI** - SwiftUI framework (includes all Swift skills and config files plus `swiftui-pro` skill)
 
 Coding conventions and build commands are installed as [Agent Skills](https://agentskills.io) rather than fragments merged into AGENTS.md. A slim hint fragment is merged into AGENTS.md to inform agents that skills are available. Additional language templates can be added to `templates.yml` configuration.
@@ -1007,7 +1004,7 @@ Templates include:
 - **Principle fragments**: Core principles and best practices - merged into AGENTS.md
 - **Mission fragments**: Mission statement, technology stack - merged into AGENTS.md
 - **Agent templates**: Agent-specific instruction files, prompts, and skills (copied to project directories)
-- **Config files**: EditorConfig, format configurations, .gitignore, .gitattributes
+- **Config files**: EditorConfig, format configurations
 
 ### Agent Skills
 
@@ -1156,7 +1153,7 @@ The bundled `templates/v5/templates.yml` should be read as an example catalog. I
 3. **agents**: Agent-specific files with `instructions`, `prompts`, `skills` (source only; name derived from path), and `directories` (workspace paths to create during init)
 4. **shared**: Reusable file groups with `files` and optional `skills` (skills propagate to including languages via `includes`)
 5. **languages**: Language-specific coding standards fragments (merged into AGENTS.md), with optional `includes` and `skills`
-6. **integration**: Tool/workflow integration groups; entries can be AGENTS.md fragments (e.g. git workflow summary) or real workspace files (e.g. `.gitattributes`, `UPDATES.md`) — installed on every init
+6. **integration**: Tool/workflow integration groups; entries can be AGENTS.md fragments (e.g. git workflow summary) or real workspace files (e.g. `UPDATES.md`) — installed on every init
 7. **principles**: Core principles and general guidelines fragments (merged into AGENTS.md)
 8. **mission**: Mission statement, purpose, and project overview fragments (merged into AGENTS.md)
 9. **skills**: Agent-agnostic skill definitions with `source` (name derived from path; installed to cross-client `.agents/skills/` for cross-client agents, native dir for native-only agents; optional `target: '$userprofile'` for global installation)
@@ -1411,7 +1408,7 @@ When you run `slopctl init --lang rust`:
 3. Uses TemplateEngine for agents.md standard
 4. Downloads main AGENTS.md template
 5. Merges fragments (mission, principles, skill hints, integration) into AGENTS.md at insertion points
-6. Copies language config files (.rustfmt.toml, .editorconfig, .gitignore) and integration files (.gitattributes, UPDATES.md)
+6. Copies language config files (.rustfmt.toml, .editorconfig) and integration files (UPDATES.md)
 7. Installs language skills (e.g. rust-coding-conventions, rust-build-commands) and top-level skills to `.agents/skills/` (or native agent dirs for Claude/Vibe)
 8. Single AGENTS.md works with all agents
 9. Optional `--agent` adds agent-specific files (e.g. `.cursor/commands/init-session.md`, `.opencode/commands/init-session.md`), agent skills, and creates agent directories (e.g. `.cursor/plans`)
