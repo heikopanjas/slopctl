@@ -1,5 +1,7 @@
 # slopctl
 
+**Website: [slopctl.me](https://slopctl.me)**
+
 **A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (every agent in the default catalog, see [Supported Agents](#supported-agents)) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
 [![Build and Test](https://github.com/heikopanjas/slopctl/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/heikopanjas/slopctl/actions/workflows/build.yml)
@@ -1655,6 +1657,12 @@ It depends on how the skill is defined and which agents are installed. See the [
 - **Adding a native-only agent after language install**: language skills are hydrated from templates into the agent's native skill dir
 - **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir
 - **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir for explicit global policy installs (e.g. `~/.codex/skills/`)
+
+## Links
+
+- Website: [slopctl.me](https://slopctl.me)
+- Source: [github.com/heikopanjas/slopctl](https://github.com/heikopanjas/slopctl)
+- Templates: [github.com/heikopanjas/slopctl-templates](https://github.com/heikopanjas/slopctl-templates)
 
 ## License
 

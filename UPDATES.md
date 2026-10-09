@@ -4,6 +4,16 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-10-09 (v23.2.1, announce website slopctl.me)
+
+- README now links the new website https://slopctl.me at the top and in a
+  new Links section; the config locations doc points back to it
+- added `homepage` and `repository` to `Cargo.toml` so the crate metadata
+  and `cargo` output reference the site
+- rationale: the project website is live and should be discoverable from
+  the repo, docs, and package metadata
+- version bump: 23.2.0 to 23.2.1 (PATCH - documentation and metadata only)
+
 ### 2026-10-09 (v23.2.0, add user-defined agent overlays and catalog cross-check)
 
 - added `src/agent_overlay.rs`: users define extra agents in

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-09 (v23.2.0)
+**Last updated:** 2026-10-09 (v23.2.1)
 
 <!-- {mission} -->
 
@@ -18,6 +18,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Package Manager:** Cargo
 - **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
 - **License:** MIT
+- **Website:** <https://slopctl.me> (also set as `homepage` in `Cargo.toml`)
 
 ## Session Protocol
 
