@@ -1,6 +1,8 @@
 # slopctl
 
-**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
+**Website: [slopctl.me](https://slopctl.me)**
+
+**A manager for coding agent instruction files** – A Rust CLI tool that provides a centralized system for managing, organizing, and maintaining initialization prompts and instruction files for AI coding assistants. Supports the [agents.md community standard](https://agents.md) where a single AGENTS.md file works across all agents (every agent in the default catalog, see [Supported Agents](#supported-agents)) with built-in governance guardrails and human-in-the-loop controls. Also supports [Agent Skills](https://agentskills.io) for extending agent capabilities with specialized knowledge and workflows.
 
 [![Build and Test](https://github.com/heikopanjas/slopctl/actions/workflows/build.yml/badge.svg?branch=develop)](https://github.com/heikopanjas/slopctl/actions/workflows/build.yml)
 ![MIT License](https://img.shields.io/badge/-MIT%20License-000000?style=flat-square&logo=opensource&logoColor=white)
@@ -20,12 +22,13 @@ slopctl is a command-line tool that helps you:
 - **Initialize projects quickly** – Set up agent instructions with a single command
 - **agents.md standard** – Follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
 - **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates; local directories and full GitHub URLs are supported in `templates.yml`
+- **Custom agents without forking** – Add your own agent with a small `agent.yml` overlay in the workspace or your global config ([example](#example-add-an-agent-called-acme))
 - **Keep catalogs synchronized** – Update global templates and agent defaults from remote sources
 - **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
 - **Append-only decision log** – `UPDATES.md` keeps the "Recent Updates & Decisions" history below a changelog marker that init, update, and merge never overwrite
 - **Workspace health checks** – Detect and fix stale or broken managed files with `doctor --fix`; run `doctor --smart` for AI-assisted linting of `AGENTS.md`
 - **Enforce governance** – Built-in guardrails for no auto-commits and human confirmation
-- **Support multiple agents** – Compatible with Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode
+- **Support multiple agents** – Compatible with every agent in the default catalog (see [Supported Agents](#supported-agents)), plus your own via [agent overlays](#adding-a-custom-agent)
 - **Flexible file placement** – Use placeholders (`$workspace`, `$userprofile`) for custom locations
 - **Template versioning** – V5 templates with shared file groups (with skill propagation), composable languages, agent/language skill associations, and agent directories
 
@@ -44,7 +47,7 @@ slopctl uses the V5 template format following the [agents.md](https://agents.md)
 **Philosophy**: One AGENTS.md file that works across all agents.
 
 - Follows the [agents.md](https://agents.md) community standard
-- Single AGENTS.md file compatible with Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode
+- Single AGENTS.md file compatible with every agent in the default catalog (see [Supported Agents](#supported-agents))
 - AGENTS.md is the single source of truth; most agents read it natively with no additional stub. Claude Code, GitHub Copilot, and Cursor each auto-load an instruction file of their own before AGENTS.md, so all three get a slim redirect stub (`CLAUDE.md`, `.github/copilot-instructions.md`, `.cursorrules`) from one shared template source
 - [Agent Skills](https://agentskills.io) support: define skills per agent, per language, or as top-level entries
 - Shared file groups (`shared` section) and composable languages (`includes`) for reuse across languages
@@ -102,7 +105,7 @@ With `--lang rust` this will:
 3. Copy language config files (.rustfmt.toml, .editorconfig)
 4. Create `UPDATES.md`, the append-only "Recent Updates & Decisions" log (entries below its changelog marker are preserved on re-init and merge)
 5. Install language skills (rust-coding-conventions, rust-build-commands) and the top-level skills (git-workflow, semantic-versioning, recent-updates) to `.agents/skills/`
-6. **Single AGENTS.md works with all agents** (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, and OpenCode)
+6. **Single AGENTS.md works with all agents** (every agent in the default catalog)
 
 Without `--lang`, you still get AGENTS.md (mission, principles, integration), `UPDATES.md`, and the top-level skills—just no language-specific files.
 
@@ -412,6 +415,7 @@ slopctl templates --update --verify --list
   (`$XDG_CACHE_HOME/slopctl/templates` if `XDG_CACHE_HOME` is set) — same on all platforms
 - If `--dry-run` is specified, shows the source URL and target directory without downloading
 - Overwrites existing global templates with new versions
+- `--verify` also cross-checks `templates.yml` against `agent-defaults.yml` (an agent must be in both) and checks [overlay agents](#adding-a-custom-agent)
 - Does NOT modify any files in the current project directory
 - **`--verify` checks three things in sequence:**
   - **YAML structure** – parses `templates.yml`, checks version, checks for duplicate targets
@@ -439,7 +443,7 @@ slopctl agents --update --verify --list
 
 - `--update` / `-u` - Download or update global agent defaults from source
 - `--verify` / `-V` - Validate local `agent-defaults.yml` and compare it with the configured source
-- `--list` / `-l` - Show known agents and their default prompt, skill, and marker paths
+- `--list` / `-l` - Show known agents and their default prompt, skill, and marker paths; [overlay agents](#adding-a-custom-agent) are included and show their origin
 - `--from` / `-f` - Path or URL used by `--update` and `--verify`
 - `--dry-run` / `-n` - Preview what would be downloaded (requires `--update`)
 
@@ -904,7 +908,7 @@ slopctl config --global --delete templates.uri
 slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl-templates/tree/develop/templates
 
 # Set an independent agent defaults source
-slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/templates
+slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/defaults
 
 # Set default LLM provider for merge (workspace-specific)
 slopctl config --set merge.provider anthropic
@@ -1485,7 +1489,95 @@ Templates live in the separate [`slopctl-templates`](https://github.com/heikopan
 3. For languages: Create coding conventions and build commands markdown files
 4. For agents: Create `agent-name/` directory with instructions and prompts
 5. Update `templates/templates.yml` with the new entries
-6. Submit a pull request there
+6. For agents, also add an entry to `defaults/agent-defaults.yml`; an agent that is only in `templates.yml` is rejected by `init` and reported by `templates --verify`
+7. Submit a pull request there
+
+To add an agent for yourself only, without forking, use an [agent overlay](#adding-a-custom-agent).
+
+### Adding a Custom Agent
+
+Add an agent that the default catalog does not ship by creating an overlay directory. Each agent lives in `agents/<name>/agent.yml`, in one of two places:
+
+- Global: `$XDG_CONFIG_HOME/slopctl/agents/<name>/` (or `~/.config/slopctl/agents/<name>/`), available in every workspace
+- Workspace: `<workspace>/.slopctl/agents/<name>/`, which can be committed to share the agent with your team. A workspace overlay wins over a global overlay of the same name
+
+`agent.yml` combines the `agent-defaults.yml` fields with the `templates.yml` agent sections:
+
+```yaml
+# .slopctl/agents/myagent/agent.yml
+markers: [.myagent]                       # directories that signal the agent is in use
+prompt_dir: $workspace/.myagent/commands
+skill_dir: $workspace/.myagent/skills
+reads_cross_client_skills: false          # true if the agent also scans .agents/skills/
+instructions:
+  - source: instructions.md               # relative to this directory
+    target: $workspace/.myagent/instructions.md
+prompts: []
+skills:
+  - source: skills/helper                 # a directory containing SKILL.md
+```
+
+Then use it like any other agent: `slopctl init --agent myagent`, `update`, `merge`, `remove --agent myagent`, `status` and `agents --list` all see it.
+
+Rules:
+
+- Overlays are add-only: a name that matches a shipped agent is an error
+- `name` is optional and must equal the directory name when given; unknown keys are rejected
+- `source` paths are relative to the agent directory. Absolute paths, `..` and URLs are rejected
+- Workspace overlays may only use `$workspace` targets and directories; global overlays may also use `$userprofile`
+- The default templates must still be installed (`slopctl templates --update`); a broken overlay makes slopctl commands fail with an error naming the file
+
+#### Example: add an agent called `acme`
+
+Suppose your team uses an in-house coding agent, `acme`, that reads `.acme/instructions.md` and loads skills from `.acme/skills/`. Create the overlay in the workspace so it can be committed with the project:
+
+```text
+my-project/
+└── .slopctl/
+    └── agents/
+        └── acme/
+            ├── agent.yml
+            ├── instructions.md
+            └── skills/
+                └── team-conventions/
+                    └── SKILL.md
+```
+
+```yaml
+# .slopctl/agents/acme/agent.yml
+markers: [.acme]
+prompt_dir: $workspace/.acme/commands
+skill_dir: $workspace/.acme/skills
+reads_cross_client_skills: false
+instructions:
+  - source: instructions.md
+    target: $workspace/.acme/instructions.md
+skills:
+  - source: skills/team-conventions
+```
+
+Install and manage it with the usual commands:
+
+```bash
+# The overlay shows up next to the built-in agents
+slopctl agents --list
+#   acme (overlay: workspace)
+#     origin: /path/to/my-project/.slopctl/agents/acme
+
+# Install it (AGENTS.md, .acme/instructions.md, .acme/skills/team-conventions)
+slopctl init --agent acme
+
+# After editing the overlay files, refresh the installed copies
+slopctl update
+
+# Check the catalogs and the overlay (missing sources, colliding targets)
+slopctl templates --verify
+
+# Remove only this agent's files
+slopctl remove --agent acme
+```
+
+To make `acme` available in every project on your machine, put the same `acme/` directory under `~/.config/slopctl/agents/` (or `$XDG_CONFIG_HOME/slopctl/agents/`) instead.
 
 ## Technology Stack
 
@@ -1565,6 +1657,12 @@ It depends on how the skill is defined and which agents are installed. See the [
 - **Adding a native-only agent after language install**: language skills are hydrated from templates into the agent's native skill dir
 - **Agent-specific skills** (`agents.<name>.skills`): always go to that agent's native workspace dir
 - **Template-defined skills with `target: '$userprofile'`**: agent's userprofile skill dir for explicit global policy installs (e.g. `~/.codex/skills/`)
+
+## Links
+
+- Website: [slopctl.me](https://slopctl.me)
+- Source: [github.com/heikopanjas/slopctl](https://github.com/heikopanjas/slopctl)
+- Templates: [github.com/heikopanjas/slopctl-templates](https://github.com/heikopanjas/slopctl-templates)
 
 ## License
 

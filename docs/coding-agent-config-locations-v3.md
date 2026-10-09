@@ -2,6 +2,8 @@
 
 Instruction files, custom prompts, skills & subagents for CLI / agentic coding tools — August 2026
 
+Part of the [slopctl](https://slopctl.me) documentation.
+
 Skills follow the [agentskills.io](https://agentskills.io/specification) open standard.
 `.agents/` is the cross-agent convention path.
 

@@ -34,7 +34,7 @@ pub const PLACEHOLDER_USERPROFILE: &str = "$userprofile";
 pub const CROSS_CLIENT_SKILL_DIR: &str = "$workspace/.agents/skills";
 
 /// YAML representation of the agent defaults catalog
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentCatalog
 {
     /// Catalog schema version
@@ -199,7 +199,7 @@ pub fn detect_all_installed_agents_from_catalog(catalog: &AgentCatalog, workspac
     found
 }
 
-fn validate_placeholder_path(path: &str, field: &str) -> Result<()>
+pub(crate) fn validate_placeholder_path(path: &str, field: &str) -> Result<()>
 {
     require!(path.trim().is_empty() == false, Err(anyhow::anyhow!("{} cannot be empty", field)));
     require!(

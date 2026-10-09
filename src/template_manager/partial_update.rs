@@ -10,8 +10,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
-    agent_defaults::AgentCatalog,
-    bom::TemplateConfig,
+    agent_overlay::{EffectiveCatalogs, load_effective_catalogs},
     file_tracker::{FileStatus, FileTracker},
     template_engine::{self, PartialSelectors, ResolvedFile, ResolvedFiles, TemplateEngine, UpdateOptions, normalize_path}
 };
@@ -53,8 +52,8 @@ impl TemplateManager
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
 
-        let config = template_engine::load_template_config(&self.config_dir)?;
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
+        let config = &catalogs.templates;
 
         // Resolve language scope: explicit override must exist; an auto-detected stale
         // language is quietly dropped so resolution still covers agent/top-level targets.
@@ -72,7 +71,7 @@ impl TemplateManager
             | None => tracker.get_installed_language().filter(|l| config.languages.contains_key(l))
         };
 
-        let effective_agents = effective_agent_scope(agent, &config, &agent_catalog, &workspace)?;
+        let effective_agents = effective_agent_scope(agent, &catalogs, &workspace)?;
 
         // Build partial selectors and resolve only matching targets from the local cache.
         let file_selectors: HashSet<String> = files.iter().cloned().collect();
@@ -95,7 +94,7 @@ impl TemplateManager
                 partial: Some(&partial),
                 local_cache_only: true
             };
-            resolved_sets.push(engine.resolve_all_files(&options)?);
+            resolved_sets.push(engine.resolve_all_files_with(&options, &catalogs)?);
         }
 
         let main_target = resolved_sets.first().map(|set| normalize_path(&set.context.target));
@@ -289,8 +288,8 @@ impl TemplateManager
         let workspace = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&workspace);
 
-        let config = template_engine::load_template_config(&self.config_dir)?;
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
+        let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
+        let config = &catalogs.templates;
         let tracker = FileTracker::new(&workspace)?;
 
         // Language scope: explicit override must exist; otherwise refresh every
@@ -328,7 +327,7 @@ impl TemplateManager
             return Err(anyhow::anyhow!("Agent '{}' is not installed in this workspace.\nUse 'slopctl init --agent {}' to install it.", name, name));
         }
 
-        let effective_agents = effective_agent_scope(agent, &config, &agent_catalog, &workspace)?;
+        let effective_agents = effective_agent_scope(agent, &catalogs, &workspace)?;
 
         // Resolve the full template set per (language, agent) combination and union
         // the candidates. AGENTS.md never appears here; it is carried in the resolved
@@ -341,7 +340,7 @@ impl TemplateManager
             {
                 let options =
                     UpdateOptions { lang: lang_opt.as_deref(), agent: agent_opt.as_deref(), mission: None, force, dry_run, partial: None, local_cache_only: true };
-                resolved_sets.push(engine.resolve_all_files(&options)?);
+                resolved_sets.push(engine.resolve_all_files_with(&options, &catalogs)?);
             }
         }
 
@@ -520,23 +519,21 @@ impl TemplateManager
 
 /// Resolves the effective agent scope for update commands
 ///
-/// An explicit override must exist in the catalog; otherwise detected agents present
+/// An explicit override must exist in both catalogs (including overlays); otherwise detected agents present
 /// in the catalog are used, falling back to a single agent-less pass.
-pub(super) fn effective_agent_scope(agent: Option<&str>, config: &TemplateConfig, agent_catalog: &AgentCatalog, workspace: &Path) -> Result<Vec<Option<String>>>
+pub(super) fn effective_agent_scope(agent: Option<&str>, catalogs: &EffectiveCatalogs, workspace: &Path) -> Result<Vec<Option<String>>>
 {
+    let config = &catalogs.templates;
     match agent
     {
         | Some(a) =>
         {
-            require!(
-                config.agents.contains_key(a) == true,
-                Err(anyhow::anyhow!("Agent '{}' not found in templates.yml.\nAvailable agents: {}", a, sorted_keys(config.agents.keys())))
-            );
+            catalogs.require_known_agent(a)?;
             Ok(vec![Some(a.to_string())])
         }
         | None =>
         {
-            let detected: Vec<Option<String>> = agent_defaults::detect_all_installed_agents_from_catalog(agent_catalog, workspace)
+            let detected: Vec<Option<String>> = agent_defaults::detect_all_installed_agents_from_catalog(&catalogs.agents, workspace)
                 .into_iter()
                 .filter(|name| config.agents.contains_key(name))
                 .map(Some)

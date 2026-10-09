@@ -4,6 +4,35 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-10-09 (v23.2.1, announce website slopctl.me)
+
+- README now links the new website https://slopctl.me at the top and in a
+  new Links section; the config locations doc points back to it
+- added `homepage` and `repository` to `Cargo.toml` so the crate metadata
+  and `cargo` output reference the site
+- rationale: the project website is live and should be discoverable from
+  the repo, docs, and package metadata
+- version bump: 23.2.0 to 23.2.1 (PATCH - documentation and metadata only)
+
+### 2026-10-09 (v23.2.0, add user-defined agent overlays and catalog cross-check)
+
+- added `src/agent_overlay.rs`: users define extra agents in
+  `agents/<name>/agent.yml` under the global config dir or the workspace
+  `.slopctl/agents/`; `load_effective_catalogs` merges them into the shipped
+  `templates.yml` and `agent-defaults.yml` for init, update, merge, remove,
+  status, list, verify and `agents --list`
+- overlays are add-only, confined to their own directory (no absolute paths,
+  `..`, or URLs) and workspace overlays are limited to `$workspace` targets
+- an agent known to only one of the two shipped catalogs now fails `init`,
+  `update` and `merge` with an `agents --update` hint and is reported by
+  `templates --verify`; `remove` only warns so tracker cleanup still works
+- removed the unreachable embedded fallback label in `agents --list`; fixed
+  the README `agents.uri` example and stale agent lists; added README
+  section "Adding a Custom Agent"
+- rationale: adding an agent previously meant forking and fully replacing both
+  catalogs, and an agent missing from `agent-defaults.yml` failed silently
+- version bump: 23.1.2 to 23.2.0 (MINOR - new backward-compatible feature)
+
 ### 2026-08-29 15:29 (v23.1.2, add shell language for bash/zsh conventions)
 
 - added a `shell` language to the catalog in the sibling `slopctl-templates`

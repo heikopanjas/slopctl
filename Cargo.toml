@@ -1,7 +1,9 @@
 [package]
 name = "slopctl"
-version = "23.1.2"
+version = "23.2.1"
 edition = "2024"
+homepage = "https://slopctl.me"
+repository = "https://github.com/heikopanjas/slopctl"
 
 [dependencies]
 clap = { version = "4.5.20", features = ["derive"] }

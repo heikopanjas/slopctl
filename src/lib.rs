@@ -28,6 +28,7 @@ macro_rules! require {
 }
 
 pub mod agent_defaults;
+mod agent_overlay;
 mod bom;
 pub mod cli;
 mod config;

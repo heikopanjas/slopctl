@@ -127,7 +127,7 @@ fn default_version() -> u32
 }
 
 /// Template configuration structure parsed from templates.yml
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TemplateConfig
 {
     #[serde(default = "default_version")]
@@ -315,10 +315,17 @@ impl BillOfMaterials
     {
         let config_content = fs::read_to_string(config_path)?;
         let template_config: TemplateConfig = serde_yaml::from_str(&config_content)?;
+        Ok(Self::from_template_config(&template_config))
+    }
 
+    /// Build a Bill of Materials from an already parsed template configuration
+    ///
+    /// Used with the effective (shipped plus overlay) configuration so overlay agents are included.
+    pub fn from_template_config(template_config: &TemplateConfig) -> Self
+    {
         let mut bom = Self::new();
 
-        for (agent_name, agent_config) in template_config.agents
+        for (agent_name, agent_config) in &template_config.agents
         {
             let mut file_paths = Vec::new();
 
@@ -332,11 +339,11 @@ impl BillOfMaterials
 
             if file_paths.is_empty() == false
             {
-                bom.agent_files.insert(agent_name, file_paths);
+                bom.agent_files.insert(agent_name.clone(), file_paths);
             }
         }
 
-        Ok(bom)
+        bom
     }
 
     /// Resolve a target path placeholder to an actual workspace path
@@ -825,6 +832,19 @@ integration:
         let result = BillOfMaterials::resolve_workspace_path("relative/path.md");
         assert_eq!(result.ok_or_else(|| anyhow::anyhow!("expected relative path"))?, PathBuf::from("relative/path.md"));
         Ok(())
+    }
+
+    // -- BillOfMaterials::from_template_config --
+
+    #[test]
+    fn test_bom_from_template_config_collects_agent_targets()
+    {
+        let config: TemplateConfig =
+            serde_yaml::from_str("version: 5\nagents:\n  fake:\n    instructions:\n      - source: a.md\n        target: $workspace/FAKE.md\nlanguages: {}\n")
+                .unwrap();
+        let bom = BillOfMaterials::from_template_config(&config);
+        assert!(bom.has_agent("fake") == true);
+        assert_eq!(bom.get_agent_files("fake").map(<[PathBuf]>::len), Some(1));
     }
 
     // -- BillOfMaterials::from_config --

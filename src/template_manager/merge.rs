@@ -12,6 +12,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     EffectiveConfig, Result,
+    agent_overlay::load_effective_catalogs,
     file_tracker::FileTracker,
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
     model_defaults::{self, ModelCatalog},
@@ -117,20 +118,19 @@ impl TemplateManager
 
         // Without --agent, union the resolved content across all detected agents so
         // every agent's instruction and prompt files participate in the merge.
+        let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
         let content_map = if options.agent.is_some() == true
         {
-            engine.build_target_content_map(&update_options)?
+            engine.build_target_content_map(&update_options, &catalogs)?
         }
         else
         {
-            let config = template_engine::load_template_config(&self.config_dir)?;
-            let agent_catalog = crate::agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-            let effective_agents = super::partial_update::effective_agent_scope(None, &config, &agent_catalog, &workspace)?;
+            let effective_agents = super::partial_update::effective_agent_scope(None, &catalogs, &workspace)?;
             let mut map = HashMap::new();
             for agent_opt in &effective_agents
             {
                 let per_agent_options = UpdateOptions { agent: agent_opt.as_deref(), ..update_options };
-                for (target, resolved) in engine.build_target_content_map(&per_agent_options)?
+                for (target, resolved) in engine.build_target_content_map(&per_agent_options, &catalogs)?
                 {
                     map.entry(target).or_insert(resolved);
                 }
