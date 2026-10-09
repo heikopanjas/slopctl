@@ -1,12 +1,12 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-08-29 (v23.1.2)
+**Last updated:** 2026-10-09 (v23.2.0)
 
 <!-- {mission} -->
 
 ## Mission Statement
 
-slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (Claude Code, Cursor, GitHub Copilot, Codex, Mistral Vibe, OpenCode) following the agents.md and agentskills.io community standards.
+slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.md, CLAUDE.md) across workspaces. It downloads, installs, updates, and synchronizes templates and Agent Skills for multiple AI coding assistants (every agent in the default catalog, plus user-defined overlay agents) following the agents.md and agentskills.io community standards.
 
 ## Technology Stack
 
@@ -111,6 +111,13 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
 - Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
 - `update` creates agent-category files only for agents that own at least one tracker entry (`get_installed_agents`), never for agents known only by a marker directory. The check is per agent, not per file: an installed agent's missing, newly catalogued, or previously deleted file (e.g. a `CLAUDE.md` dropped by an old init/remove cycle) is recreated, which a per-file `get_metadata` probe used to silently skip. Files it refuses to create are reported per agent with a `slopctl init --agent <name>` hint, never dropped silently; `--force` does not override this, and `--agent` on `update` narrows scope only — it never authorizes creation, and errors with the same hint when the named agent owns nothing. `update --file`/`--skill` selectors are explicit intent and are deliberately not gated this way (an unmatched selector already hard-errors), so refreshing a single agent file makes that agent tracker-installed and its remaining files reachable by the next bare `update`. Marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
+
+### Agent Overlays
+
+- Users add agents without forking the template repo via `agents/<name>/agent.yml`, in the global slopctl config dir and in the workspace `.slopctl/agents/` (workspace wins on a name clash). `agent.yml` holds the `agent-defaults.yml` fields and the `templates.yml` agent sections (`instructions`, `prompts`, `skills`, `directories`) flattened side by side; unknown keys are rejected
+- Overlays are add-only: a name that clashes with a shipped agent is a hard error. Sources must be relative to the agent directory (no absolute paths, `..`, or URLs) and are rewritten to absolute paths at load time (`std::path::absolute`, never `canonicalize`), so every existing `config_dir.join(source)` site works unchanged. Workspace overlays may only use `$workspace` targets and dirs
+- `agent_overlay::load_effective_catalogs` is the single loader that merges the shipped `templates.yml`/`agent-defaults.yml` with overlays; commands must use it (or `load_effective_catalogs_lenient` where a missing shipped file is tolerated, i.e. `remove`, `status` detection, `agents --list`) instead of loading the shipped files directly. The global overlay root is disabled under `#[cfg(test)]`
+- The rule "an agent must be in both shipped catalogs" lives only on `EffectiveCatalogs` (`require_known_agent`, `require_agent_consistent`, `catalog_mismatches`). `init`/`update`/`merge` hard-error on a mismatch with an `agents --update` hint, `templates --verify` reports it, and `remove` only warns so tracker records can still clean up. Overlay test fixtures use the artificial agent names `bogus`, `fake`, and `overlayfake`
 
 ### Security & Safety
 

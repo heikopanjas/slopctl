@@ -10,6 +10,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result,
+    agent_overlay::{EffectiveCatalogs, load_effective_catalogs},
     bom::{self, TemplateConfig},
     github::{download_file, is_github_url, is_url, parse_github_url},
     template_engine::load_template_config
@@ -19,9 +20,10 @@ impl TemplateManager
 {
     /// Verify local templates for YAML validity, file integrity, and source freshness
     ///
-    /// Runs three sequential checks and prints results:
+    /// Runs four sequential checks and prints results:
     /// - **C – YAML structure**: parses `templates.yml`, validates version and required fields
     /// - **A – Local file integrity**: every source file/directory declared in `templates.yml` must exist in the local template cache
+    /// - **D – Agent catalogs**: every agent must be in both `templates.yml` and `agent-defaults.yml`; overlay agents are listed and their sources and targets checked
     /// - **B – Source freshness**: downloads (or reads) `templates.yml` from the configured source and compares its content with the local copy
     ///
     /// Returns `Ok(())` when all checks pass, or `Err` (non-zero exit) if any issue is found.
@@ -53,6 +55,9 @@ impl TemplateManager
         {
             self.verify_local_integrity(cfg, &mut issues);
         }
+
+        // Section D: Agent catalogs, including user overlays
+        self.verify_agent_catalogs(config.as_ref(), &mut issues);
 
         // Section B: Source freshness
         self.verify_source_freshness(source, &mut issues);
@@ -238,6 +243,45 @@ impl TemplateManager
         issues.extend(local_issues);
     }
 
+    /// Section D: cross-check `templates.yml` against `agent-defaults.yml` and validate overlay agents
+    fn verify_agent_catalogs(&self, shipped: Option<&TemplateConfig>, issues: &mut Vec<String>)
+    {
+        println!("{} Agent catalogs", "→".blue());
+
+        let catalogs = std::env::current_dir().map_err(anyhow::Error::from).and_then(|workspace| load_effective_catalogs(&self.config_dir, &workspace));
+        let catalogs = match catalogs
+        {
+            | Ok(c) => c,
+            | Err(e) =>
+            {
+                let msg = format!("agent catalogs: {}", e);
+                println!("  {} {}", "✗".red(), msg);
+                issues.push(msg);
+                return;
+            }
+        };
+
+        let shipped_duplicates = shipped.map(|config| collect_duplicate_target_issues(config, &self.config_dir)).unwrap_or_default();
+        let catalog_issues = agent_catalog_issues(&catalogs, &self.config_dir, &shipped_duplicates);
+
+        for overlay in &catalogs.overlays
+        {
+            println!("  {} overlay agent {} ({}): {}", "→".blue(), overlay.name.green(), overlay.scope, overlay.dir.display());
+        }
+        if catalog_issues.is_empty() == true
+        {
+            println!("  {} agent catalogs consistent", "✓".green());
+        }
+        else
+        {
+            for msg in &catalog_issues
+            {
+                println!("  {} {}", "✗".red(), msg);
+            }
+        }
+        issues.extend(catalog_issues);
+    }
+
     /// Section B: compare local `templates.yml` content with the remote/configured source
     fn verify_source_freshness(&self, source: &str, issues: &mut Vec<String>)
     {
@@ -283,6 +327,36 @@ impl TemplateManager
 /// Collect duplicate-target violations across all single-install scenarios
 ///
 /// Returns one error string per duplicate found.
+/// Collects cross-check, overlay source and overlay target-collision issues for the effective catalogs
+///
+/// Duplicate targets already present in the shipped `templates.yml` are excluded so they are reported once.
+fn agent_catalog_issues(catalogs: &EffectiveCatalogs, config_dir: &Path, shipped_duplicates: &[String]) -> Vec<String>
+{
+    let mut issues = catalogs.catalog_mismatches();
+
+    let mut checked = 0u32;
+    for overlay in &catalogs.overlays
+    {
+        if let Some(agent_cfg) = catalogs.templates.agents.get(&overlay.name)
+        {
+            for mapping in agent_cfg.instructions.iter().chain(&agent_cfg.prompts)
+            {
+                check_source_file(config_dir, &mapping.source, &mut checked, &mut issues);
+            }
+            for skill in &agent_cfg.skills
+            {
+                check_source_skill(config_dir, &skill.source, &mut checked, &mut issues);
+            }
+        }
+    }
+
+    if catalogs.overlays.is_empty() == false
+    {
+        issues.extend(collect_duplicate_target_issues(&catalogs.templates, config_dir).into_iter().filter(|msg| shipped_duplicates.contains(msg) == false));
+    }
+    issues
+}
+
 fn collect_duplicate_target_issues(config: &TemplateConfig, config_dir: &Path) -> Vec<String>
 {
     let mut violations = collect_global_duplicate_target_issues(config, config_dir);
@@ -668,6 +742,80 @@ mod tests
 
         let issues = collect_duplicate_target_issues(&config, data_dir.path());
         assert!(issues.is_empty() == true, "instructions targets must not be flagged: {:?}", issues);
+        Ok(())
+    }
+
+    const CATALOG_TEMPLATES: &str = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: bogus.md\n        target: $workspace/BOGUS.md\nlanguages: {}\n";
+    const CATALOG_DEFAULTS: &str = "version: 1\nagents:\n  - name: bogus\n    markers: [.bogus]\n    prompt_dir: $workspace/.bogus/prompts\n    skill_dir: \
+                                    $workspace/.bogus/skills\n    reads_cross_client_skills: true\n";
+
+    /// Writes shipped catalogs plus an optional `fake` workspace overlay and loads the effective catalogs
+    fn catalogs_with_overlay(templates: &str, overlay: Option<&str>) -> anyhow::Result<(tempfile::TempDir, tempfile::TempDir, EffectiveCatalogs)>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        fs::write(data_dir.path().join("templates.yml"), templates)?;
+        fs::write(data_dir.path().join("agent-defaults.yml"), CATALOG_DEFAULTS)?;
+        fs::write(data_dir.path().join("bogus.md"), "x")?;
+        if let Some(content) = overlay
+        {
+            let dir = workspace.path().join(".slopctl/agents/fake");
+            fs::create_dir_all(&dir)?;
+            fs::write(dir.join("agent.yml"), content)?;
+            fs::write(dir.join("fake.md"), "x")?;
+        }
+        let catalogs = load_effective_catalogs(data_dir.path(), workspace.path())?;
+        Ok((data_dir, workspace, catalogs))
+    }
+
+    const FAKE_AGENT: &str = "markers: [.fake]\nprompt_dir: $workspace/.fake/prompts\nskill_dir: $workspace/.fake/skills\nreads_cross_client_skills: \
+                              true\ninstructions:\n  - source: fake.md\n    target: $workspace/FAKE.md\n";
+
+    #[test]
+    fn test_verify_catalogs_consistent_no_issues() -> anyhow::Result<()>
+    {
+        let (data_dir, _ws, catalogs) = catalogs_with_overlay(CATALOG_TEMPLATES, Some(FAKE_AGENT))?;
+        assert!(agent_catalog_issues(&catalogs, data_dir.path(), &[]).is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_catalogs_templates_only_agent_reports_issue() -> anyhow::Result<()>
+    {
+        let templates = format!("{}  extra: {{}}\n", CATALOG_TEMPLATES.replace("languages: {}\n", ""));
+        let (data_dir, _ws, catalogs) = catalogs_with_overlay(&format!("{}languages: {{}}\n", templates), None)?;
+        let issues = agent_catalog_issues(&catalogs, data_dir.path(), &[]);
+        assert!(issues.iter().any(|i| i.contains("'extra'") && i.contains("missing from agent-defaults.yml")) == true, "{:?}", issues);
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_catalogs_defaults_only_agent_reports_issue() -> anyhow::Result<()>
+    {
+        let templates = "version: 5\nagents: {}\nlanguages: {}\n";
+        let (data_dir, _ws, catalogs) = catalogs_with_overlay(templates, None)?;
+        let issues = agent_catalog_issues(&catalogs, data_dir.path(), &[]);
+        assert!(issues.iter().any(|i| i.contains("'bogus'") && i.contains("missing from templates.yml")) == true, "{:?}", issues);
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_overlay_missing_source_reports_issue() -> anyhow::Result<()>
+    {
+        let (data_dir, ws, catalogs) = catalogs_with_overlay(CATALOG_TEMPLATES, Some(FAKE_AGENT))?;
+        fs::remove_file(ws.path().join(".slopctl/agents/fake/fake.md"))?;
+        let issues = agent_catalog_issues(&catalogs, data_dir.path(), &[]);
+        assert!(issues.iter().any(|i| i.contains("fake.md") && i.contains("missing")) == true, "{:?}", issues);
+        Ok(())
+    }
+
+    #[test]
+    fn test_verify_overlay_target_collides_with_shipped_reports_duplicate() -> anyhow::Result<()>
+    {
+        let overlay = FAKE_AGENT.replace("$workspace/FAKE.md", "$workspace/BOGUS.md");
+        let (data_dir, _ws, catalogs) = catalogs_with_overlay(CATALOG_TEMPLATES, Some(&overlay))?;
+        let issues = agent_catalog_issues(&catalogs, data_dir.path(), &[]);
+        assert!(issues.iter().any(|i| i.contains("duplicate target")) == true, "{:?}", issues);
         Ok(())
     }
 }

@@ -108,11 +108,11 @@ impl Config
 {
     // ── path helpers ──────────────────────────────────────────────
 
-    /// Returns the path to the **global** config file
+    /// Returns the **global** slopctl config directory
     ///
-    /// Uses `$XDG_CONFIG_HOME/slopctl/config.yml` if XDG_CONFIG_HOME is set,
-    /// otherwise falls back to `$HOME/.config/slopctl/config.yml`
-    pub fn get_global_path() -> Result<PathBuf>
+    /// Uses `$XDG_CONFIG_HOME/slopctl` if XDG_CONFIG_HOME is set,
+    /// otherwise falls back to `$HOME/.config/slopctl`
+    pub fn get_global_dir() -> Result<PathBuf>
     {
         let config_dir = if let Ok(xdg_config) = env::var("XDG_CONFIG_HOME")
         {
@@ -127,7 +127,13 @@ impl Config
             return Err(anyhow::anyhow!("Could not determine config directory"));
         };
 
-        Ok(config_dir.join("slopctl").join("config.yml"))
+        Ok(config_dir.join("slopctl"))
+    }
+
+    /// Returns the path to the **global** config file (`config.yml` inside [`Self::get_global_dir`])
+    pub fn get_global_path() -> Result<PathBuf>
+    {
+        Ok(Self::get_global_dir()?.join("config.yml"))
     }
 
     /// Returns the path to the **workspace-local** config file
@@ -880,6 +886,13 @@ mod tests
         config.set("merge.model", "gpt-4o")?;
         config.unset("merge.model")?;
         assert!(config.get("merge.model").is_none() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_global_dir_is_parent_of_global_path() -> Result<()>
+    {
+        assert_eq!(Config::get_global_dir()?, Config::get_global_path()?.parent().unwrap());
         Ok(())
     }
 }

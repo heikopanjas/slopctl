@@ -11,17 +11,19 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
-    bom::{self, BillOfMaterials},
+    agent_overlay::{load_effective_catalogs, load_effective_catalogs_lenient},
+    bom::{self, BillOfMaterials, TemplateConfig},
     file_tracker::FileTracker,
     template_engine
 };
 
 impl TemplateManager
 {
-    fn installed_agent_names(&self, workspace: &std::path::Path) -> Result<Vec<String>>
+    pub(super) fn installed_agent_names(&self, workspace: &std::path::Path) -> Result<Vec<String>>
     {
-        let catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        Ok(agent_defaults::detect_all_installed_agents_from_catalog(&catalog, workspace))
+        // Detection only needs the agent catalog, so a missing templates.yml is tolerated.
+        let catalogs = load_effective_catalogs_lenient(&self.config_dir, workspace)?;
+        Ok(agent_defaults::detect_all_installed_agents_from_catalog(&catalogs.agents, workspace))
     }
 
     /// Returns installed skill names from existing FileTracker entries.
@@ -51,13 +53,13 @@ impl TemplateManager
     /// same file collected from different sources (BoM `./x`, tracker `x`, absolute
     /// AGENTS.md) collapses to a single entry rather than surviving as distinct
     /// spellings. Only files that exist on disk are included; the result is sorted.
-    fn collect_managed_files(current_dir: &Path, config_file: &Path, file_tracker: &FileTracker, agents_md_path: &Path) -> Vec<PathBuf>
+    fn collect_managed_files(current_dir: &Path, templates: Option<&TemplateConfig>, file_tracker: &FileTracker, agents_md_path: &Path) -> Vec<PathBuf>
     {
         let mut managed_files: Vec<PathBuf> = Vec::new();
 
-        if config_file.exists() == true &&
-            let Ok(bom) = BillOfMaterials::from_config(config_file)
+        if let Some(templates) = templates
         {
+            let bom = BillOfMaterials::from_template_config(templates);
             for agent_name in bom.get_agent_names()
             {
                 if let Some(files) = bom.get_agent_files(&agent_name)
@@ -122,15 +124,16 @@ impl TemplateManager
         {
             println!("  {} Installed at: {}", "✓".green(), self.config_dir.display().to_string().yellow());
 
-            if let Ok(config) = template_engine::load_template_config(&self.config_dir)
+            if let Ok(catalogs) = load_effective_catalogs(&self.config_dir, &current_dir)
             {
+                let config = &catalogs.templates;
                 println!("  {} Template version: {}", "→".blue(), config.version.to_string().green());
 
                 if config.agents.is_empty() == false
                 {
                     let mut agents: Vec<&String> = config.agents.keys().collect();
                     agents.sort();
-                    println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ").green());
+                    println!("  {} Available agents: {}", "→".blue(), agents.iter().map(|s| catalogs.agent_label(s)).collect::<Vec<_>>().join(", ").green());
                 }
 
                 let mut languages: Vec<&String> = config.languages.keys().collect();
@@ -174,7 +177,6 @@ impl TemplateManager
         // Detect installed agents via AgentDefaults markers. Some agents install
         // only marker directories and skills, so BoM file checks are insufficient.
         let installed_agents = self.installed_agent_names(&current_dir)?;
-        let config_file = self.config_dir.join("templates.yml");
 
         if installed_agents.is_empty() == false
         {
@@ -213,7 +215,8 @@ impl TemplateManager
 
         if verbose == true
         {
-            let managed_files = Self::collect_managed_files(&current_dir, &config_file, &file_tracker, &agents_md_path);
+            let catalogs = load_effective_catalogs(&self.config_dir, &current_dir).ok();
+            let managed_files = Self::collect_managed_files(&current_dir, catalogs.as_ref().map(|c| &c.templates), &file_tracker, &agents_md_path);
 
             println!();
 
@@ -262,7 +265,8 @@ impl TemplateManager
             return Ok(());
         }
 
-        let config = template_engine::load_template_config(&self.config_dir)?;
+        let catalogs = load_effective_catalogs(&self.config_dir, &std::env::current_dir()?)?;
+        let config = &catalogs.templates;
 
         println!("{}", "Available Agents:".bold());
         if config.agents.is_empty() == true
@@ -291,17 +295,18 @@ impl TemplateManager
                     String::new()
                 };
 
+                let label = catalogs.agent_label(agent_name);
                 if is_installed == true
                 {
-                    println!("  {} {} (installed{})", "✓".green(), agent_name.green(), skill_info);
+                    println!("  {} {} (installed{})", "✓".green(), label.green(), skill_info);
                 }
                 else if skill_count > 0
                 {
-                    println!("  {} {} ({} skill(s))", "○".blue(), agent_name, skill_count);
+                    println!("  {} {} ({} skill(s))", "○".blue(), label, skill_count);
                 }
                 else
                 {
-                    println!("  {} {}", "○".blue(), agent_name);
+                    println!("  {} {}", "○".blue(), label);
                 }
             }
         }
@@ -316,7 +321,7 @@ impl TemplateManager
             let lang_config = config.languages.get(lang_name.as_str());
             let includes_annotation = lang_config.map(|lc| &lc.includes).filter(|inc| inc.is_empty() == false).map(|inc| format!("includes: {}", inc.join(", ")));
 
-            let resolved_skills = bom::resolve_language_skills(lang_name, &config).unwrap_or_default();
+            let resolved_skills = bom::resolve_language_skills(lang_name, config).unwrap_or_default();
             let skill_annotation = if resolved_skills.is_empty() == false
             {
                 Some(format!("{} skill(s)", resolved_skills.len()))
@@ -445,7 +450,12 @@ mod tests
         tracker.record_installation(&agent_file, "sha2".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
 
         // agents_md_path is passed as an absolute path, matching list_workspace.
-        let collected = TemplateManager::collect_managed_files(workspace.path(), &config_dir.path().join("templates.yml"), &tracker, &agents_md);
+        let collected = TemplateManager::collect_managed_files(
+            workspace.path(),
+            crate::template_engine::load_template_config(config_dir.path()).ok().as_ref(),
+            &tracker,
+            &agents_md
+        );
 
         let canonical_dir = std::fs::canonicalize(workspace.path())?;
         let relative: Vec<PathBuf> = collected.iter().map(|p| p.strip_prefix(&canonical_dir).unwrap_or(p).to_path_buf()).collect();

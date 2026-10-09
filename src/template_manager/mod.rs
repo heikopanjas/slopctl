@@ -159,8 +159,8 @@ impl TemplateManager
             }
         }
 
-        let agent_catalog = crate::agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &agent_catalog)?;
+        let catalogs = crate::agent_overlay::load_effective_catalogs(&self.config_dir, workspace)?;
+        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &catalogs.agents)?;
         if adopted > 0
         {
             println!("{} Adopted {} existing file(s) into .slopctl/", "→".blue(), adopted);

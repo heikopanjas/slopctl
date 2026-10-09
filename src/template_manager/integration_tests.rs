@@ -1778,3 +1778,170 @@ fn walkdir(dir: &Path) -> Vec<std::path::PathBuf>
     }
     files
 }
+
+// ── Agent overlays ───────────────────────────────────────────────────────────
+
+/// Writes a workspace overlay agent `overlayfake` with one instruction file and one skill.
+fn write_overlay_agent(workspace: &Path, instructions: &str) -> anyhow::Result<()>
+{
+    let dir = workspace.join(".slopctl/agents/overlayfake");
+    fs::create_dir_all(dir.join("skills/helper"))?;
+    fs::write(
+        dir.join("agent.yml"),
+        "markers: [.overlayfake]\nprompt_dir: $workspace/.overlayfake/prompts\nskill_dir: $workspace/.overlayfake/skills\nreads_cross_client_skills: \
+         false\ninstructions:\n  - source: instructions.md\n    target: $workspace/.overlayfake/instructions.md\nskills:\n  - source: skills/helper/\n"
+    )?;
+    fs::write(dir.join("instructions.md"), instructions)?;
+    fs::write(dir.join("skills/helper/SKILL.md"), "---\nname: helper\ndescription: Overlay helper skill\n---\n\n# Helper\n")?;
+    Ok(())
+}
+
+#[test]
+fn test_init_overlay_agent_installs_and_tracks_owner() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+
+    fixture.init(Some("overlayfake"), None)?;
+
+    assert_eq!(fs::read_to_string(workspace.path().join(".overlayfake/instructions.md"))?, "overlay v1\n");
+    assert!(workspace.path().join(".overlayfake/skills/helper/SKILL.md").exists() == true, "overlay skill must land in the overlay skill dir");
+
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    assert!(tracker.get_installed_agents().contains(&"overlayfake".to_string()) == true, "overlay agent must own tracker entries");
+    Ok(())
+}
+
+#[test]
+fn test_update_full_overlay_agent_refreshes_changed_source() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+    fixture.init(Some("overlayfake"), None)?;
+
+    fs::write(workspace.path().join(".slopctl/agents/overlayfake/instructions.md"), "overlay v2\n")?;
+    fixture.manager().update_full(None, None, false, false)?;
+
+    assert_eq!(fs::read_to_string(workspace.path().join(".overlayfake/instructions.md"))?, "overlay v2\n");
+    Ok(())
+}
+
+#[test]
+fn test_update_partial_overlay_agent_file_refreshes() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+    fixture.init(Some("overlayfake"), None)?;
+
+    fs::write(workspace.path().join(".slopctl/agents/overlayfake/instructions.md"), "overlay v2\n")?;
+    fixture.manager().update_partial(&[".overlayfake/instructions.md".to_string()], &[], None, Some("overlayfake"), false, false)?;
+
+    assert_eq!(fs::read_to_string(workspace.path().join(".overlayfake/instructions.md"))?, "overlay v2\n");
+    Ok(())
+}
+
+#[test]
+fn test_merge_overlay_agent_included_in_content_map() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+    fixture.init(Some("overlayfake"), None)?;
+
+    // Changing the overlay source makes the installed file diverge from the fresh content.
+    fs::write(workspace.path().join(".slopctl/agents/overlayfake/instructions.md"), "overlay v2\n")?;
+    fixture.merge_dry_run(Some("overlayfake"), None)?;
+    fixture.merge_dry_run(None, None)?;
+    Ok(())
+}
+
+#[test]
+fn test_remove_overlay_agent_deletes_files_and_markers() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+    fixture.init(Some("overlayfake"), None)?;
+
+    fixture.remove_agent("overlayfake")?;
+
+    assert!(workspace.path().join(".overlayfake/instructions.md").exists() == false);
+    assert!(workspace.path().join(".overlayfake").exists() == false, "empty marker dir must be cleaned up");
+    assert!(workspace.path().join(".slopctl/agents/overlayfake/agent.yml").exists() == true, "overlay definition must survive removal");
+    Ok(())
+}
+
+#[test]
+fn test_status_detects_overlay_agent() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "overlay v1\n")?;
+    fixture.init(Some("overlayfake"), None)?;
+
+    let installed = fixture.manager().installed_agent_names(workspace.path())?;
+    assert!(installed.contains(&"overlayfake".to_string()) == true, "{:?}", installed);
+    fixture.status()?;
+    Ok(())
+}
+
+#[test]
+fn test_init_overlay_clashing_with_shipped_agent_errors() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    write_overlay_agent(workspace.path(), "x\n")?;
+    fs::rename(workspace.path().join(".slopctl/agents/overlayfake"), workspace.path().join(".slopctl/agents/bogus"))?;
+
+    let err = fixture.init(Some("bogus"), None).unwrap_err().to_string();
+    assert!(err.contains("add-only") == true, "{}", err);
+    Ok(())
+}
+
+#[test]
+fn test_init_agent_missing_from_defaults_errors() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    let content = fs::read_to_string(&templates)?.replace("  foobar: {}\n", "  foobar: {}\n  orphan: {}\n");
+    fs::write(&templates, content)?;
+
+    let err = fixture.init(Some("orphan"), None).unwrap_err().to_string();
+    assert!(err.contains("agents --update") == true, "{}", err);
+    Ok(())
+}
+
+#[test]
+fn test_verify_reports_agent_missing_from_defaults() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    let content = fs::read_to_string(&templates)?.replace("  foobar: {}\n", "  foobar: {}\n  orphan: {}\n");
+    fs::write(&templates, content)?;
+
+    assert!(fixture.verify().is_err() == true);
+    Ok(())
+}

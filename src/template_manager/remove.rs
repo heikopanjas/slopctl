@@ -11,6 +11,7 @@ use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
     agent_defaults::resolve_placeholder_path,
+    agent_overlay::load_effective_catalogs_lenient,
     bom,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
@@ -61,7 +62,13 @@ impl TemplateManager
     {
         let current_dir = std::env::current_dir()?;
         let _ = self.try_migrate_tracker(&current_dir);
-        let config_file = self.config_dir.join("templates.yml");
+        let catalogs = load_effective_catalogs_lenient(&self.config_dir, &current_dir)?;
+        // A catalog mismatch must not block removal: tracker records still identify the agent's files.
+        if let Some(agent_name) = agent &&
+            let Err(mismatch) = catalogs.require_agent_consistent(agent_name)
+        {
+            eprintln!("{} {}", "!".yellow(), mismatch);
+        }
         let has_agent_target = agent.is_some();
         let has_lang_target = lang.is_some();
         let remove_all = agent.is_none() && lang.is_none();
@@ -77,20 +84,12 @@ impl TemplateManager
         if has_agent_target == true || remove_all == true
         {
             let file_tracker = FileTracker::new(&current_dir)?;
-            let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-
-            let bom = if config_file.exists() == true
-            {
-                BillOfMaterials::from_config(&config_file).ok()
-            }
-            else
-            {
-                None
-            };
+            let agent_catalog = &catalogs.agents;
+            let bom = Some(BillOfMaterials::from_template_config(&catalogs.templates));
 
             if let Some(agent_name) = agent
             {
-                agent_dirs = Self::agent_workspace_dirs(&agent_catalog, agent_name, &current_dir);
+                agent_dirs = Self::agent_workspace_dirs(agent_catalog, agent_name, &current_dir);
 
                 let found_in_bom = if let Some(ref bom) = bom &&
                     bom.has_agent(agent_name) == true
@@ -136,7 +135,7 @@ impl TemplateManager
                 // Skip userprofile-based dirs because those are user-global and may
                 // contain agent-internal files or other workspaces' skills.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent_name) &&
+                if let Some(raw_skill_dir) = agent_defaults::get_skill_dir_from_catalog(agent_catalog, agent_name) &&
                     raw_skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
                 {
                     let skill_dir = resolve_placeholder_path(raw_skill_dir, &current_dir, &userprofile);
@@ -183,11 +182,11 @@ impl TemplateManager
                 // contents for deletion so orphaned skills don't accumulate.
                 // If another cross-client agent is still installed, preserve the directory
                 // and print an informational note so the user knows why it was skipped.
-                if agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, agent_name) == true
+                if agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, agent_name) == true
                 {
-                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents_from_catalog(&agent_catalog, &current_dir)
+                    let other_cross_client: Vec<String> = agent_defaults::detect_all_installed_agents_from_catalog(agent_catalog, &current_dir)
                         .into_iter()
-                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, other) == true)
+                        .filter(|other| *other != agent_name && agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, other) == true)
                         .collect();
 
                     let cross_client_dir = resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, &current_dir, &userprofile);
@@ -230,7 +229,7 @@ impl TemplateManager
                 }
 
                 description_parts.push(format!("agent '{}'", agent_name.yellow()));
-                dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &current_dir));
+                dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(agent_catalog, agent_name, &current_dir));
             }
             else
             {
@@ -263,7 +262,7 @@ impl TemplateManager
                 // untracked/manually placed skills. Userprofile-based dirs are excluded;
                 // those are covered by the FileTracker sweep below.
                 let userprofile = dirs::home_dir().unwrap_or_default();
-                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
+                let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(agent_catalog, &current_dir, &userprofile);
                 for dir in &skill_search_dirs
                 {
                     if dir.exists() == true &&
@@ -304,9 +303,9 @@ impl TemplateManager
                 }
 
                 description_parts.push("all agents and skills".to_string());
-                for name in agent_defaults::list_agent_names_from_catalog(&agent_catalog)
+                for name in agent_defaults::list_agent_names_from_catalog(agent_catalog)
                 {
-                    dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, name, &current_dir));
+                    dirs_to_cleanup.extend(agent_defaults::get_workspace_marker_dirs_from_catalog(agent_catalog, name, &current_dir));
                 }
             }
         }
@@ -318,11 +317,10 @@ impl TemplateManager
         {
             let lang_name = lang.unwrap();
 
-            let found_in_config = if config_file.exists() == true &&
-                let Ok(config) = template_engine::load_template_config(&self.config_dir) &&
-                config.languages.contains_key(lang_name) == true
+            let config = &catalogs.templates;
+            let found_in_config = if config.languages.contains_key(lang_name) == true
             {
-                if let Ok(file_mappings) = bom::resolve_language_files(lang_name, &config)
+                if let Ok(file_mappings) = bom::resolve_language_files(lang_name, config)
                 {
                     for mapping in file_mappings
                     {
@@ -336,11 +334,10 @@ impl TemplateManager
                         }
                     }
                 }
-                if let Ok(lang_skills) = bom::resolve_language_skills(lang_name, &config)
+                if let Ok(lang_skills) = bom::resolve_language_skills(lang_name, config)
                 {
                     let userprofile = dirs::home_dir().unwrap_or_default();
-                    let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-                    let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, &current_dir, &userprofile);
+                    let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&catalogs.agents, &current_dir, &userprofile);
                     for skill in lang_skills
                     {
                         let skill_name = skill.derive_name();
@@ -609,10 +606,10 @@ impl TemplateManager
 
         file_tracker.save()?;
 
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        for name in agent_defaults::list_agent_names_from_catalog(&agent_catalog)
+        let catalogs = load_effective_catalogs_lenient(&self.config_dir, &current_dir)?;
+        for name in agent_defaults::list_agent_names_from_catalog(&catalogs.agents)
         {
-            for dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, name, &current_dir)
+            for dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&catalogs.agents, name, &current_dir)
             {
                 if dir.exists() == true && fs::remove_dir(&dir).is_ok() == true
                 {
@@ -664,10 +661,9 @@ impl TemplateManager
 
         // Collect agent files from BoM (template-defined), canonicalized to
         // absolute paths so they dedup correctly against FileTracker entries.
-        let config_file = self.config_dir.join("templates.yml");
-        if config_file.exists() == true &&
-            let Ok(bom) = BillOfMaterials::from_config(&config_file)
+        let catalogs = load_effective_catalogs_lenient(&self.config_dir, current_dir)?;
         {
+            let bom = BillOfMaterials::from_template_config(&catalogs.templates);
             for agent in &bom.get_agent_names()
             {
                 if let Some(files) = bom.get_agent_files(agent)
@@ -699,8 +695,7 @@ impl TemplateManager
         // Scan workspace-scoped agent skill directories on disk to catch untracked/manually
         // placed skills. Userprofile-based dirs are excluded.
         let userprofile = dirs::home_dir().unwrap_or_default();
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&agent_catalog, current_dir, &userprofile);
+        let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&catalogs.agents, current_dir, &userprofile);
         for dir in &skill_search_dirs
         {
             if dir.exists() == true &&
@@ -914,7 +909,7 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  fake:\n    instructions: []\n";
+        let yaml = "version: 5\nagents:\n  fake:\n    instructions: []\nlanguages: {}\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None), ("fake", true, None, None)])?;
 
@@ -1145,7 +1140,8 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
+        let yaml =
+            "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\nlanguages: {}\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
@@ -1228,7 +1224,8 @@ mod tests
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
 
-        let yaml = "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\n";
+        let yaml =
+            "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\nlanguages: {}\n";
         fs::write(data_dir.path().join("templates.yml"), yaml)?;
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 

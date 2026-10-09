@@ -15,6 +15,7 @@ use owo_colors::OwoColorize;
 
 use crate::{
     Result, agent_defaults,
+    agent_overlay::{EffectiveCatalogs, load_effective_catalogs},
     bom::{self, TemplateConfig},
     file_tracker::{AGENT_ALL, FileStatus, FileTracker, LANG_NONE},
     github,
@@ -696,26 +697,42 @@ impl<'a> TemplateEngine<'a>
     /// or any source resolution fails
     pub fn resolve_all_files(&self, options: &UpdateOptions) -> Result<ResolvedFiles>
     {
+        self.require_templates_present()?;
+        let catalogs = load_effective_catalogs(self.config_dir, &std::env::current_dir()?)?;
+        self.resolve_all_files_with(options, &catalogs)
+    }
+
+    /// Fails with an actionable message when the global template cache is missing
+    fn require_templates_present(&self) -> Result<()>
+    {
         let templates_yml_path = self.config_dir.join("templates.yml");
 
         require!(
             self.config_dir.exists() == true && templates_yml_path.exists() == true,
             Err(anyhow::anyhow!("Global templates not found. Please run 'slopctl templates --update' first to download templates."))
         );
+        Ok(())
+    }
 
-        let config = load_template_config(self.config_dir)?;
-        let agent_catalog = agent_defaults::load_agent_catalog_from_dir(self.config_dir)?;
+    /// Resolves all files against already loaded catalogs
+    ///
+    /// Same as [`Self::resolve_all_files`], but lets callers that resolve repeatedly (partial
+    /// update, merge) load the shipped and overlay catalogs once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the agent or language is unknown, the agent is missing from one of the
+    /// two catalogs, or any source resolution fails
+    pub fn resolve_all_files_with(&self, options: &UpdateOptions, catalogs: &EffectiveCatalogs) -> Result<ResolvedFiles>
+    {
+        self.require_templates_present()?;
 
-        if let Some(agent_name) = options.agent &&
-            config.agents.contains_key(agent_name) == false
+        let config = &catalogs.templates;
+        let agent_catalog = &catalogs.agents;
+
+        if let Some(agent_name) = options.agent
         {
-            let mut available: Vec<&String> = config.agents.keys().collect();
-            available.sort();
-            return Err(anyhow::anyhow!(
-                "Agent '{}' not found in templates.yml.\nAvailable agents: {}",
-                agent_name,
-                available.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
-            ));
+            catalogs.require_known_agent(agent_name)?;
         }
 
         if let Some(lang) = options.lang &&
@@ -819,7 +836,7 @@ impl<'a> TemplateEngine<'a>
             {
                 if let Some(lang) = options.lang
                 {
-                    let resolved_files = bom::resolve_language_files(lang, &config)?;
+                    let resolved_files = bom::resolve_language_files(lang, config)?;
                     for file_entry in &resolved_files
                     {
                         process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
@@ -891,9 +908,9 @@ impl<'a> TemplateEngine<'a>
             {
                 let agent_skill_dir = options
                     .agent
-                    .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
+                    .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(agent_catalog, agent))
                     .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
-                let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, &agent_catalog, &workspace, &userprofile);
+                let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, agent_catalog, &workspace, &userprofile);
 
                 if let Some(agent_name) = options.agent &&
                     let Some(agent_config) = config.agents.get(agent_name) &&
@@ -902,7 +919,7 @@ impl<'a> TemplateEngine<'a>
                 {
                     let filtered: Vec<bom::SkillDefinition> =
                         agent_config.skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
-                    for (dir, group) in self.group_skills_by_target(&filtered, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                    for (dir, group) in self.group_skills_by_target(&filtered, default_dir, options.agent, agent_catalog, &workspace, &userprofile)
                     {
                         let pairs: Vec<(String, String)> = group.iter().flat_map(|skill| self.skill_install_pairs_for_partial(skill, partial.skills)).collect();
                         self.install_skills(
@@ -919,13 +936,13 @@ impl<'a> TemplateEngine<'a>
 
                 if let Some(lang) = options.lang
                 {
-                    let lang_skills = bom::resolve_language_skills(lang, &config)?;
+                    let lang_skills = bom::resolve_language_skills(lang, config)?;
                     let filtered: Vec<bom::SkillDefinition> =
                         lang_skills.iter().filter(|skill| self.skill_definition_matches_partial(skill, partial.skills)).cloned().collect();
                     if filtered.is_empty() == false
                     {
                         self.install_partial_non_agent_skills(
-                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL,
+                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL,
                             local_cache_only, &mut files_to_copy
                         )?;
                     }
@@ -938,8 +955,8 @@ impl<'a> TemplateEngine<'a>
                     if filtered.is_empty() == false
                     {
                         self.install_partial_non_agent_skills(
-                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, LANG_NONE,
-                            AGENT_ALL, local_cache_only, &mut files_to_copy
+                            &filtered, partial.skills, &non_agent_skill_dirs, options.agent, agent_catalog, &workspace, &userprofile, temp_path, LANG_NONE, AGENT_ALL,
+                            local_cache_only, &mut files_to_copy
                         )?;
                     }
                 }
@@ -1013,7 +1030,7 @@ impl<'a> TemplateEngine<'a>
 
             if let Some(lang) = options.lang
             {
-                let resolved_files = bom::resolve_language_files(lang, &config)?;
+                let resolved_files = bom::resolve_language_files(lang, config)?;
                 for file_entry in &resolved_files
                 {
                     process_entry(&file_entry.source, &file_entry.target, "languages", lang, AGENT_ALL);
@@ -1030,7 +1047,7 @@ impl<'a> TemplateEngine<'a>
 
             if let Some(agent_name) = options.agent
             {
-                for marker_dir in agent_defaults::get_workspace_marker_dirs_from_catalog(&agent_catalog, agent_name, &workspace)
+                for marker_dir in agent_defaults::get_workspace_marker_dirs_from_catalog(agent_catalog, agent_name, &workspace)
                 {
                     if directories_to_create.contains(&marker_dir) == false
                     {
@@ -1084,18 +1101,18 @@ impl<'a> TemplateEngine<'a>
 
             let agent_skill_dir = options
                 .agent
-                .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(&agent_catalog, agent))
+                .and_then(|agent| agent_defaults::get_skill_dir_from_catalog(agent_catalog, agent))
                 .map(|dir| self.resolve_placeholder(dir, &workspace, &userprofile));
-            let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, &agent_catalog, &workspace, &userprofile);
+            let non_agent_skill_dirs = self.non_agent_skill_target_dirs(options.agent, agent_catalog, &workspace, &userprofile);
             let existing_tracker = FileTracker::new(&workspace).ok();
-            let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(&agent_catalog, a) == false);
+            let native_only_agent = options.agent.is_some_and(|a| agent_defaults::reads_cross_client_skills_from_catalog(agent_catalog, a) == false);
 
             if let Some(agent_name) = options.agent &&
                 let Some(agent_config) = config.agents.get(agent_name) &&
                 agent_config.skills.is_empty() == false &&
                 let Some(ref default_dir) = agent_skill_dir
             {
-                for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, &agent_catalog, &workspace, &userprofile)
+                for (dir, group) in self.group_skills_by_target(&agent_config.skills, default_dir, options.agent, agent_catalog, &workspace, &userprofile)
                 {
                     self.install_skills(
                         group.iter().map(|s| (s.derive_name(), s.source.as_str())),
@@ -1111,11 +1128,11 @@ impl<'a> TemplateEngine<'a>
 
             if let Some(lang) = options.lang
             {
-                let lang_skills = bom::resolve_language_skills(lang, &config)?;
+                let lang_skills = bom::resolve_language_skills(lang, config)?;
                 if lang_skills.is_empty() == false
                 {
                     self.install_non_agent_skills(
-                        &lang_skills, &non_agent_skill_dirs, options.agent, &agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL, local_cache_only,
+                        &lang_skills, &non_agent_skill_dirs, options.agent, agent_catalog, &workspace, &userprofile, temp_path, lang, AGENT_ALL, local_cache_only,
                         &mut files_to_copy
                     )?;
                 }
@@ -1127,7 +1144,7 @@ impl<'a> TemplateEngine<'a>
                     &config.skills,
                     &non_agent_skill_dirs,
                     options.agent,
-                    &agent_catalog,
+                    agent_catalog,
                     &workspace,
                     &userprofile,
                     temp_path,
@@ -1148,7 +1165,7 @@ impl<'a> TemplateEngine<'a>
                 tracker.get_installed_languages().is_empty() == false
             {
                 self.hydrate_language_skills_for_native_agent(
-                    agent_name, native_dir, &config, &agent_catalog, &workspace, &userprofile, tracker, temp_path, &mut files_to_copy
+                    agent_name, native_dir, config, agent_catalog, &workspace, &userprofile, tracker, temp_path, &mut files_to_copy
                 )?;
             }
         }
@@ -1167,13 +1184,14 @@ impl<'a> TemplateEngine<'a>
     /// # Arguments
     ///
     /// * `options` - Aggregated CLI parameters controlling which sections are resolved
+    /// * `catalogs` - Shipped catalogs merged with agent overlays
     ///
     /// # Errors
     ///
     /// Returns an error if file resolution or reading fails
-    pub fn build_target_content_map(&self, options: &UpdateOptions) -> Result<HashMap<PathBuf, ResolvedContent>>
+    pub fn build_target_content_map(&self, options: &UpdateOptions, catalogs: &EffectiveCatalogs) -> Result<HashMap<PathBuf, ResolvedContent>>
     {
-        let resolved = self.resolve_all_files(options)?;
+        let resolved = self.resolve_all_files_with(options, catalogs)?;
         let mut map: HashMap<PathBuf, ResolvedContent> = HashMap::new();
 
         let fresh_main = Self::generate_fresh_main(&resolved.context, options)?;

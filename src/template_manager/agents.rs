@@ -8,6 +8,7 @@ use super::TemplateManager;
 use crate::{
     Result,
     agent_defaults::{self, AGENT_DEFAULTS_FILE},
+    agent_overlay::load_effective_catalogs_lenient,
     download_manager::DownloadManager,
     github
 };
@@ -68,15 +69,9 @@ impl TemplateManager
     /// Returns an error if the effective catalog cannot be loaded.
     pub fn list_agents(&self) -> Result<()>
     {
-        let catalog = agent_defaults::load_agent_catalog_from_dir(&self.config_dir)?;
-        let source = if self.has_agent_defaults() == true
-        {
-            self.config_dir.join(AGENT_DEFAULTS_FILE).display().to_string()
-        }
-        else
-        {
-            "embedded fallback".to_string()
-        };
+        let catalogs = load_effective_catalogs_lenient(&self.config_dir, &std::env::current_dir()?)?;
+        let catalog = &catalogs.agents;
+        let source = self.config_dir.join(AGENT_DEFAULTS_FILE).display().to_string();
 
         println!("{}", "Agent Defaults:".bold());
         println!("  {} Source: {}", "→".blue(), source.yellow());
@@ -85,7 +80,11 @@ impl TemplateManager
 
         for agent in &catalog.agents
         {
-            println!("{}", agent.name.bold());
+            println!("{}", catalogs.agent_label(&agent.name).bold());
+            if let Some(overlay) = catalogs.overlay(&agent.name)
+            {
+                println!("  {} origin: {}", "→".blue(), overlay.dir.display().to_string().yellow());
+            }
             println!("  {} prompts: {}", "→".blue(), agent.prompt_dir.yellow());
             println!("  {} skills: {}", "→".blue(), agent.skill_dir.yellow());
             if let Some(userprofile_skill_dir) = &agent.userprofile_skill_dir
