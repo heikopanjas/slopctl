@@ -15,7 +15,7 @@ use crate::{
     bom,
     bom::BillOfMaterials,
     file_tracker::FileTracker,
-    template_engine,
+    github, template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
 
@@ -338,9 +338,18 @@ impl TemplateManager
                 {
                     let userprofile = dirs::home_dir().unwrap_or_default();
                     let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&catalogs.agents, &current_dir, &userprofile);
+                    let file_tracker = FileTracker::new(&current_dir)?;
                     for skill in lang_skills
                     {
                         let skill_name = skill.derive_name();
+                        let source_dir = if github::is_url(&skill.source) == true
+                        {
+                            self.config_dir.join("skills").join(skill_name)
+                        }
+                        else
+                        {
+                            self.config_dir.join(&skill.source)
+                        };
                         for search_dir in &skill_search_dirs
                         {
                             let candidate = search_dir.join(skill_name);
@@ -351,7 +360,14 @@ impl TemplateManager
                                 collect_files_recursive(&candidate, &mut skill_files)?;
                                 for f in skill_files
                                 {
-                                    if files_to_remove.contains(&f) == false
+                                    // Only files slopctl installed or the template ships; files the
+                                    // user added to the skill directory are theirs.
+                                    let from_template = f.strip_prefix(&candidate).is_ok_and(|relative| source_dir.join(relative).is_file() == true);
+                                    if from_template == false && file_tracker.get_metadata(&f).is_none() == true
+                                    {
+                                        println!("{} Keeping {} (not installed by slopctl)", "→".blue(), f.display().to_string().yellow());
+                                    }
+                                    else if files_to_remove.contains(&f) == false
                                     {
                                         files_to_remove.push(f);
                                     }

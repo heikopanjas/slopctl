@@ -1,6 +1,6 @@
 [package]
 name = "slopctl"
-version = "23.2.1"
+version = "23.2.2"
 edition = "2024"
 homepage = "https://slopctl.me"
 repository = "https://github.com/heikopanjas/slopctl"

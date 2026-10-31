@@ -418,7 +418,7 @@ slopctl templates --update --verify --list
 - `--verify` also cross-checks `templates.yml` against `agent-defaults.yml` (an agent must be in both) and checks [overlay agents](#adding-a-custom-agent)
 - Does NOT modify any files in the current project directory
 - **`--verify` checks three things in sequence:**
-  - **YAML structure** – parses `templates.yml`, checks version, checks for duplicate targets
+  - **YAML structure** – parses `templates.yml`, checks version, checks for duplicate targets, and checks that each skill name has one source across top-level, language and shared skills (agent-specific variants are reported as warnings)
   - **Local file integrity** – every non-URL `source` file referenced in `templates.yml` must exist in the local cache
   - **Source freshness** – fetches `templates.yml` from the configured source and compares it with the local copy; a mismatch recommends `slopctl templates --update`
 
@@ -586,7 +586,7 @@ slopctl remove --purge --dry-run
 - Loads templates.yml from global storage to build Bill of Materials (BoM)
 - `--agent`: removes agent instruction, prompt, and skill files; candidates come from the BoM, tracked files solely owned by the agent, and files inside the agent's catalog directories (markers, skill dir, prompt dir)
 - Removing an agent or language releases its ownership across ALL tracker entries, so shared files keep correct owners and `status`/re-init stay truthful
-- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories; skips `$instructions` fragments; validates the language name against templates.yml
+- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories (only files slopctl installed or the template skill ships; files you added to a skill directory are kept and reported); skips `$instructions` fragments; validates the language name against templates.yml
 - `--all`: removes all agent files and skills from all agents; **NEVER touches AGENTS.md**
 - `--purge`: removes everything `--all` removes **plus** AGENTS.md; customized AGENTS.md is preserved unless `--force` is also given
 - Changelog-marker files (e.g. `UPDATES.md`) are preserved by `remove` and `--purge` regardless of tracked modification status; `--purge --force` overrides
@@ -623,12 +623,14 @@ slopctl doctor [--fix] [--dry-run] [--verbose] [--smart]
 | **Missing** | File is tracked but no longer exists on disk (stale tracker entry) | `✗` |
 | **Unmerged** | AGENTS.md (main file) exists but still contains the template marker | `✗` |
 | **Modified** | File exists but SHA changed since installation (informational; main files like AGENTS.md and changelog-marker files like UPDATES.md are excluded since customization is expected) | `!` |
+| **Orphaned** | File is tracked and present, but the current template catalog no longer provides it for the installed languages and agents (e.g. a skill dropped upstream); checked only when the global template cache exists | `!` |
 
 **What `--fix` repairs:**
 
 - **Missing** — Prunes the stale FileTracker entry. No filesystem change; run `slopctl update` to restore the file.
 - **Unmerged** — Strips the template marker from the file in-place, marking it as customized so future installs won't silently overwrite it. Run `slopctl merge` afterward for a full re-merge with language sections.
 - **Modified** — No automatic fix; shown as informational. Use `slopctl merge` to combine, or `slopctl update --force` to overwrite if intended.
+- **Orphaned** — No automatic fix; `update` deliberately leaves such files alone. Remove them with `slopctl remove --lang`/`--agent`, or delete them manually.
 
 **Examples:**
 
@@ -1624,7 +1626,7 @@ Run `slopctl remove --purge` to remove all agent files and AGENTS.md, or `slopct
 Run `slopctl remove --lang <language>` (e.g. `slopctl remove --lang rust`). This removes disk files like `.rustfmt.toml` and `.editorconfig` but does NOT remove language fragments already merged into AGENTS.md.
 
 **How do I fix stale or broken managed files?**
-Run `slopctl doctor` to list issues, or `slopctl doctor --fix` to repair them automatically. Issues detected: missing tracked files (stale tracker entries), unmerged AGENTS.md templates, and modified files (informational). Use `--verbose` to see the result for every tracked file.
+Run `slopctl doctor` to list issues, or `slopctl doctor --fix` to repair them automatically. Issues detected: missing tracked files (stale tracker entries), unmerged AGENTS.md templates, and modified and orphaned files (informational). Use `--verbose` to see the result for every tracked file.
 
 **How do I preview changes before applying?**
 Use the `--dry-run` flag on any command: `slopctl init --lang rust --dry-run` or `slopctl init --agent cursor --dry-run`

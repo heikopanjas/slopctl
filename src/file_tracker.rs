@@ -1,10 +1,12 @@
 use std::{
+    cell::Cell,
     collections::{BTreeSet, HashMap},
     fs,
     io::Read,
     path::{Path, PathBuf}
 };
 
+use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -151,6 +153,9 @@ pub const SLOPCTL_DIR: &str = ".slopctl";
 /// Name of the tracker YAML file inside the slopctl directory
 const TRACKER_FILE: &str = "tracker.yml";
 
+/// Extension appended to an unreadable tracker file before it is replaced
+const TRACKER_BACKUP_EXTENSION: &str = "bak";
+
 /// Legacy tracker filename used in the global template directory
 const LEGACY_TRACKER_FILE: &str = "installed_files.json";
 
@@ -162,7 +167,9 @@ pub struct FileTracker
 {
     workspace:     PathBuf,
     metadata_path: PathBuf,
-    metadata:      HashMap<String, FileMetadata>
+    metadata:      HashMap<String, FileMetadata>,
+    /// The tracker file on disk could not be parsed; `save` backs it up before overwriting
+    unparseable:   Cell<bool>
 }
 
 impl FileTracker
@@ -207,15 +214,36 @@ impl FileTracker
     /// # Errors
     ///
     /// Returns an error if the tracker file exists but cannot be read
+    ///
+    /// A tracker that exists but cannot be parsed (e.g. an obsolete format) starts empty with a
+    /// warning; the next [`Self::save`] moves the old file to `tracker.yml.bak` instead of
+    /// silently overwriting it.
     pub fn new(workspace: &Path) -> anyhow::Result<Self>
     {
         let slopctl_dir = workspace.join(SLOPCTL_DIR);
         let metadata_path = slopctl_dir.join(TRACKER_FILE);
 
+        let mut unparseable = false;
         let mut metadata: HashMap<String, FileMetadata> = if metadata_path.exists() == true
         {
             let contents = fs::read_to_string(&metadata_path)?;
-            serde_yaml::from_str(&contents).unwrap_or_else(|_| HashMap::new())
+            match serde_yaml::from_str(&contents)
+            {
+                | Ok(metadata) => metadata,
+                | Err(e) =>
+                {
+                    eprintln!(
+                        "{} Ignoring unreadable tracker {} ({}); it will be backed up to {}.{} on the next write",
+                        "!".yellow(),
+                        metadata_path.display(),
+                        e,
+                        TRACKER_FILE,
+                        TRACKER_BACKUP_EXTENSION
+                    );
+                    unparseable = true;
+                    HashMap::new()
+                }
+            }
         }
         else
         {
@@ -226,7 +254,7 @@ impl FileTracker
             meta.normalize_ownership();
         }
 
-        Ok(Self { workspace: workspace.to_path_buf(), metadata_path, metadata })
+        Ok(Self { workspace: workspace.to_path_buf(), metadata_path, metadata, unparseable: Cell::new(unparseable) })
     }
 
     /// Returns the workspace root this tracker is bound to
@@ -652,6 +680,13 @@ impl FileTracker
             fs::create_dir_all(parent)?;
         }
 
+        if self.unparseable.replace(false) == true && self.metadata_path.exists() == true
+        {
+            let backup = self.metadata_path.with_extension(format!("yml.{}", TRACKER_BACKUP_EXTENSION));
+            fs::rename(&self.metadata_path, &backup)?;
+            println!("{} Backed up unreadable tracker to {}", "→".blue(), backup.display().to_string().yellow());
+        }
+
         let yaml = serde_yaml::to_string(&self.metadata)?;
         fs::write(&self.metadata_path, yaml)?;
         Ok(())
@@ -923,6 +958,28 @@ agents:
         let tracker = FileTracker::new(workspace)?;
 
         assert!(tracker.get_entries().is_empty() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_unparseable_tracker_backed_up_on_save() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let slopctl_dir = workspace.join(SLOPCTL_DIR);
+        fs::create_dir_all(&slopctl_dir)?;
+        let corrupt = "AGENTS.md: [not, a, mapping\n";
+        fs::write(slopctl_dir.join(TRACKER_FILE), corrupt)?;
+
+        let tracker = FileTracker::new(workspace)?;
+        assert_eq!(fs::read_to_string(slopctl_dir.join(TRACKER_FILE))?, corrupt, "loading must not touch the file");
+
+        tracker.save()?;
+        tracker.save()?;
+
+        assert_eq!(fs::read_to_string(slopctl_dir.join("tracker.yml.bak"))?, corrupt);
+        assert!(FileTracker::new(workspace)?.get_entries().is_empty() == true);
+        assert_ne!(fs::read_to_string(slopctl_dir.join(TRACKER_FILE))?, corrupt);
         Ok(())
     }
 

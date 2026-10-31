@@ -4,6 +4,31 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-10-31 (v23.2.2, harden catalog clash handling before template layers)
+
+- skill names now map to one source across top-level, language and shared
+  lists; conflicts fail the strict loader and `templates --verify`, agent
+  skill variants are only warned about
+- include resolution no longer treats a diamond (a group or language reached
+  through two includes) as circular or as a duplicate target; identical
+  entries are deduped, and the engine merges identical resolved entries so a
+  skill listed in a language and in top-level `skills` installs once
+- catalog fetches stage and swap the cache directory, so files deleted from
+  a local source no longer linger in the cache; agent and model defaults are
+  carried over
+- an unreadable tracker is backed up to `tracker.yml.bak` on the next save
+  instead of being silently overwritten
+- `remove --lang` keeps files the user added to a skill directory
+- `doctor` reports orphaned files that the catalog no longer provides
+- fixed the `LanguageConfig` doc that claimed included-language skills are
+  not propagated
+- checked and dropped: `update --agent` pruning other agents' skill copies
+  does not happen (skill distribution always covers every installed agent);
+  a regression test guards it
+- rationale: these were latent single-catalog bugs that additional template
+  systems would make likely; fixing them first keeps the layer feature small
+- version bump: 23.2.1 to 23.2.2 (PATCH - bug fixes, no new features)
+
 ### 2026-10-09 (v23.2.1, announce website slopctl.me)
 
 - README now links the new website https://slopctl.me at the top and in a

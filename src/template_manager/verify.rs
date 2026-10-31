@@ -135,6 +135,27 @@ impl TemplateManager
             }
         }
 
+        // One source per skill name; agent-specific variants are only reported
+        let conflicts = crate::bom::skill_source_conflicts(&config);
+        if conflicts.is_empty() == true
+        {
+            println!("  {} no conflicting skill sources", "✓".green());
+        }
+        for conflict in &conflicts
+        {
+            let definitions: Vec<String> = conflict.definitions.iter().map(|(location, source)| format!("'{}' ({})", source, location)).collect();
+            if conflict.agent_variants == true
+            {
+                println!("  {} skill '{}' has agent-specific variants: {}", "!".yellow(), conflict.name, definitions.join(", "));
+            }
+            else
+            {
+                let msg = format!("skill '{}' has different sources: {}", conflict.name, definitions.join(", "));
+                println!("  {} {}", "✗".red(), msg);
+                issues.push(msg);
+            }
+        }
+
         Some(config)
     }
 

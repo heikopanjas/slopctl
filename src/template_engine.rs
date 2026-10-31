@@ -107,6 +107,47 @@ pub struct ResolvedFiles
     _temp_dir:       tempfile::TempDir
 }
 
+/// Collapses entries that copy the same source to the same target, unioning their owners
+///
+/// One skill can be reached from several catalog lists in a single run (e.g. a language and the
+/// top-level `skills`). Only entries with different sources for one target are real conflicts;
+/// preflight still reports those.
+fn merge_identical_entries(files: &mut Vec<ResolvedFile>)
+{
+    let mut index: HashMap<(PathBuf, PathBuf), usize> = HashMap::with_capacity(files.len());
+    let mut merged: Vec<ResolvedFile> = Vec::with_capacity(files.len());
+    for entry in files.drain(..)
+    {
+        match index.get(&(entry.target.clone(), entry.source.clone()))
+        {
+            | Some(&position) =>
+            {
+                let kept = &mut merged[position];
+                for lang in entry.lang
+                {
+                    if kept.lang.contains(&lang) == false
+                    {
+                        kept.lang.push(lang);
+                    }
+                }
+                for agent in entry.agent
+                {
+                    if kept.agent.contains(&agent) == false
+                    {
+                        kept.agent.push(agent);
+                    }
+                }
+            }
+            | None =>
+            {
+                index.insert((entry.target.clone(), entry.source.clone()), merged.len());
+                merged.push(entry);
+            }
+        }
+    }
+    *files = merged;
+}
+
 /// A resolved file's content with provenance metadata for the merge command
 pub struct ResolvedContent
 {
@@ -1171,6 +1212,7 @@ impl<'a> TemplateEngine<'a>
         }
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+        merge_identical_entries(&mut files_to_copy);
 
         Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create, _temp_dir: temp_dir })
     }
