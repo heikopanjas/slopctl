@@ -6,7 +6,7 @@ use clap::Parser;
 use clap_complete::generate;
 use owo_colors::OwoColorize;
 use slopctl::{
-    Config, EffectiveConfig, MergeOptions, Result, TemplateManager, UpdateOptions,
+    CatalogSource, Config, EffectiveConfig, MergeOptions, Result, TemplateManager, UpdateOptions,
     agent_defaults::AGENT_DEFAULTS_FILE,
     cli::{Cli, Commands},
     model_defaults::MODEL_DEFAULTS_FILE
@@ -21,33 +21,60 @@ const DEFAULT_AGENTS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-
 /// Default model defaults source URL
 const DEFAULT_MODELS_SOURCE_URL: &str = "https://github.com/heikopanjas/slopctl-templates/tree/develop/defaults";
 
-/// Resolves template source URL from CLI argument, config, or default
+/// Baseline template source resolved from the CLI, config, or default
+struct TemplateSource
+{
+    uri:           String,
+    git_ref:       Option<String>,
+    path:          Option<String>,
+    is_configured: bool,
+    fallback:      Option<String>
+}
+
+impl TemplateSource
+{
+    fn catalog(&self) -> CatalogSource<'_>
+    {
+        CatalogSource { uri: &self.uri, git_ref: self.git_ref.as_deref(), path: self.path.as_deref(), expected_id: None }
+    }
+
+    /// Source for display, e.g. `git@host:org/repo.git (path: templates, ref: develop)`
+    fn display(&self) -> String
+    {
+        let details: Vec<String> = [self.path.as_ref().map(|path| format!("path: {}", path)), self.git_ref.as_ref().map(|git_ref| format!("ref: {}", git_ref))]
+            .into_iter()
+            .flatten()
+            .collect();
+        if details.is_empty() == true
+        {
+            self.uri.clone()
+        }
+        else
+        {
+            format!("{} ({})", self.uri, details.join(", "))
+        }
+    }
+}
+
+/// Resolves the baseline template source from CLI argument, config, or default
 ///
-/// Returns (source_url, is_configured, fallback_url).
-/// Priority: CLI `from` argument > effective config `templates.uri` > default URL.
-///
-/// The effective config merges workspace + global with per-key precedence.
-fn resolve_source(from: Option<String>) -> (String, bool, Option<String>)
+/// Priority: CLI `from` argument > effective config `templates.uri` (with `templates.ref` and
+/// `templates.path` from the same scope) > default URL. The fallback is `templates.fallbackUri`.
+fn resolve_source(from: Option<String>) -> TemplateSource
 {
     let cwd = std::env::current_dir().ok();
     let effective = cwd.as_deref().and_then(|w| EffectiveConfig::load(w).ok());
-    let configured_source = effective.as_ref().and_then(|c| c.get("templates.uri"));
-    let fallback_source = effective.as_ref().and_then(|c| c.get("templates.fallbackUri"));
+    let fallback = effective.as_ref().and_then(|c| c.get("templates.fallbackUri"));
 
-    let (source, is_configured) = if let Some(from_url) = from
+    if let Some(uri) = from
     {
-        (from_url, false)
+        return TemplateSource { uri, git_ref: None, path: None, is_configured: false, fallback };
     }
-    else if let Some(config_url) = configured_source
+    match effective.as_ref().and_then(EffectiveConfig::baseline_source)
     {
-        (config_url, true)
+        | Some(baseline) => TemplateSource { uri: baseline.uri, git_ref: baseline.git_ref, path: baseline.path, is_configured: true, fallback },
+        | None => TemplateSource { uri: DEFAULT_SOURCE_URL.to_string(), git_ref: None, path: None, is_configured: false, fallback }
     }
-    else
-    {
-        (DEFAULT_SOURCE_URL.to_string(), false)
-    };
-
-    (source, is_configured, fallback_source)
 }
 
 /// Resolves agent defaults source URL from CLI argument, config, or default
@@ -84,24 +111,23 @@ fn resolve_agents_source(from: Option<String>) -> (String, bool, Option<String>)
 /// # Arguments
 ///
 /// * `manager` - Template manager to use for download/copy
-/// * `source` - Primary source URL or path
-/// * `fallback` - Optional fallback source URL or path
+/// * `source` - Primary source (with `ref`/`path`) and optional fallback URL or path
 ///
 /// # Errors
 ///
 /// Returns an error if both primary and fallback sources fail
-fn download_with_fallback(manager: &TemplateManager, source: &str, fallback: Option<String>) -> Result<()>
+fn download_with_fallback(manager: &TemplateManager, source: &TemplateSource) -> Result<()>
 {
-    match manager.download_or_copy_templates(source)
+    match manager.download_or_copy_templates_from(&source.catalog())
     {
         | Ok(()) => Ok(()),
         | Err(e) =>
         {
-            if let Some(fallback_url) = fallback
+            if let Some(fallback_url) = &source.fallback
             {
                 println!("{} Primary source failed: {}", "!".yellow(), e);
                 println!("{} Trying fallback source: {}", "→".blue(), fallback_url.yellow());
-                manager.download_or_copy_templates(&fallback_url)
+                manager.download_or_copy_templates(fallback_url)
             }
             else
             {
@@ -544,15 +570,15 @@ fn main()
                         return;
                     }
 
-                    let (source, is_configured, fallback) = resolve_source(None);
+                    let source = resolve_source(None);
 
-                    if is_configured == true
+                    if source.is_configured == true
                     {
                         println!("{} Using configured source", "→".blue());
                     }
-                    println!("{} Global templates not found, downloading from {}", "→".blue(), source.yellow());
+                    println!("{} Global templates not found, downloading from {}", "→".blue(), source.display().yellow());
 
-                    if let Err(e) = download_with_fallback(&manager, &source, fallback)
+                    if let Err(e) = download_with_fallback(&manager, &source)
                     {
                         eprintln!("{} Failed to download global templates: {}", "✗".red(), e);
                         std::process::exit(1);
@@ -585,7 +611,7 @@ fn main()
                     | (None, None) => unreachable!("validated at least one init target")
                 }
 
-                manager.update(&options)
+                std::env::current_dir().map_err(anyhow::Error::from).and_then(|cwd| manager.fetch_layers(&cwd, true, dry_run)).and_then(|()| manager.update(&options))
             }
         }
         | Commands::Templates { update, list, verify, from, dry_run } =>
@@ -606,18 +632,18 @@ fn main()
                 std::process::exit(1);
             }
 
-            let (source, is_configured, fallback) = resolve_source(from);
+            let source = resolve_source(from);
 
             let update_result = if update == true
             {
                 if dry_run == true
                 {
-                    if is_configured == true
+                    if source.is_configured == true
                     {
                         println!("{} Using configured source", "→".blue());
                     }
-                    println!("{} Dry run: would update global templates from {}", "→".blue(), source.yellow());
-                    if let Some(ref fallback_url) = fallback
+                    println!("{} Dry run: would update global templates from {}", "→".blue(), source.display().yellow());
+                    if let Some(ref fallback_url) = source.fallback
                     {
                         println!("{} Fallback source configured: {}", "→".blue(), fallback_url.yellow());
                     }
@@ -630,6 +656,10 @@ fn main()
                     {
                         Err(e)
                     }
+                    else if let Err(e) = std::env::current_dir().map_err(anyhow::Error::from).and_then(|cwd| manager.fetch_layers(&cwd, false, true))
+                    {
+                        Err(e)
+                    }
                     else
                     {
                         println!("\n{} Dry run complete. No files were modified.", "✓".green());
@@ -638,14 +668,16 @@ fn main()
                 }
                 else
                 {
-                    if is_configured == true
+                    if source.is_configured == true
                     {
                         println!("{} Using configured source", "→".blue());
                     }
-                    println!("{} Updating global templates from {}", "→".blue(), source.yellow());
-                    download_with_fallback(&manager, &source, fallback)
+                    println!("{} Updating global templates from {}", "→".blue(), source.display().yellow());
+                    download_with_fallback(&manager, &source)
                         .and_then(|()| bootstrap_agent_defaults_if_missing(&manager, false))
                         .and_then(|()| bootstrap_model_defaults_if_missing(&manager, false))
+                        .and_then(|()| std::env::current_dir().map_err(anyhow::Error::from))
+                        .and_then(|cwd| manager.fetch_layers(&cwd, false, false))
                 }
             }
             else
@@ -657,7 +689,7 @@ fn main()
                 .and_then(|()| {
                     if verify == true
                     {
-                        manager.verify(&source)
+                        manager.verify_from(&source.catalog())
                     }
                     else
                     {
@@ -753,11 +785,15 @@ fn main()
                     }
                 })
         }
-        | Commands::Remove { agent, lang, all, purge, force, dry_run } =>
+        | Commands::Remove { agent, lang, source, all, purge, force, dry_run } =>
         {
             if purge == true
             {
                 manager.remove_purge(force, dry_run)
+            }
+            else if let Some(source) = source
+            {
+                manager.remove_source(&source, force, dry_run)
             }
             else if all == true && (agent.is_some() == true || lang.is_some() == true)
             {
@@ -765,7 +801,7 @@ fn main()
             }
             else if all == false && agent.is_none() == true && lang.is_none() == true
             {
-                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --all, or --purge"))
+                Err(anyhow::anyhow!("Must specify at least one of --agent, --lang, --source, --all, or --purge"))
             }
             else
             {
@@ -946,16 +982,16 @@ mod tests
     #[test]
     fn test_resolve_source_returns_default_when_no_args()
     {
-        let (source, is_configured, _fallback) = resolve_source(None);
-        assert!(source.is_empty() == false);
-        assert!(is_configured == false);
+        let source = resolve_source(None);
+        assert!(source.uri.is_empty() == false);
     }
 
     #[test]
     fn test_resolve_source_returns_from_arg()
     {
-        let (source, _is_configured, _) = resolve_source(Some("/tmp/my-templates".to_string()));
-        assert_eq!(source, "/tmp/my-templates");
+        let source = resolve_source(Some("/tmp/my-templates".to_string()));
+        assert_eq!(source.uri, "/tmp/my-templates");
+        assert!(source.git_ref.is_none() == true && source.path.is_none() == true && source.is_configured == false);
     }
 
     #[test]

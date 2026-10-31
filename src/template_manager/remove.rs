@@ -547,6 +547,110 @@ impl TemplateManager
         Ok(())
     }
 
+    /// Remove every tracked file that one template system provided
+    ///
+    /// The counterpart to dropping a template layer from the configuration: deletes tracked files
+    /// whose recorded origin is `source` and drops their tracker entries (also for files already
+    /// gone from disk). Changelog-marker files are kept like in `remove --lang`; AGENTS.md has no
+    /// single origin and is never touched (re-run `slopctl merge` to drop a system's fragments).
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Template system id, as recorded in the tracker
+    /// * `force` - Skip the confirmation prompt
+    /// * `dry_run` - Preview what would be removed without making changes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the tracker cannot be read or written
+    pub fn remove_source(&self, source: &str, force: bool, dry_run: bool) -> Result<()>
+    {
+        let current_dir = std::env::current_dir()?;
+        let mut file_tracker = FileTracker::new(&current_dir)?;
+        let tracked: Vec<PathBuf> = file_tracker
+            .get_entries()
+            .into_iter()
+            .filter(|(_, metadata)| metadata.origin.as_deref() == Some(source))
+            .map(|(rel_path, _)| current_dir.join(rel_path))
+            .collect();
+        let (present, missing): (Vec<PathBuf>, Vec<PathBuf>) = tracked.into_iter().partition(|path| path.exists() == true);
+        let (changelog_kept, mut files_to_remove) = split_changelog_preserved(present);
+        files_to_remove.sort();
+
+        if files_to_remove.is_empty() == true && missing.is_empty() == true
+        {
+            println!("{} No files from template system '{}' are tracked in this workspace", "→".blue(), source.yellow());
+            return Ok(());
+        }
+
+        let heading = if dry_run == true
+        {
+            "Files that would be deleted"
+        }
+        else
+        {
+            "Files to be removed"
+        };
+        println!("\n{} {} for template system '{}':", "→".blue(), heading, source.yellow());
+        for file in &files_to_remove
+        {
+            println!("  {} {}", "●".red(), file.display());
+        }
+        for file in &changelog_kept
+        {
+            println!("  {} {} (kept - log entries preserved)", "○".yellow(), file.display());
+        }
+        if missing.is_empty() == false
+        {
+            println!(
+                "  {} {} tracker entr{} for files already deleted",
+                "○".yellow(),
+                missing.len(),
+                if missing.len() == 1
+                {
+                    "y"
+                }
+                else
+                {
+                    "ies"
+                }
+            );
+        }
+
+        if dry_run == true
+        {
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+        if force == false && confirm_action(&format!("\n{} Proceed with removal? [y/N]: ", "?".yellow()))? == false
+        {
+            println!("{} Operation cancelled", "✗".red());
+            return Ok(());
+        }
+
+        let mut removed_count = 0;
+        for file in &files_to_remove
+        {
+            match remove_file_and_cleanup_parents(file)
+            {
+                | Ok(_) =>
+                {
+                    file_tracker.remove_entry(file);
+                    removed_count += 1;
+                }
+                | Err(e) => eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e)
+            }
+        }
+        for file in &missing
+        {
+            file_tracker.remove_entry(file);
+        }
+        file_tracker.save()?;
+
+        println!("\n{} Removed {} file(s) from template system '{}'", "✓".green(), removed_count, source.yellow());
+        Ok(())
+    }
+
     /// Remove all slopctl-installed files from the current workspace, including AGENTS.md
     ///
     /// This is the `--purge` mode of `remove`. It discovers files from three sources

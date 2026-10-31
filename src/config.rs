@@ -65,7 +65,54 @@ pub struct TemplatesConfig
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uri:          Option<String>,
     #[serde(rename = "fallbackUri", skip_serializing_if = "Option::is_none")]
-    pub fallback_uri: Option<String>
+    pub fallback_uri: Option<String>,
+    /// Branch or tag of a git `uri` (the remote's default branch when unset)
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub git_ref:      Option<String>,
+    /// Subdirectory of `uri` holding `templates.yml`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path:         Option<String>,
+    /// Additional template systems stacked on the baseline, in precedence order (later wins)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub layers:       Vec<LayerSpec>
+}
+
+/// One additional template system (layer) configured under `templates.layers`
+///
+/// `uri` accepts everything `templates.uri` does (local path, GitHub tree URL) plus git URLs.
+/// `ref` and `path` select a branch/tag and a subdirectory; `ref` applies to git URLs only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LayerSpec
+{
+    pub id:      String,
+    pub uri:     String,
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path:    Option<String>
+}
+
+/// Config key prefix for template layers: `templates.layers.<id>.<field>`
+const LAYER_KEY_PREFIX: &str = "templates.layers.";
+
+/// Layer fields settable through `templates.layers.<id>.<field>`
+const LAYER_FIELDS: [&str; 3] = ["uri", "ref", "path"];
+
+/// Returns true when `id` is a valid template system id (`[a-z0-9_-]+`)
+pub fn is_valid_system_id(id: &str) -> bool
+{
+    id.is_empty() == false && id.bytes().all(|b| b.is_ascii_lowercase() == true || b.is_ascii_digit() == true || b == b'-' || b == b'_')
+}
+
+/// Splits `templates.layers.<id>[.<field>]` into `(id, field)`; `None` for any other key
+fn parse_layer_key(key: &str) -> Option<(&str, Option<&str>)>
+{
+    let rest = key.strip_prefix(LAYER_KEY_PREFIX)?;
+    match rest.split_once('.')
+    {
+        | Some((id, field)) => Some((id, Some(field))),
+        | None => Some((rest, None))
+    }
 }
 
 /// Configuration for the `agents` command
@@ -222,10 +269,25 @@ impl Config
     /// Returns None if key doesn't exist or path is invalid
     pub fn get(&self, key: &str) -> Option<String>
     {
+        if let Some((id, field)) = parse_layer_key(key)
+        {
+            let layer = self.templates.layers.iter().find(|layer| layer.id == id)?;
+            // The bare `templates.layers.<id>` key reads as the layer's uri so it can be deleted as a whole.
+            return match field.unwrap_or("uri")
+            {
+                | "uri" => Some(layer.uri.clone()),
+                | "ref" => layer.git_ref.clone(),
+                | "path" => layer.path.clone(),
+                | _ => None
+            };
+        }
+
         match key
         {
             | "templates.uri" => self.templates.uri.clone(),
             | "templates.fallbackUri" => self.templates.fallback_uri.clone(),
+            | "templates.ref" => self.templates.git_ref.clone(),
+            | "templates.path" => self.templates.path.clone(),
             | "agents.uri" => self.agents.uri.clone(),
             | "agents.fallbackUri" => self.agents.fallback_uri.clone(),
             | "models.uri" => self.models.uri.clone(),
@@ -241,6 +303,11 @@ impl Config
     /// Returns error if key is not recognized
     pub fn set(&mut self, key: &str, value: &str) -> Result<()>
     {
+        if let Some((id, field)) = parse_layer_key(key)
+        {
+            return self.set_layer_field(key, id, field, value);
+        }
+
         match key
         {
             | "templates.uri" =>
@@ -251,6 +318,16 @@ impl Config
             | "templates.fallbackUri" =>
             {
                 self.templates.fallback_uri = Some(value.to_string());
+                Ok(())
+            }
+            | "templates.ref" =>
+            {
+                self.templates.git_ref = Some(value.to_string());
+                Ok(())
+            }
+            | "templates.path" =>
+            {
+                self.templates.path = Some(value.to_string());
                 Ok(())
             }
             | "agents.uri" =>
@@ -292,6 +369,22 @@ impl Config
     /// Returns error if key is not recognized
     pub fn unset(&mut self, key: &str) -> Result<()>
     {
+        if let Some((id, field)) = parse_layer_key(key)
+        {
+            let position = self.templates.layers.iter().position(|layer| layer.id == id).ok_or_else(|| anyhow::anyhow!("No template layer '{}' configured", id))?;
+            match field
+            {
+                | None | Some("uri") =>
+                {
+                    self.templates.layers.remove(position);
+                }
+                | Some("ref") => self.templates.layers[position].git_ref = None,
+                | Some("path") => self.templates.layers[position].path = None,
+                | Some(_) => return Err(anyhow::anyhow!("Unknown config key: {}", key))
+            }
+            return Ok(());
+        }
+
         match key
         {
             | "templates.uri" =>
@@ -302,6 +395,16 @@ impl Config
             | "templates.fallbackUri" =>
             {
                 self.templates.fallback_uri = None;
+                Ok(())
+            }
+            | "templates.ref" =>
+            {
+                self.templates.git_ref = None;
+                Ok(())
+            }
+            | "templates.path" =>
+            {
+                self.templates.path = None;
                 Ok(())
             }
             | "agents.uri" =>
@@ -355,6 +458,16 @@ impl Config
             values.insert("templates.fallbackUri".to_string(), fallback_uri.clone());
         }
 
+        if let Some(git_ref) = &self.templates.git_ref
+        {
+            values.insert("templates.ref".to_string(), git_ref.clone());
+        }
+
+        if let Some(path) = &self.templates.path
+        {
+            values.insert("templates.path".to_string(), path.clone());
+        }
+
         if let Some(uri) = &self.agents.uri
         {
             values.insert("agents.uri".to_string(), uri.clone());
@@ -385,14 +498,67 @@ impl Config
             values.insert("merge.model".to_string(), model.clone());
         }
 
+        for layer in &self.templates.layers
+        {
+            values.insert(format!("{}{}.uri", LAYER_KEY_PREFIX, layer.id), layer.uri.clone());
+            if let Some(git_ref) = &layer.git_ref
+            {
+                values.insert(format!("{}{}.ref", LAYER_KEY_PREFIX, layer.id), git_ref.clone());
+            }
+            if let Some(path) = &layer.path
+            {
+                values.insert(format!("{}{}.path", LAYER_KEY_PREFIX, layer.id), path.clone());
+            }
+        }
+
         values
+    }
+
+    /// Sets one field of a template layer; `uri` on an unknown id appends a new layer
+    fn set_layer_field(&mut self, key: &str, id: &str, field: Option<&str>, value: &str) -> Result<()>
+    {
+        let field = field.ok_or_else(|| anyhow::anyhow!("Config key '{}' needs a field: {}", key, LAYER_FIELDS.join(", ")))?;
+        require!(LAYER_FIELDS.contains(&field) == true, Err(anyhow::anyhow!("Unknown config key: {}", key)));
+        require!(is_valid_system_id(id) == true, Err(anyhow::anyhow!("Invalid template layer id '{}': use lowercase letters, digits, '-' and '_'", id)));
+
+        let position = match self.templates.layers.iter().position(|layer| layer.id == id)
+        {
+            | Some(position) => position,
+            | None =>
+            {
+                require!(field == "uri", Err(anyhow::anyhow!("Template layer '{}' does not exist; set {}{}.uri first", id, LAYER_KEY_PREFIX, id)));
+                self.templates.layers.push(LayerSpec { id: id.to_string(), ..Default::default() });
+                self.templates.layers.len() - 1
+            }
+        };
+
+        let layer = &mut self.templates.layers[position];
+        match field
+        {
+            | "uri" => layer.uri = value.to_string(),
+            | "ref" => layer.git_ref = Some(value.to_string()),
+            | _ => layer.path = Some(value.to_string())
+        }
+        Ok(())
     }
 
     /// Get list of all valid config keys
     pub fn valid_keys() -> Vec<&'static str>
     {
-        vec!["templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"]
+        vec![
+            "templates.uri", "templates.fallbackUri", "templates.ref", "templates.path", "templates.layers.<id>.uri", "templates.layers.<id>.ref",
+            "templates.layers.<id>.path", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model",
+        ]
     }
+}
+
+/// The baseline template source resolved from config (see [`EffectiveConfig::baseline_source`])
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BaselineSource
+{
+    pub uri:     String,
+    pub git_ref: Option<String>,
+    pub path:    Option<String>
 }
 
 /// Merged view of workspace + global config with per-key precedence
@@ -433,6 +599,48 @@ impl EffectiveConfig
         {
             self.global.get(key).map(|v| (v, ConfigScope::Global))
         }
+    }
+
+    /// The configured baseline template source: `templates.uri` with its `ref` and `path`
+    ///
+    /// `ref` and `path` are read from the same scope as `uri`, so a workspace uri is never combined
+    /// with a global path meant for a different source. `None` when no `templates.uri` is set.
+    pub fn baseline_source(&self) -> Option<BaselineSource>
+    {
+        let (uri, scope) = self.get_with_origin("templates.uri")?;
+        let config = match scope
+        {
+            | ConfigScope::Workspace => &self.workspace,
+            | ConfigScope::Global => &self.global
+        };
+        Some(BaselineSource { uri, git_ref: config.templates.git_ref.clone(), path: config.templates.path.clone() })
+    }
+
+    /// Configured template layers in precedence order: global layers, then workspace layers
+    ///
+    /// Unlike scalar keys, layers from both scopes are concatenated rather than shadowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a layer id is invalid, a layer has no uri, or the same id is configured
+    /// in both scopes (the layer cache is keyed by id)
+    pub fn layers(&self) -> Result<Vec<(LayerSpec, ConfigScope)>>
+    {
+        let mut layers: Vec<(LayerSpec, ConfigScope)> = Vec::new();
+        for (scope, config) in [(ConfigScope::Global, &self.global), (ConfigScope::Workspace, &self.workspace)]
+        {
+            for layer in &config.templates.layers
+            {
+                require!(is_valid_system_id(&layer.id) == true, Err(anyhow::anyhow!("Invalid template layer id '{}' in {} config", layer.id, scope)));
+                require!(layer.uri.is_empty() == false, Err(anyhow::anyhow!("Template layer '{}' in {} config has no uri", layer.id, scope)));
+                require!(
+                    layers.iter().any(|(existing, _)| existing.id == layer.id) == false,
+                    Err(anyhow::anyhow!("Template layer '{}' is configured more than once (global and workspace); ids must be unique", layer.id))
+                );
+                layers.push((layer.clone(), scope));
+            }
+        }
+        Ok(layers)
     }
 
     /// Merged list of all set keys with their origin scope (deterministic order)
@@ -596,7 +804,8 @@ mod tests
     {
         let keys = Config::valid_keys();
         assert_eq!(keys, vec![
-            "templates.uri", "templates.fallbackUri", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"
+            "templates.uri", "templates.fallbackUri", "templates.ref", "templates.path", "templates.layers.<id>.uri", "templates.layers.<id>.ref",
+            "templates.layers.<id>.path", "agents.uri", "agents.fallbackUri", "models.uri", "models.fallbackUri", "merge.provider", "merge.model"
         ]);
     }
 
@@ -893,6 +1102,115 @@ mod tests
     fn test_get_global_dir_is_parent_of_global_path() -> Result<()>
     {
         assert_eq!(Config::get_global_dir()?, Config::get_global_path()?.parent().unwrap());
+        Ok(())
+    }
+
+    // -- template layers --
+
+    #[test]
+    fn test_config_layers_set_appends_in_order_and_updates_in_place() -> Result<()>
+    {
+        let mut config = Config::default();
+        config.set("templates.layers.fake-layer.uri", "/tmp/fake")?;
+        config.set("templates.layers.bogus_layer.uri", "git@example.com:bogus.git")?;
+        config.set("templates.layers.bogus_layer.ref", "main")?;
+        config.set("templates.layers.fake-layer.uri", "/tmp/fake2")?;
+
+        let ids: Vec<&str> = config.templates.layers.iter().map(|layer| layer.id.as_str()).collect();
+        assert_eq!(ids, vec!["fake-layer", "bogus_layer"]);
+        assert_eq!(config.get("templates.layers.fake-layer.uri"), Some("/tmp/fake2".to_string()));
+        assert_eq!(config.get("templates.layers.bogus_layer.ref"), Some("main".to_string()));
+        assert_eq!(config.list().get("templates.layers.bogus_layer.ref"), Some(&"main".to_string()));
+
+        let yaml = serde_yaml::to_string(&config)?;
+        let reloaded: Config = serde_yaml::from_str(&yaml)?;
+        assert_eq!(reloaded.templates.layers, config.templates.layers);
+        assert!(yaml.contains("ref: main") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_config_layers_field_before_uri_errors()
+    {
+        let mut config = Config::default();
+        let err = config.set("templates.layers.fake-layer.ref", "main").unwrap_err().to_string();
+        assert!(err.contains("set templates.layers.fake-layer.uri first") == true);
+    }
+
+    #[test]
+    fn test_config_layers_invalid_id_and_field_error()
+    {
+        let mut config = Config::default();
+        assert!(config.set("templates.layers.Bad.Id.uri", "/tmp").is_err() == true);
+        assert!(config.set("templates.layers.UPPER.uri", "/tmp").is_err() == true);
+        assert!(config.set("templates.layers.fake.branch", "main").is_err() == true);
+        assert!(config.set("templates.layers.fake", "/tmp").is_err() == true);
+    }
+
+    #[test]
+    fn test_config_layers_unset_field_and_layer() -> Result<()>
+    {
+        let mut config = Config::default();
+        config.set("templates.layers.fake.uri", "/tmp/fake")?;
+        config.set("templates.layers.fake.path", "templates")?;
+        config.unset("templates.layers.fake.path")?;
+        assert_eq!(config.get("templates.layers.fake.path"), None);
+        assert_eq!(config.get("templates.layers.fake"), Some("/tmp/fake".to_string()));
+        config.unset("templates.layers.fake")?;
+        assert!(config.templates.layers.is_empty() == true);
+        assert!(config.unset("templates.layers.fake").is_err() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_config_layers_concatenates_global_then_workspace() -> Result<()>
+    {
+        let mut global = Config::default();
+        global.set("templates.layers.bogus.uri", "/tmp/bogus")?;
+        let mut workspace = Config::default();
+        workspace.set("templates.layers.fake.uri", "/tmp/fake")?;
+        let effective = EffectiveConfig { workspace, global };
+
+        let layers = effective.layers()?;
+        assert_eq!(layers.len(), 2);
+        assert_eq!((layers[0].0.id.as_str(), layers[0].1), ("bogus", ConfigScope::Global));
+        assert_eq!((layers[1].0.id.as_str(), layers[1].1), ("fake", ConfigScope::Workspace));
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_config_layers_same_id_in_both_scopes_errors() -> Result<()>
+    {
+        let mut global = Config::default();
+        global.set("templates.layers.fake.uri", "/tmp/a")?;
+        let mut workspace = Config::default();
+        workspace.set("templates.layers.fake.uri", "/tmp/b")?;
+        let err = EffectiveConfig { workspace, global }.layers().unwrap_err().to_string();
+        assert!(err.contains("more than once") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_baseline_source_takes_ref_and_path_from_the_uri_scope() -> Result<()>
+    {
+        let mut global = Config::default();
+        global.set("templates.uri", "git@example.com:bogus/templates.git")?;
+        global.set("templates.path", "templates")?;
+        global.set("templates.ref", "develop")?;
+        let effective = EffectiveConfig { workspace: Config::default(), global };
+        assert_eq!(
+            effective.baseline_source(),
+            Some(BaselineSource {
+                uri:     "git@example.com:bogus/templates.git".to_string(),
+                git_ref: Some("develop".to_string()),
+                path:    Some("templates".to_string())
+            })
+        );
+
+        let mut workspace = Config::default();
+        workspace.set("templates.uri", "/tmp/fake")?;
+        let effective = EffectiveConfig { workspace, global: effective.global };
+        assert_eq!(effective.baseline_source(), Some(BaselineSource { uri: "/tmp/fake".to_string(), git_ref: None, path: None }));
         Ok(())
     }
 }

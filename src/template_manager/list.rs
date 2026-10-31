@@ -11,7 +11,7 @@ use owo_colors::OwoColorize;
 use super::TemplateManager;
 use crate::{
     Result, agent_defaults,
-    agent_overlay::{load_effective_catalogs, load_effective_catalogs_lenient},
+    agent_overlay::{EffectiveCatalogs, load_effective_catalogs, load_effective_catalogs_lenient},
     bom::{self, BillOfMaterials, TemplateConfig},
     file_tracker::FileTracker,
     template_engine
@@ -267,6 +267,12 @@ impl TemplateManager
 
         let catalogs = load_effective_catalogs(&self.config_dir, &std::env::current_dir()?)?;
         let config = &catalogs.templates;
+        let layered = catalogs.systems.systems.len() > 1;
+
+        if layered == true
+        {
+            print_template_systems(&catalogs);
+        }
 
         println!("{}", "Available Agents:".bold());
         if config.agents.is_empty() == true
@@ -331,7 +337,13 @@ impl TemplateManager
                 None
             };
 
-            let annotations: Vec<String> = [includes_annotation, skill_annotation].into_iter().flatten().collect();
+            let layer_annotation = catalogs
+                .systems
+                .contributors
+                .get(&format!("languages.{}", lang_name))
+                .filter(|ids| layered == true && ids.is_empty() == false)
+                .map(|ids| format!("from: {}", ids.join(" + ")));
+            let annotations: Vec<String> = [includes_annotation, skill_annotation, layer_annotation].into_iter().flatten().collect();
 
             if annotations.is_empty() == true
             {
@@ -344,15 +356,7 @@ impl TemplateManager
 
             for skill in &resolved_skills
             {
-                let source_info = if crate::github::is_url(&skill.source) == true
-                {
-                    "(GitHub)"
-                }
-                else
-                {
-                    "(local)"
-                };
-                println!("    {} {} {}", "•".blue(), skill.derive_name(), source_info.dimmed());
+                println!("    {} {} {}", "•".blue(), skill.derive_name(), skill_source_label(skill, &catalogs).dimmed());
             }
         }
 
@@ -367,15 +371,7 @@ impl TemplateManager
             for skill in &config.skills
             {
                 template_skill_names.insert(skill.derive_name().to_string());
-                let source_info = if crate::github::is_url(&skill.source) == true
-                {
-                    "(GitHub)"
-                }
-                else
-                {
-                    "(local)"
-                };
-                println!("  • {} {}", skill.derive_name(), source_info.dimmed());
+                println!("  • {} {}", skill.derive_name(), skill_source_label(skill, &catalogs).dimmed());
             }
         }
 
@@ -410,10 +406,58 @@ impl TemplateManager
             }
         }
 
+        if catalogs.systems.overrides.is_empty() == false
+        {
+            println!();
+            println!("{}", "Overrides:".bold());
+            for item in &catalogs.systems.overrides
+            {
+                println!("  {} {} from {} {}", "→".blue(), item.item, item.winner.green(), format!("(replaces {})", item.shadowed).dimmed());
+            }
+        }
+
         println!();
         println!("{} Use 'slopctl init --lang <lang> --agent <agent>' to install", "→".blue());
 
         Ok(())
+    }
+}
+
+/// Prints the template systems (baseline and layers) that make up the effective catalog
+fn print_template_systems(catalogs: &EffectiveCatalogs)
+{
+    println!("{}", "Template Systems:".bold());
+    for system in &catalogs.systems.systems
+    {
+        let role = match system.scope
+        {
+            | Some(scope) => format!("{} layer", scope),
+            | None => "baseline".to_string()
+        };
+        let source = system.manifest.as_ref().map(|manifest| {
+            let commit = manifest.commit.as_deref().map(|commit| format!(" @ {}", &commit[..commit.len().min(12)])).unwrap_or_default();
+            format!("{}{}", manifest.uri, commit)
+        });
+        println!("  • {} {} {}", system.id.green(), format!("[{}]", role).dimmed(), source.unwrap_or_default().dimmed());
+    }
+    println!();
+}
+
+/// Display label for a skill's source: its template system (when layers exist) or GitHub/local
+fn skill_source_label(skill: &bom::SkillDefinition, catalogs: &EffectiveCatalogs) -> String
+{
+    if catalogs.systems.systems.len() > 1 &&
+        let Some(origin) = catalogs.origin_of(std::path::Path::new(&skill.source))
+    {
+        return format!("[{}]", origin);
+    }
+    if crate::github::is_url(&skill.source) == true
+    {
+        "(GitHub)".to_string()
+    }
+    else
+    {
+        "(local)".to_string()
     }
 }
 

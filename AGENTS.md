@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-31 (v23.2.2)
+**Last updated:** 2026-10-31 (v23.3.0)
 
 <!-- {mission} -->
 
@@ -13,6 +13,7 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
+- **Git:** the user's `git` CLI (via `std::process::Command`) for git template sources; no git library dependency
 - **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, model-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
@@ -122,6 +123,17 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - `remove --lang` deletes only skill-directory files that are tracked or shipped by the catalog skill source; files the user added to a skill directory are kept and reported. Untracked files at catalog file targets are still removed (legacy discovery)
 - `doctor` reports tracked files the current catalog no longer provides as `Orphaned` (informational, no automatic fix); `update` keeps leaving them alone and `remove` owns their cleanup. Orphan detection and `update` share `resolve_workspace_sets`, so both agree on what the catalog provides
 
+### Template Layers
+
+- A template system is a full catalog (`templates.yml`, its files and skills, optionally `agent-defaults.yml`). The baseline comes from `templates.uri` with optional `templates.ref`/`templates.path`, read from the same scope as the uri (`EffectiveConfig::baseline_source`; `--from` and `fallbackUri` use the uri alone); layers are configured as an ordered list under `templates.layers` (`LayerSpec { id, uri, ref, path }`, config keys `templates.layers.<id>.uri|ref|path`). Global layers come first, then workspace layers (`EffectiveConfig::layers` concatenates instead of shadowing); the same id in both scopes is an error
+- Ids (`[a-z0-9_-]+`) are declared by the system author in `templates.yml` (`id:`), required for layers and checked against the configured id at fetch time; a baseline without one is `baseline`. Ids are for provenance, not namespacing: skill install slots are fixed by the agentskills.io name, so clashes are settled by precedence
+- `template_layer::apply_layers`, called from `load_effective_catalogs` between the baseline load and overlays, is the only merge path. Rules, later wins: `main` replaced; `$instructions` fragments keyed by source path relative to their system; other files by target; keyed sections merged field by field; shared-list skills (top-level, languages, shared) settled globally by name so a name has one source; agent skill lists per agent; layer `agent-defaults.yml` entries by name. Every replacement is recorded in `TemplateSystems.overrides`
+- Layer sources are rebased to absolute paths inside `layers/<id>/` (sibling of the baseline cache, `template_layer::layer_cache_dir`) with `utils::rebase_source`, shared with overlays. Layer file sources must be relative; URL skills are rebased to their cached copies via the manifest's `url_skills` (one definition per discovered skill)
+- `fetch_catalog(&CatalogSource, dest)` fetches every system: git URLs (`git::is_git_url`) via the user's `git`, other `http(s)` URLs as GitHub tree URLs, everything else as a local folder. URL skills are cached for every source kind, and each fetch writes `.slopctl-source.yml` (`SourceManifest`: uri, ref, path, commit, fetched, url_skills). The strict loader refuses an unfetched layer or one whose manifest no longer matches its config; the lenient loader warns and skips
+- Provenance: `ResolvedFile.origin` comes from `EffectiveCatalogs::origin_of` (cache-path prefix; overlay files have none) and is stored as `FileMetadata.origin` via `FileTracker::set_origin` at every install site. AGENTS.md has no origin. `update` reports origin switches, `doctor` names orphans from systems not configured here, `remove --source <id>` removes a system's files
+- Private layers belong in the global config; workspace config is committed, so workspace layers must be reachable by the whole team
+- Layer test fixtures use the ids `fake-layer` and `bogus-layer`; integration tests keep the baseline at `<root>/templates` so layer caches stay per test
+
 ### Agent Overlays
 
 - Users add agents without forking the template repo via `agents/<name>/agent.yml`, in the global slopctl config dir and in the workspace `.slopctl/agents/` (workspace wins on a name clash). `agent.yml` holds the `agent-defaults.yml` fields and the `templates.yml` agent sections (`instructions`, `prompts`, `skills`, `directories`) flattened side by side; unknown keys are rejected
@@ -136,6 +148,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
 - GitHub API access is unauthenticated (no tokens or credentials); unauthenticated limits apply (~60 REST requests/hour per IP, plus raw.githubusercontent.com throttling)
+- Git template sources are cloned with the user's installed `git` (`src/git.rs`); authentication for private repositories is delegated to the user's SSH keys and credential helpers. slopctl never reads, stores, or passes credentials
 - Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
