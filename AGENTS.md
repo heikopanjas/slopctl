@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-09 (v23.2.1)
+**Last updated:** 2026-10-31 (v23.2.2)
 
 <!-- {mission} -->
 
@@ -112,6 +112,15 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
 - Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
 - `update` creates agent-category files only for agents that own at least one tracker entry (`get_installed_agents`), never for agents known only by a marker directory. The check is per agent, not per file: an installed agent's missing, newly catalogued, or previously deleted file (e.g. a `CLAUDE.md` dropped by an old init/remove cycle) is recreated, which a per-file `get_metadata` probe used to silently skip. Files it refuses to create are reported per agent with a `slopctl init --agent <name>` hint, never dropped silently; `--force` does not override this, and `--agent` on `update` narrows scope only — it never authorizes creation, and errors with the same hint when the named agent owns nothing. `update --file`/`--skill` selectors are explicit intent and are deliberately not gated this way (an unmatched selector already hard-errors), so refreshing a single agent file makes that agent tracker-installed and its remaining files reachable by the next bare `update`. Marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
+
+### Catalog Clash Resilience
+
+- One source per skill name: top-level, language and shared skills install into the same skill directories, so a name defined with two different sources there is a hard error in the strict loader (`bom::require_unique_skill_sources`, called from `load_effective_catalogs`) and an error in `templates --verify`. Agent skill lists may carry their own variant (they install into the agent's own directory); verify only warns about those. The lenient loader skips the check so `remove`/`status` keep working
+- Include resolution tracks only the current include path (a stack, not a visited set), so a group or language reached through two paths (a diamond) is not a cycle. Identical entries reached twice are deduped (`resolve_language_files`/`resolve_language_skills`); only different sources for one target are a "duplicate target" error. The engine likewise collapses resolved entries with the same source and target, unioning their owners (`merge_identical_entries`), so a skill listed in a language and the top-level list installs once
+- `fetch_catalog` (`template_manager/mod.rs`) is the only way a catalog enters a cache directory: it stages into a sibling dir and swaps it in after a successful fetch, so files dropped upstream never linger and a failed fetch keeps the old cache. `agent-defaults.yml`, `model-defaults.yml` and the legacy tracker have their own update paths and are carried over
+- An unreadable `.slopctl/tracker.yml` (e.g. the obsolete scalar format) still loads as empty, but warns, and the next save moves it to `tracker.yml.bak` instead of overwriting it
+- `remove --lang` deletes only skill-directory files that are tracked or shipped by the catalog skill source; files the user added to a skill directory are kept and reported. Untracked files at catalog file targets are still removed (legacy discovery)
+- `doctor` reports tracked files the current catalog no longer provides as `Orphaned` (informational, no automatic fix); `update` keeps leaving them alone and `remove` owns their cleanup. Orphan detection and `update` share `resolve_workspace_sets`, so both agree on what the catalog provides
 
 ### Agent Overlays
 

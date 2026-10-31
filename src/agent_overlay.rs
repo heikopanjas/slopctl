@@ -21,7 +21,7 @@ use serde::Deserialize;
 use crate::{
     Result,
     agent_defaults::{self, AgentCatalog, AgentDefaultsEntry, PLACEHOLDER_WORKSPACE},
-    bom::{AgentConfig, TemplateConfig},
+    bom::{self, AgentConfig, TemplateConfig},
     config::ConfigScope,
     file_tracker::SLOPCTL_DIR,
     template_engine::load_template_config
@@ -159,6 +159,12 @@ fn load_effective_catalogs_from(config_dir: &Path, global_root: Option<&Path>, w
         agents.agents.push(overlay.defaults);
         templates.agents.insert(name, overlay.config);
         overlays.push(overlay.agent);
+    }
+
+    // Lenient loads (remove, status) must keep working on a catalog that fails this check.
+    if lenient == false
+    {
+        bom::require_unique_skill_sources(&templates)?;
     }
 
     Ok(EffectiveCatalogs { templates, agents, overlays })
@@ -478,6 +484,21 @@ mod tests
         write_overlay(ws.path(), "bogus", FAKE_OVERLAY);
         let err = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap_err().to_string();
         assert!(err.contains("add-only") == true);
+    }
+
+    #[test]
+    fn test_load_effective_catalogs_conflicting_skill_sources_strict_only()
+    {
+        let cache = shipped_cache();
+        let ws = TempDir::new().unwrap();
+        fs::write(
+            cache.path().join("templates.yml"),
+            "version: 5\nagents:\n  bogus: {}\nlanguages:\n  Rust++:\n    skills:\n      - source: skills/review\nskills:\n  - source: other/review\n"
+        )
+        .unwrap();
+        let err = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap_err().to_string();
+        assert!(err.contains("skill 'review'") == true);
+        assert!(load_effective_catalogs_from(cache.path(), None, ws.path(), true).is_ok() == true);
     }
 
     #[test]

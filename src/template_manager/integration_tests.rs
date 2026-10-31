@@ -1945,3 +1945,109 @@ fn test_verify_reports_agent_missing_from_defaults() -> anyhow::Result<()>
     assert!(fixture.verify().is_err() == true);
     Ok(())
 }
+
+// ── Catalog clash resilience ─────────────────────────────────────────────────
+
+#[test]
+fn test_init_skill_listed_in_language_and_top_level_installs_once() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    let yaml = fs::read_to_string(&templates)?
+        .replace("      - source: 'skills/rpp-coding-conventions'\n", "      - source: 'skills/rpp-coding-conventions'\n      - source: 'skills/git-workflow'\n");
+    fs::write(&templates, yaml)?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true);
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let meta =
+        tracker.get_metadata(&std::env::current_dir()?.join(".agents/skills/git-workflow/SKILL.md")).ok_or_else(|| anyhow::anyhow!("git-workflow must be tracked"))?;
+    assert!(meta.has_lang("Rust++") == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_narrowed_agent_keeps_other_agent_skill_copy() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    let native_copy = workspace.path().join(".bogus/skills/rpp-coding-conventions/SKILL.md");
+    assert!(native_copy.exists() == true, "native-only agent must get its own copy of the language skill");
+
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+
+    assert!(native_copy.exists() == true, "update --agent fake must not prune bogus's copy as stale");
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_lang_keeps_untracked_file_in_skill_dir() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let skill_dir = workspace.path().join(".agents/skills/rpp-coding-conventions");
+    let notes = skill_dir.join("notes.md");
+    fs::write(&notes, "my own notes\n")?;
+
+    fixture.remove_lang("Rust++")?;
+
+    assert!(skill_dir.join("SKILL.md").exists() == false, "tracked skill files must be removed");
+    assert!(notes.exists() == true, "untracked user file must survive remove --lang");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_orphans_empty_after_multi_agent_init() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    fixture.init(None, Some("CppScript"))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert!(orphans.is_empty() == true, "a freshly initialized workspace has no orphans, got: {orphans:?}");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_reports_skill_dropped_from_catalog() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    fs::write(&templates, fs::read_to_string(&templates)?.replace("    skills:\n      - source: 'skills/rpp-coding-conventions'\n", ""))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert_eq!(orphans, vec![crate::template_engine::normalize_path(&cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md"))]);
+    fixture.doctor(false, false)?;
+
+    Ok(())
+}

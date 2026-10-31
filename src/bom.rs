@@ -44,8 +44,8 @@ pub struct AgentConfig
 /// Languages can include shared file groups or other languages via `includes`.
 /// Resolution order: included files first (depth-first), then own `files`.
 /// Skills are installed to the cross-client `.agents/skills/` directory when
-/// the language is selected. Skills from included `shared` groups are propagated;
-/// skills from included *languages* are NOT propagated.
+/// the language is selected. Skills from included `shared` groups and included
+/// languages are propagated (e.g. a framework language inherits its base language's skills).
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct LanguageConfig
 {
@@ -173,8 +173,12 @@ pub struct TemplateConfig
 /// the same disk file
 pub fn resolve_language_files(lang: &str, config: &TemplateConfig) -> Result<Vec<FileMapping>>
 {
-    let mut visited = HashSet::new();
-    let files = resolve_language_files_inner(lang, config, &mut visited)?;
+    let mut stack = HashSet::new();
+    let mut files = resolve_language_files_inner(lang, config, &mut stack)?;
+
+    // A group reached through several includes contributes identical entries; keep the first.
+    let mut seen_entries: HashSet<(String, String)> = HashSet::new();
+    files.retain(|entry| seen_entries.insert((entry.source.clone(), entry.target.clone())));
 
     let mut seen_targets: HashMap<&str, &str> = HashMap::new();
     for entry in &files
@@ -192,10 +196,12 @@ pub fn resolve_language_files(lang: &str, config: &TemplateConfig) -> Result<Vec
 }
 
 /// Recursive helper for `resolve_language_files` with cycle detection
-fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &mut HashSet<String>) -> Result<Vec<FileMapping>>
+///
+/// `stack` holds the languages on the current include path only, so a language reached through
+/// two separate paths (a diamond) is not mistaken for a cycle.
+fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, stack: &mut HashSet<String>) -> Result<Vec<FileMapping>>
 {
-    require!(visited.contains(lang) == false, Err(anyhow::anyhow!("Circular include detected: '{}'", lang)));
-    visited.insert(lang.to_string());
+    require!(stack.insert(lang.to_string()) == true, Err(anyhow::anyhow!("Circular include detected: '{}'", lang)));
 
     let lang_config = config.languages.get(lang).ok_or_else(|| anyhow::anyhow!("Language '{}' not found in templates.yml", lang))?;
 
@@ -209,7 +215,7 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
         }
         else if config.languages.contains_key(include_name.as_str()) == true
         {
-            let included = resolve_language_files_inner(include_name, config, visited)?;
+            let included = resolve_language_files_inner(include_name, config, stack)?;
             files.extend(included);
         }
         else
@@ -219,6 +225,7 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
     }
 
     files.extend(lang_config.files.iter().cloned());
+    stack.remove(lang);
 
     Ok(files)
 }
@@ -242,15 +249,22 @@ fn resolve_language_files_inner(lang: &str, config: &TemplateConfig, visited: &m
 /// include is detected
 pub fn resolve_language_skills(lang: &str, config: &TemplateConfig) -> Result<Vec<SkillDefinition>>
 {
-    let mut visited = HashSet::new();
-    resolve_language_skills_inner(lang, config, &mut visited)
+    let mut stack = HashSet::new();
+    let mut skills = resolve_language_skills_inner(lang, config, &mut stack)?;
+
+    // A group reached through several includes contributes identical definitions; keep the first.
+    let mut seen: HashSet<(String, Option<String>)> = HashSet::new();
+    skills.retain(|skill| seen.insert((skill.source.clone(), skill.target.clone())));
+
+    Ok(skills)
 }
 
 /// Recursive helper for `resolve_language_skills` with cycle detection
-fn resolve_language_skills_inner(lang: &str, config: &TemplateConfig, visited: &mut HashSet<String>) -> Result<Vec<SkillDefinition>>
+///
+/// `stack` holds the languages on the current include path only (see `resolve_language_files_inner`).
+fn resolve_language_skills_inner(lang: &str, config: &TemplateConfig, stack: &mut HashSet<String>) -> Result<Vec<SkillDefinition>>
 {
-    require!(visited.contains(lang) == false, Err(anyhow::anyhow!("Circular include detected in skills: '{}'", lang)));
-    visited.insert(lang.to_string());
+    require!(stack.insert(lang.to_string()) == true, Err(anyhow::anyhow!("Circular include detected in skills: '{}'", lang)));
 
     let lang_config = config.languages.get(lang).ok_or_else(|| anyhow::anyhow!("Language '{}' not found in templates.yml", lang))?;
 
@@ -265,14 +279,92 @@ fn resolve_language_skills_inner(lang: &str, config: &TemplateConfig, visited: &
         }
         else if config.languages.contains_key(include_name.as_str()) == true
         {
-            let included = resolve_language_skills_inner(include_name, config, visited)?;
+            let included = resolve_language_skills_inner(include_name, config, stack)?;
             skills.extend(included);
         }
     }
 
     skills.extend(lang_config.skills.iter().cloned());
+    stack.remove(lang);
 
     Ok(skills)
+}
+
+/// A skill name that the catalog defines with more than one source
+#[derive(Debug, PartialEq, Eq)]
+pub struct SkillSourceConflict
+{
+    pub name:           String,
+    /// `(location, source)` pairs, e.g. `("languages.Rust++", "skills/x")`, one per distinct source
+    pub definitions:    Vec<(String, String)>,
+    /// True when only agent skill lists disagree with the rest; agent skills install into the
+    /// agent's own directory, so such a variant does not always collide on disk
+    pub agent_variants: bool
+}
+
+/// Finds skill names that are defined with different sources across the catalog
+///
+/// Top-level, language and shared skills install into the same skill directories, so a name with
+/// two sources there makes the installed content depend on resolution order. Agent skill lists are
+/// checked as well but flagged as `agent_variants` when the shared lists alone agree.
+pub fn skill_source_conflicts(config: &TemplateConfig) -> Vec<SkillSourceConflict>
+{
+    let mut lists: Vec<(String, bool, &[SkillDefinition])> = vec![("skills".to_string(), false, config.skills.as_slice())];
+    let mut languages: Vec<_> = config.languages.iter().collect();
+    languages.sort_by(|a, b| a.0.cmp(b.0));
+    lists.extend(languages.into_iter().map(|(name, lang)| (format!("languages.{}", name), false, lang.skills.as_slice())));
+    let mut shared: Vec<_> = config.shared.iter().collect();
+    shared.sort_by(|a, b| a.0.cmp(b.0));
+    lists.extend(shared.into_iter().map(|(name, group)| (format!("shared.{}", name), false, group.skills.as_slice())));
+    let mut agents: Vec<_> = config.agents.iter().collect();
+    agents.sort_by(|a, b| a.0.cmp(b.0));
+    lists.extend(agents.into_iter().map(|(name, agent)| (format!("agents.{}", name), true, agent.skills.as_slice())));
+
+    // name -> distinct (location, source, is_agent) definitions in catalog order
+    let mut by_name: BTreeMap<&str, Vec<(&str, &str, bool)>> = BTreeMap::new();
+    for (location, is_agent, skills) in &lists
+    {
+        for skill in skills.iter()
+        {
+            let definitions = by_name.entry(skill.derive_name()).or_default();
+            if definitions.iter().any(|(_, source, _)| *source == skill.source.as_str()) == false
+            {
+                definitions.push((location.as_str(), skill.source.as_str(), *is_agent));
+            }
+        }
+    }
+
+    by_name
+        .into_iter()
+        .filter(|(_, definitions)| definitions.len() > 1)
+        .map(|(name, definitions)| {
+            let shared_sources = definitions.iter().filter(|(_, _, is_agent)| *is_agent == false).count();
+            SkillSourceConflict {
+                name:           name.to_string(),
+                agent_variants: shared_sources <= 1,
+                definitions:    definitions.into_iter().map(|(location, source, _)| (location.to_string(), source.to_string())).collect()
+            }
+        })
+        .collect()
+}
+
+/// Rejects a catalog whose shared skill lists define one skill name with several sources
+///
+/// # Errors
+///
+/// Returns an error describing every conflicting name (agent-only variants are not errors)
+pub fn require_unique_skill_sources(config: &TemplateConfig) -> Result<()>
+{
+    let conflicts: Vec<String> = skill_source_conflicts(config)
+        .into_iter()
+        .filter(|conflict| conflict.agent_variants == false)
+        .map(|conflict| {
+            let definitions: Vec<String> = conflict.definitions.iter().map(|(location, source)| format!("'{}' ({})", source, location)).collect();
+            format!("skill '{}' has different sources: {}", conflict.name, definitions.join(", "))
+        })
+        .collect();
+    require!(conflicts.is_empty() == true, Err(anyhow::anyhow!("templates.yml defines conflicting skills:\n  {}", conflicts.join("\n  "))));
+    Ok(())
 }
 
 /// Bill of Materials - maps agent names to their target file paths
@@ -752,6 +844,89 @@ integration:
         let files = resolve_language_files("Rust++", &config)?;
         assert_eq!(files.len(), 2);
         Ok(())
+    }
+
+    #[test]
+    fn test_resolve_diamond_include_dedupes_identical_entries() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.shared.insert("group".to_string(), SharedConfig {
+            files:  vec![make_mapping("a.ini", "$workspace/.editorconfig"), make_mapping("shared.md", "$instructions")],
+            skills: vec![SkillDefinition { source: "skills/group-skill".to_string(), target: None }]
+        });
+        config.languages.insert("Rust++".to_string(), make_lang(vec!["group".to_string()], vec![make_mapping("rpp.md", "$instructions")]));
+        config.languages.insert("CppScript".to_string(), make_lang(vec!["group".to_string(), "Rust++".to_string()], vec![]));
+
+        let files = resolve_language_files("CppScript", &config)?;
+        let sources: Vec<&str> = files.iter().map(|f| f.source.as_str()).collect();
+        assert_eq!(sources, vec!["a.ini", "shared.md", "rpp.md"]);
+
+        let skills = resolve_language_skills("CppScript", &config)?;
+        assert_eq!(skills.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_language_included_twice_is_not_circular() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.languages.insert("Rust++".to_string(), LanguageConfig {
+            includes: vec![],
+            files:    vec![make_mapping("rpp.md", "$instructions")],
+            skills:   vec![SkillDefinition { source: "skills/rpp-skill".to_string(), target: None }]
+        });
+        config.languages.insert("CppScript".to_string(), make_lang(vec!["Rust++".to_string(), "Rust++".to_string()], vec![]));
+
+        assert_eq!(resolve_language_files("CppScript", &config)?.len(), 1);
+        assert_eq!(resolve_language_skills("CppScript", &config)?.len(), 1);
+        Ok(())
+    }
+
+    // -- skill source conflicts --
+
+    fn skill(source: &str) -> SkillDefinition
+    {
+        SkillDefinition { source: source.to_string(), target: None }
+    }
+
+    #[test]
+    fn test_skill_source_conflicts_same_source_accepted() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.skills = vec![skill("skills/review")];
+        config.languages.insert("Rust++".to_string(), LanguageConfig { includes: vec![], files: vec![], skills: vec![skill("skills/review")] });
+        config.agents.insert("bogus".to_string(), AgentConfig { skills: vec![skill("skills/review")], ..Default::default() });
+
+        assert!(skill_source_conflicts(&config).is_empty() == true);
+        require_unique_skill_sources(&config)
+    }
+
+    #[test]
+    fn test_skill_source_conflicts_different_shared_sources_rejected()
+    {
+        let mut config = minimal_config();
+        config.skills = vec![skill("skills/review")];
+        config.languages.insert("Rust++".to_string(), LanguageConfig { includes: vec![], files: vec![], skills: vec![skill("other/review")] });
+
+        let conflicts = skill_source_conflicts(&config);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].name, "review");
+        assert!(conflicts[0].agent_variants == false);
+        let err = require_unique_skill_sources(&config).unwrap_err().to_string();
+        assert!(err.contains("other/review") == true && err.contains("languages.Rust++") == true);
+    }
+
+    #[test]
+    fn test_skill_source_conflicts_agent_variant_is_not_an_error() -> anyhow::Result<()>
+    {
+        let mut config = minimal_config();
+        config.skills = vec![skill("skills/init")];
+        config.agents.insert("bogus".to_string(), AgentConfig { skills: vec![skill("bogus/init")], ..Default::default() });
+
+        let conflicts = skill_source_conflicts(&config);
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].agent_variants == true);
+        require_unique_skill_sources(&config)
     }
 
     // -- BillOfMaterials --
