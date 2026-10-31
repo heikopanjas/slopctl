@@ -664,11 +664,7 @@ impl EffectiveConfig
 #[cfg(test)]
 mod tests
 {
-    use std::sync::Mutex;
-
     use super::*;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_config_default()
@@ -876,7 +872,7 @@ mod tests
     #[test]
     fn test_config_save_and_load() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
@@ -894,7 +890,7 @@ mod tests
     #[test]
     fn test_config_load_missing_file() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", dir.path()) };
 
@@ -908,7 +904,7 @@ mod tests
     #[test]
     fn test_config_get_config_path_xdg() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { env::set_var("XDG_CONFIG_HOME", "/tmp/test-xdg") };
         let path = Config::get_config_path()?;
         assert_eq!(path, PathBuf::from("/tmp/test-xdg/slopctl/config.yml"));
@@ -953,7 +949,7 @@ mod tests
     #[test]
     fn test_effective_config_workspace_wins() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let global_dir = tempfile::TempDir::new()?;
         let ws_dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
@@ -978,7 +974,7 @@ mod tests
     #[test]
     fn test_effective_config_get_with_origin() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let global_dir = tempfile::TempDir::new()?;
         let ws_dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
@@ -1010,7 +1006,7 @@ mod tests
     #[test]
     fn test_effective_config_list_with_origin_deterministic_order() -> anyhow::Result<()>
     {
-        let _lock = ENV_LOCK.lock().map_err(|e| anyhow::anyhow!("env lock poisoned: {}", e))?;
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let global_dir = tempfile::TempDir::new()?;
         let ws_dir = tempfile::TempDir::new()?;
         unsafe { env::set_var("XDG_CONFIG_HOME", global_dir.path()) };
@@ -1101,6 +1097,7 @@ mod tests
     #[test]
     fn test_get_global_dir_is_parent_of_global_path() -> Result<()>
     {
+        let _lock = crate::ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(Config::get_global_dir()?, Config::get_global_path()?.parent().unwrap());
         Ok(())
     }

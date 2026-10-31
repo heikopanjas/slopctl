@@ -4,6 +4,20 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-10-31 18:28 (v23.3.2, fix flaky env var tests)
+
+- `config.rs` tests now use the crate-wide `crate::ENV_LOCK` instead of a
+  module-local lock, so they serialize with the `merge.rs` tests that also
+  set `XDG_CONFIG_HOME`
+- `test_get_global_dir_is_parent_of_global_path` now takes the lock; it read
+  `XDG_CONFIG_HOME` twice unguarded and failed on ubuntu CI when another test
+  set the variable between the two reads
+- AGENTS.md testing section now requires every env var test, including
+  read-only ones, to hold `crate::ENV_LOCK`
+- rationale: the develop build after the history rewrite failed on this race
+  although the same tree had passed minutes earlier
+- version bump: 23.3.1 to 23.3.2 (PATCH - test-only fix)
+
 ### 2026-10-31 16:40 (v23.3.1, rename the default catalog to slopctl-starter)
 
 - renamed the GitHub repository `heikopanjas/slopctl-templates` to

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-31 (v23.3.1)
+**Last updated:** 2026-10-31 (v23.3.2)
 
 <!-- {mission} -->
 
@@ -158,6 +158,7 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Unit tests: In-file `#[cfg(test)]` modules, named `test_<scenario>_<expected_outcome>`
 - Integration tests: Manual CLI verification with `--dry-run` flag
 - Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
+- Env var serialization: every test that sets, removes, or reads an environment variable another test changes (e.g. `XDG_CONFIG_HOME`, `*_API_KEY`) must hold `crate::ENV_LOCK` (`lib.rs`), taken with `.lock().unwrap_or_else(|e| e.into_inner())`; never declare a module-local env lock, since two locks do not exclude each other. This includes read-only tests: reading the same variable twice without the lock races with any concurrent writer
 - CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
 - Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
 - Rust source tests must not use real-world coding-agent or programming-language fixture names. Use artificial agents `bogus` and `fake`; use artificial languages `Rust++` and `CppScript`. Real supported names belong only in shipped template/catalog data, not source fixtures.
