@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-09 (v23.2.1)
+**Last updated:** 2026-10-31 (v23.3.1)
 
 <!-- {mission} -->
 
@@ -13,10 +13,11 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
+- **Git:** the user's `git` CLI (via `std::process::Command`) for git template sources; no git library dependency
 - **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, model-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
-- **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
+- **CI/CD:** GitHub Actions (build.yml on develop and feature/** branches, push and pull request, Linux/macOS/Windows matrix; release.yml on main)
 - **License:** MIT
 - **Website:** <https://slopctl.me> (also set as `homepage` in `Cargo.toml`)
 
@@ -113,6 +114,26 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
 - `update` creates agent-category files only for agents that own at least one tracker entry (`get_installed_agents`), never for agents known only by a marker directory. The check is per agent, not per file: an installed agent's missing, newly catalogued, or previously deleted file (e.g. a `CLAUDE.md` dropped by an old init/remove cycle) is recreated, which a per-file `get_metadata` probe used to silently skip. Files it refuses to create are reported per agent with a `slopctl init --agent <name>` hint, never dropped silently; `--force` does not override this, and `--agent` on `update` narrows scope only — it never authorizes creation, and errors with the same hint when the named agent owns nothing. `update --file`/`--skill` selectors are explicit intent and are deliberately not gated this way (an unmatched selector already hard-errors), so refreshing a single agent file makes that agent tracker-installed and its remaining files reachable by the next bare `update`. Marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
 
+### Catalog Clash Resilience
+
+- One source per skill name: top-level, language and shared skills install into the same skill directories, so a name defined with two different sources there is a hard error in the strict loader (`bom::require_unique_skill_sources`, called from `load_effective_catalogs`) and an error in `templates --verify`. Agent skill lists may carry their own variant (they install into the agent's own directory); verify only warns about those. The lenient loader skips the check so `remove`/`status` keep working
+- Include resolution tracks only the current include path (a stack, not a visited set), so a group or language reached through two paths (a diamond) is not a cycle. Identical entries reached twice are deduped (`resolve_language_files`/`resolve_language_skills`); only different sources for one target are a "duplicate target" error. The engine likewise collapses resolved entries with the same source and target, unioning their owners (`merge_identical_entries`), so a skill listed in a language and the top-level list installs once
+- `fetch_catalog` (`template_manager/mod.rs`) is the only way a catalog enters a cache directory: it stages into a sibling dir and swaps it in after a successful fetch, so files dropped upstream never linger and a failed fetch keeps the old cache. `agent-defaults.yml`, `model-defaults.yml` and the legacy tracker have their own update paths and are carried over
+- An unreadable `.slopctl/tracker.yml` (e.g. the obsolete scalar format) still loads as empty, but warns, and the next save moves it to `tracker.yml.bak` instead of overwriting it
+- `remove --lang` deletes only skill-directory files that are tracked or shipped by the catalog skill source; files the user added to a skill directory are kept and reported. Untracked files at catalog file targets are still removed (legacy discovery)
+- `doctor` reports tracked files the current catalog no longer provides as `Orphaned` (informational, no automatic fix); `update` keeps leaving them alone and `remove` owns their cleanup. Orphan detection and `update` share `resolve_workspace_sets`, so both agree on what the catalog provides
+
+### Template Layers
+
+- A template system is a full catalog (`templates.yml`, its files and skills, optionally `agent-defaults.yml`). The baseline comes from `templates.uri` with optional `templates.ref`/`templates.path`, read from the same scope as the uri (`EffectiveConfig::baseline_source`; `--from` and `fallbackUri` use the uri alone); layers are configured as an ordered list under `templates.layers` (`LayerSpec { id, uri, ref, path }`, config keys `templates.layers.<id>.uri|ref|path`). Global layers come first, then workspace layers (`EffectiveConfig::layers` concatenates instead of shadowing); the same id in both scopes is an error
+- Ids (`[a-z0-9_-]+`) are declared by the system author in `templates.yml` (`id:`), required for layers and checked against the configured id at fetch time; a baseline without one is `baseline`. Ids are for provenance, not namespacing: skill install slots are fixed by the agentskills.io name, so clashes are settled by precedence
+- `template_layer::apply_layers`, called from `load_effective_catalogs` between the baseline load and overlays, is the only merge path. Rules, later wins: `main` replaced; `$instructions` fragments keyed by source path relative to their system; other files by target; keyed sections merged field by field; shared-list skills (top-level, languages, shared) settled globally by name so a name has one source; agent skill lists per agent; layer `agent-defaults.yml` entries by name. Every replacement is recorded in `TemplateSystems.overrides`
+- Layer sources are rebased to absolute paths inside `layers/<id>/` (sibling of the baseline cache, `template_layer::layer_cache_dir`) with `utils::rebase_source`, shared with overlays. Layer file sources must be relative; URL skills are rebased to their cached copies via the manifest's `url_skills` (one definition per discovered skill)
+- `fetch_catalog(&CatalogSource, dest)` fetches every system: git URLs (`git::is_git_url`) via the user's `git`, other `http(s)` URLs as GitHub tree URLs, everything else as a local folder. URL skills are cached for every source kind, and each fetch writes `.slopctl-source.yml` (`SourceManifest`: uri, ref, path, commit, fetched, url_skills). The strict loader refuses an unfetched layer or one whose manifest no longer matches its config; the lenient loader warns and skips
+- Provenance: `ResolvedFile.origin` comes from `EffectiveCatalogs::origin_of` (cache-path prefix; overlay files have none) and is stored as `FileMetadata.origin` via `FileTracker::set_origin` at every install site. AGENTS.md has no origin. `update` reports origin switches, `doctor` names orphans from systems not configured here, `remove --source <id>` removes a system's files
+- Private layers belong in the global config; workspace config is committed, so workspace layers must be reachable by the whole team
+- Layer test fixtures use the ids `fake-layer` and `bogus-layer`; integration tests keep the baseline at `<root>/templates` so layer caches stay per test
+
 ### Agent Overlays
 
 - Users add agents without forking the template repo via `agents/<name>/agent.yml`, in the global slopctl config dir and in the workspace `.slopctl/agents/` (workspace wins on a name clash). `agent.yml` holds the `agent-defaults.yml` fields and the `templates.yml` agent sections (`instructions`, `prompts`, `skills`, `directories`) flattened side by side; unknown keys are rejected
@@ -127,6 +148,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
 - GitHub API access is unauthenticated (no tokens or credentials); unauthenticated limits apply (~60 REST requests/hour per IP, plus raw.githubusercontent.com throttling)
+- Git template sources are cloned with the user's installed `git` (`src/git.rs`); authentication for private repositories is delegated to the user's SSH keys and credential helpers. slopctl never reads, stores, or passes credentials
 - Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
@@ -387,7 +409,7 @@ Load the `rust-build-commands` skill when building or running the project.
 
 **Formatting Configuration (.rustfmt.toml):**
 
-- This repo's root `.rustfmt.toml` is dogfooded from `templates/rust-format-instructions.toml` in the separate [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository — the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files. This is now a cross-repo invariant with nothing enforcing it automatically — check by hand when either file changes
+- This repo's root `.rustfmt.toml` is dogfooded from `templates/rust-format-instructions.toml` in the separate [`slopctl-starter`](https://github.com/heikopanjas/slopctl-starter) repository — the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files. This is now a cross-repo invariant with nothing enforcing it automatically — check by hand when either file changes
 - Do NOT add `required_version` (or other CI-environment-specific settings) to either copy — a hardcoded version pin breaks `cargo fmt` for any downstream user whose local rustfmt doesn't match exactly, since they don't get this repo's `rust-toolchain.toml`. Version consistency for this repo's own CI is handled entirely by the toolchain pin (see "Toolchain Pinning" above)
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability

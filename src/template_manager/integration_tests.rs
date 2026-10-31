@@ -1945,3 +1945,280 @@ fn test_verify_reports_agent_missing_from_defaults() -> anyhow::Result<()>
     assert!(fixture.verify().is_err() == true);
     Ok(())
 }
+
+// ── Catalog clash resilience ─────────────────────────────────────────────────
+
+#[test]
+fn test_init_skill_listed_in_language_and_top_level_installs_once() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    let yaml = fs::read_to_string(&templates)?
+        .replace("      - source: 'skills/rpp-coding-conventions'\n", "      - source: 'skills/rpp-coding-conventions'\n      - source: 'skills/git-workflow'\n");
+    fs::write(&templates, yaml)?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true);
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let meta =
+        tracker.get_metadata(&std::env::current_dir()?.join(".agents/skills/git-workflow/SKILL.md")).ok_or_else(|| anyhow::anyhow!("git-workflow must be tracked"))?;
+    assert!(meta.has_lang("Rust++") == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_narrowed_agent_keeps_other_agent_skill_copy() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    let native_copy = workspace.path().join(".bogus/skills/rpp-coding-conventions/SKILL.md");
+    assert!(native_copy.exists() == true, "native-only agent must get its own copy of the language skill");
+
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+
+    assert!(native_copy.exists() == true, "update --agent fake must not prune bogus's copy as stale");
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_lang_keeps_untracked_file_in_skill_dir() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let skill_dir = workspace.path().join(".agents/skills/rpp-coding-conventions");
+    let notes = skill_dir.join("notes.md");
+    fs::write(&notes, "my own notes\n")?;
+
+    fixture.remove_lang("Rust++")?;
+
+    assert!(skill_dir.join("SKILL.md").exists() == false, "tracked skill files must be removed");
+    assert!(notes.exists() == true, "untracked user file must survive remove --lang");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_orphans_empty_after_multi_agent_init() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    fixture.init(None, Some("CppScript"))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert!(orphans.is_empty() == true, "a freshly initialized workspace has no orphans, got: {orphans:?}");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_reports_skill_dropped_from_catalog() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    fs::write(&templates, fs::read_to_string(&templates)?.replace("    skills:\n      - source: 'skills/rpp-coding-conventions'\n", ""))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert_eq!(orphans, vec![(crate::template_engine::normalize_path(&cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md")), None)]);
+    fixture.doctor(false, false)?;
+
+    Ok(())
+}
+
+// ── Template layers ──────────────────────────────────────────────────────────
+
+/// Baseline fixture relocated to `<root>/templates` so its layer caches (`<root>/layers/<id>`) stay per test
+struct LayeredFixture
+{
+    _base:  IntegrationFixture,
+    root:   tempfile::TempDir,
+    source: tempfile::TempDir
+}
+
+impl LayeredFixture
+{
+    /// Builds a baseline plus a local layer `fake-layer` that adds skill `fake-review` to `Rust++`
+    /// and overrides the baseline skill `rpp-coding-conventions`
+    fn new() -> anyhow::Result<Self>
+    {
+        let base = IntegrationFixture::new()?;
+        let root = tempfile::TempDir::new()?;
+        crate::copy_dir_all(base.config_dir.path(), &root.path().join("templates"))?;
+
+        let source = tempfile::TempDir::new()?;
+        let s = source.path();
+        fs::write(
+            s.join("templates.yml"),
+            "version: 5\nid: fake-layer\nlanguages:\n  Rust++:\n    files:\n      - source: private-hint.md\n        target: '$instructions'\n    skills:\n      - \
+             source: skills/fake-review\n      - source: skills/rpp-coding-conventions\n"
+        )?;
+        fs::write(s.join("private-hint.md"), "## Private Rust++ notes\n")?;
+        for (skill, body) in [("fake-review", "# Fake review"), ("rpp-coding-conventions", "# Layer conventions")]
+        {
+            fs::create_dir_all(s.join("skills").join(skill))?;
+            fs::write(s.join("skills").join(skill).join("SKILL.md"), format!("---\nname: {skill}\n---\n{body}\n"))?;
+        }
+        Ok(Self { _base: base, root, source })
+    }
+
+    fn manager(&self) -> TemplateManager
+    {
+        TemplateManager { config_dir: self.root.path().join("templates") }
+    }
+
+    fn spec(&self) -> crate::config::LayerSpec
+    {
+        crate::config::LayerSpec { id: "fake-layer".to_string(), uri: self.source.path().to_string_lossy().into_owned(), ..Default::default() }
+    }
+
+    /// Configures the layer in the workspace config and fetches it
+    fn enable_layer(&self, workspace: &Path) -> anyhow::Result<()>
+    {
+        let mut config = crate::Config::load_workspace(workspace)?;
+        config.templates.layers = vec![self.spec()];
+        config.save_workspace(workspace)?;
+        self.manager().fetch_layers(workspace, true, false)
+    }
+
+    fn disable_layer(&self, workspace: &Path) -> anyhow::Result<()>
+    {
+        let mut config = crate::Config::load_workspace(workspace)?;
+        config.templates.layers.clear();
+        config.save_workspace(workspace)
+    }
+
+    fn init(&self, agent: Option<&str>, lang: Option<&str>) -> anyhow::Result<()>
+    {
+        let options = UpdateOptions { lang, agent, mission: None, force: false, dry_run: false, partial: None, local_cache_only: false };
+        self.manager().update(&options)
+    }
+}
+
+fn origin_of(workspace: &Path, relative: &str) -> anyhow::Result<Option<String>>
+{
+    let tracker = FileTracker::new(workspace)?;
+    Ok(tracker.get_metadata(&workspace.join(relative)).ok_or_else(|| anyhow::anyhow!("{relative} must be tracked"))?.origin.clone())
+}
+
+#[test]
+fn test_init_with_layer_installs_layer_content_and_records_origins() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(cwd.join(".agents/skills/fake-review/SKILL.md").exists() == true, "layer skill must be installed");
+    let overridden = fs::read_to_string(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md"))?;
+    assert!(overridden.contains("Layer conventions") == true, "layer must override the baseline skill");
+    let agents_md = fs::read_to_string(cwd.join("AGENTS.md"))?;
+    assert!(agents_md.contains("## Rust++ Conventions") == true && agents_md.contains("## Private Rust++ notes") == true, "fragments of both systems");
+
+    assert_eq!(origin_of(&cwd, ".agents/skills/fake-review/SKILL.md")?, Some("fake-layer".to_string()));
+    assert_eq!(origin_of(&cwd, ".agents/skills/rpp-coding-conventions/SKILL.md")?, Some("fake-layer".to_string()));
+    assert_eq!(origin_of(&cwd, ".agents/skills/git-workflow/SKILL.md")?, Some("baseline".to_string()));
+    assert_eq!(origin_of(&cwd, "AGENTS.md")?, None, "AGENTS.md merges every system");
+
+    Ok(())
+}
+
+#[test]
+fn test_dropping_layer_switches_override_back_and_reports_orphans() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.disable_layer(&cwd)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    let conventions = fs::read_to_string(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md"))?;
+    assert!(conventions.contains("Layer conventions") == false, "the baseline version must come back");
+    assert_eq!(origin_of(&cwd, ".agents/skills/rpp-coding-conventions/SKILL.md")?, Some("baseline".to_string()));
+    assert!(cwd.join(".agents/skills/fake-review/SKILL.md").exists() == true, "update never deletes orphans");
+
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert_eq!(orphans, vec![(crate::template_engine::normalize_path(&cwd.join(".agents/skills/fake-review/SKILL.md")), Some("fake-layer".to_string()))]);
+
+    fixture.manager().remove_source("fake-layer", true, false)?;
+    assert!(cwd.join(".agents/skills/fake-review").exists() == false, "remove --source deletes the layer's files");
+    assert!(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true, "baseline files stay");
+    assert!(fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd).is_empty() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_layer_changed_after_fetch_blocks_update_until_refetch() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    let mut config = crate::Config::load_workspace(&cwd)?;
+    config.templates.layers[0].path = Some(".".to_string());
+    config.save_workspace(&cwd)?;
+
+    let err = fixture.manager().update_full(None, None, false, false).expect_err("a changed layer config must be refetched first");
+    assert!(err.to_string().contains("templates --update") == true, "got: {err}");
+
+    fixture.manager().fetch_layers(&cwd, true, false)?;
+    fixture.manager().update_full(None, None, false, false)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_fetch_layer_with_wrong_id_keeps_cache_untouched() -> anyhow::Result<()>
+{
+    let fixture = LayeredFixture::new()?;
+    let mut spec = fixture.spec();
+    spec.id = "bogus-layer".to_string();
+
+    let err = fixture.manager().fetch_layer(&spec).unwrap_err().to_string();
+    assert!(err.contains("declares id 'fake-layer'") == true, "got: {err}");
+    assert!(crate::template_layer::layer_cache_dir(&fixture.root.path().join("templates"), "bogus-layer").exists() == false);
+
+    Ok(())
+}

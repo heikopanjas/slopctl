@@ -24,8 +24,14 @@ use owo_colors::OwoColorize;
 
 use crate::{
     Result,
+    agent_defaults::AGENT_DEFAULTS_FILE,
+    config::LayerSpec,
     download_manager::DownloadManager,
     file_tracker::{self, FileTracker, SLOPCTL_DIR},
+    git,
+    model_defaults::MODEL_DEFAULTS_FILE,
+    template_engine::load_template_config,
+    template_layer::{self, SourceManifest},
     utils::copy_dir_all
 };
 
@@ -74,7 +80,8 @@ impl TemplateManager
     /// Downloads or copies templates from a source (URL or local path)
     ///
     /// Supports both local file paths and URLs. For URLs starting with http/https,
-    /// templates are downloaded. For local paths, templates are copied.
+    /// templates are downloaded. For local paths, templates are copied. The cache is
+    /// replaced as a whole, see [`fetch_catalog`].
     ///
     /// # Arguments
     ///
@@ -85,38 +92,64 @@ impl TemplateManager
     /// Returns an error if download or copy operation fails
     pub fn download_or_copy_templates(&self, source: &str) -> Result<()>
     {
-        if source.starts_with("http://") || source.starts_with("https://")
+        self.download_or_copy_templates_from(&CatalogSource::uri(source))
+    }
+
+    /// Fetches the baseline templates from a source with optional git `ref` and subdirectory `path`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the fetch fails or the source holds no valid `templates.yml`
+    pub fn download_or_copy_templates_from(&self, source: &CatalogSource) -> Result<()>
+    {
+        fetch_catalog(source, &self.config_dir)
+    }
+
+    /// Fetches the template layers configured for a workspace
+    ///
+    /// `templates --update` refreshes every layer; `init` passes `only_missing` to fetch just the
+    /// layers that were never fetched or whose configuration changed since.
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace` - Workspace whose (global + workspace) config lists the layers
+    /// * `only_missing` - Skip layers whose cache matches their configuration
+    /// * `dry_run` - Only report what would be fetched
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer configuration is invalid or a fetch fails
+    pub fn fetch_layers(&self, workspace: &Path, only_missing: bool, dry_run: bool) -> Result<()>
+    {
+        for (spec, scope) in crate::agent_overlay::configured_layers(workspace)?
         {
-            // Download from URL using DownloadManager
-            println!("{} Downloading templates from URL...", "→".blue());
-            let download_manager = DownloadManager::new(self.config_dir.clone());
-            download_manager.download_templates_from_url(source)?;
-        }
-        else
-        {
-            // Copy from local path
-            let source_path = Path::new(source);
-            if source_path.exists() == false
+            let dir = template_layer::layer_cache_dir(&self.config_dir, &spec.id);
+            let current = SourceManifest::read(&dir).ok().flatten().is_some_and(|manifest| manifest.matches(&spec) == true);
+            if only_missing == true && current == true
             {
-                return Err(anyhow::anyhow!("Source path does not exist: {}", source));
+                println!("{} Template layer '{}' is cached", "✓".green(), spec.id.green());
             }
-
-            // Validate the catalog before touching the cache, mirroring the URL path.
-            let source_config = source_path.join("templates.yml");
-            if source_config.exists() == false
+            else if dry_run == true
             {
-                return Err(anyhow::anyhow!("Source path '{}' does not contain a templates.yml; a template source must include one", source));
+                println!("{} Dry run: would fetch template layer '{}' ({}) from {}", "→".blue(), spec.id.green(), scope, spec.uri.yellow());
             }
-            serde_yaml::from_str::<crate::bom::TemplateConfig>(&fs::read_to_string(&source_config)?)
-                .map_err(|e| anyhow::anyhow!("Invalid templates.yml in source '{}': {}", source, e))?;
-
-            println!("{} Copying templates from local path...", "→".blue());
-            fs::create_dir_all(&self.config_dir)?;
-            let copied = copy_dir_all(source_path, &self.config_dir)?;
-            println!("{} Copied {} template file(s) from {}", "✓".green(), copied, source_path.display().to_string().yellow());
+            else
+            {
+                self.fetch_layer(&spec)?;
+            }
         }
-
         Ok(())
+    }
+
+    /// Fetches a configured template layer into its cache directory
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the fetch fails or the layer's `templates.yml` declares another id
+    pub fn fetch_layer(&self, spec: &LayerSpec) -> Result<()>
+    {
+        println!("{} Fetching template layer '{}'...", "→".blue(), spec.id.green());
+        fetch_catalog(&CatalogSource::layer(spec), &template_layer::layer_cache_dir(&self.config_dir, &spec.id))
     }
 
     /// Returns the path to the workspace-local `.slopctl/` directory
@@ -193,6 +226,176 @@ impl TemplateManager
     {
         path.ancestors().find(|candidate| candidate.parent().and_then(Path::file_name) == Some(OsStr::new("skills"))).map(Path::to_path_buf)
     }
+}
+
+/// Where a template catalog is fetched from
+///
+/// `uri` is a local path, a GitHub tree URL, or a git URL; `ref` (git only) and `path` select a
+/// branch/tag and the subdirectory holding `templates.yml`. Layers also carry the id their
+/// `templates.yml` must declare.
+#[derive(Debug, Clone, Copy)]
+pub struct CatalogSource<'a>
+{
+    pub uri:         &'a str,
+    pub git_ref:     Option<&'a str>,
+    pub path:        Option<&'a str>,
+    pub expected_id: Option<&'a str>
+}
+
+impl<'a> CatalogSource<'a>
+{
+    /// A plain source URI (local path or URL), as used for the baseline
+    pub fn uri(uri: &'a str) -> Self
+    {
+        Self { uri, git_ref: None, path: None, expected_id: None }
+    }
+
+    /// The source of a configured template layer
+    pub fn layer(spec: &'a LayerSpec) -> Self
+    {
+        Self { uri: &spec.uri, git_ref: spec.git_ref.as_deref(), path: spec.path.as_deref(), expected_id: Some(&spec.id) }
+    }
+}
+
+/// Fetches a template catalog from `source` into `dest`, replacing its previous content
+///
+/// The catalog is staged in a sibling directory and swapped in only after the fetch succeeded,
+/// so a failed fetch leaves the old cache intact and files dropped upstream do not linger.
+/// Agent and model defaults and the legacy tracker have their own update paths and are carried
+/// over when the new catalog does not ship them. Every fetch writes a [`SourceManifest`].
+///
+/// # Errors
+///
+/// Returns an error if the source is invalid, the fetch fails, the catalog declares the wrong id,
+/// or the cache cannot be replaced
+pub(crate) fn fetch_catalog(source: &CatalogSource, dest: &Path) -> Result<()>
+{
+    let parent = dest.parent().ok_or_else(|| anyhow::anyhow!("Cache directory {} has no parent", dest.display()))?;
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new().prefix(".slopctl-staging-").tempdir_in(parent)?;
+    fetch_catalog_into(source, staging.path())?;
+
+    if let Some(expected) = source.expected_id
+    {
+        let declared = load_template_config(staging.path())?.id;
+        require!(
+            declared.as_deref() == Some(expected),
+            Err(anyhow::anyhow!(
+                "templates.yml from '{}' declares id '{}', but it is configured as template layer '{}'",
+                source.uri,
+                declared.unwrap_or_default(),
+                expected
+            ))
+        );
+    }
+
+    if dest.exists() == false
+    {
+        fs::rename(staging.path(), dest)?;
+        let _ = staging.keep();
+        return Ok(());
+    }
+
+    for preserved in [dest.join(AGENT_DEFAULTS_FILE), dest.join(MODEL_DEFAULTS_FILE), file_tracker::legacy_tracker_path(dest)]
+    {
+        if let Some(name) = preserved.file_name() &&
+            preserved.is_file() == true &&
+            staging.path().join(name).exists() == false
+        {
+            fs::copy(&preserved, staging.path().join(name))?;
+        }
+    }
+
+    // Move the old cache aside first so a failed swap can be rolled back; the retired dir is
+    // deleted when it goes out of scope.
+    let retired = tempfile::Builder::new().prefix(".slopctl-retired-").tempdir_in(parent)?;
+    let previous = retired.path().join("previous");
+    fs::rename(dest, &previous)?;
+    if let Err(e) = fs::rename(staging.path(), dest)
+    {
+        fs::rename(&previous, dest)?;
+        return Err(e.into());
+    }
+    let _ = staging.keep();
+    Ok(())
+}
+
+/// Fetches a validated catalog into an empty directory and writes its manifest
+///
+/// Git URLs are cloned with the user's `git`, other `http(s)` URLs are GitHub tree URLs downloaded
+/// over HTTP, and anything else is a local directory. URL-based skills are cached in every case.
+fn fetch_catalog_into(source: &CatalogSource, dest: &Path) -> Result<()>
+{
+    let (commit, url_skills) = if git::is_git_url(source.uri) == true
+    {
+        println!("{} Cloning {}...", "→".blue(), source.uri.yellow());
+        let checkout = tempfile::TempDir::new()?;
+        let clone = checkout.path().join("repo");
+        git::clone_shallow(source.uri, source.git_ref, &clone)?;
+        let commit = git::head_commit(&clone)?;
+        fs::remove_dir_all(clone.join(".git"))?;
+        let config = copy_validated_catalog(&catalog_root(&clone, source.path)?, dest, source.uri)?;
+        (Some(commit), DownloadManager::new(dest.to_path_buf()).cache_url_skills(&config)?)
+    }
+    else if source.uri.starts_with("http://") == true || source.uri.starts_with("https://") == true
+    {
+        require!(
+            source.git_ref.is_none() == true && source.path.is_none() == true,
+            Err(anyhow::anyhow!("'ref' and 'path' only apply to git sources; a GitHub tree URL already names its branch and directory"))
+        );
+        println!("{} Downloading templates from URL...", "→".blue());
+        (None, DownloadManager::new(dest.to_path_buf()).download_templates_from_url(source.uri)?)
+    }
+    else
+    {
+        require!(source.git_ref.is_none() == true, Err(anyhow::anyhow!("'ref' only applies to git sources, not to the local path '{}'", source.uri)));
+        let config = copy_validated_catalog(&catalog_root(Path::new(source.uri), source.path)?, dest, source.uri)?;
+        (None, DownloadManager::new(dest.to_path_buf()).cache_url_skills(&config)?)
+    };
+
+    SourceManifest {
+        uri: source.uri.to_string(),
+        git_ref: source.git_ref.map(str::to_string),
+        path: source.path.map(str::to_string),
+        commit,
+        fetched: chrono::Utc::now().to_rfc3339(),
+        url_skills
+    }
+    .write(dest)
+}
+
+/// Resolves the catalog directory inside a checkout or local source
+fn catalog_root(root: &Path, path: Option<&str>) -> Result<PathBuf>
+{
+    match path
+    {
+        // `.` names the root itself, which `safe_relative_path` rejects as naming nothing
+        | Some(path) if Path::new(path).components().all(|component| component == std::path::Component::CurDir) == false =>
+            Ok(root.join(crate::utils::safe_relative_path(path)?)),
+        | _ => Ok(root.to_path_buf())
+    }
+}
+
+/// Validates the `templates.yml` in `source_path` and copies the catalog into `dest`
+fn copy_validated_catalog(source_path: &Path, dest: &Path, uri: &str) -> Result<crate::bom::TemplateConfig>
+{
+    require!(source_path.exists() == true, Err(anyhow::anyhow!("Source path does not exist: {}", source_path.display())));
+    let source_config = source_path.join("templates.yml");
+    require!(
+        source_config.exists() == true,
+        Err(anyhow::anyhow!(
+            "Source '{}' has no templates.yml at {}; a template source must include one (set its 'path' if the catalog lives in a subdirectory)",
+            uri,
+            source_path.display()
+        ))
+    );
+    let config = serde_yaml::from_str::<crate::bom::TemplateConfig>(&fs::read_to_string(&source_config)?)
+        .map_err(|e| anyhow::anyhow!("Invalid templates.yml in source '{}': {}", uri, e))?;
+
+    println!("{} Copying templates from {}...", "→".blue(), uri.yellow());
+    let copied = copy_dir_all(source_path, dest)?;
+    println!("{} Copied {} template file(s)", "✓".green(), copied);
+    Ok(config)
 }
 
 /// Serializes tests that call `std::env::set_current_dir` (process-global state).
@@ -293,6 +496,48 @@ mod tests
 
         assert!(config_dir.path().join("templates.yml").exists() == true);
         assert!(config_dir.path().join("AGENTS.md").exists() == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_local_refetch_drops_stale_files() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let cache_root = tempfile::TempDir::new()?;
+        let config_dir = cache_root.path().join("templates");
+        fs::write(source.path().join("templates.yml"), "version: 5\nlanguages: {}\n")?;
+        fs::create_dir_all(source.path().join("skills/review"))?;
+        fs::write(source.path().join("skills/review/SKILL.md"), "# Review\n")?;
+        fs::write(source.path().join("skills/review/old.md"), "# Dropped upstream\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.clone() };
+        manager.download_or_copy_templates(&source.path().to_string_lossy())?;
+        fs::write(config_dir.join(crate::agent_defaults::AGENT_DEFAULTS_FILE), "version: 1\nagents: []\n")?;
+
+        fs::remove_file(source.path().join("skills/review/old.md"))?;
+        manager.download_or_copy_templates(&source.path().to_string_lossy())?;
+
+        assert!(config_dir.join("skills/review/SKILL.md").exists() == true);
+        assert!(config_dir.join("skills/review/old.md").exists() == false, "files dropped upstream must leave the cache");
+        assert!(config_dir.join(crate::agent_defaults::AGENT_DEFAULTS_FILE).exists() == true, "agent defaults have their own update path");
+        assert_eq!(fs::read_dir(cache_root.path())?.count(), 1, "no staging leftovers next to the cache");
+        Ok(())
+    }
+
+    #[test]
+    fn test_download_or_copy_templates_failed_fetch_keeps_existing_cache() -> anyhow::Result<()>
+    {
+        let source = tempfile::TempDir::new()?;
+        let cache_root = tempfile::TempDir::new()?;
+        let config_dir = cache_root.path().join("templates");
+        fs::write(source.path().join("templates.yml"), "version: 5\nlanguages: {}\n")?;
+
+        let manager = TemplateManager { config_dir: config_dir.clone() };
+        manager.download_or_copy_templates(&source.path().to_string_lossy())?;
+        fs::write(source.path().join("templates.yml"), "languages: [broken\n")?;
+
+        assert!(manager.download_or_copy_templates(&source.path().to_string_lossy()).is_err() == true);
+        assert_eq!(fs::read_to_string(config_dir.join("templates.yml"))?, "version: 5\nlanguages: {}\n");
         Ok(())
     }
 

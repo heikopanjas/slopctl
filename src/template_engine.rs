@@ -85,7 +85,9 @@ pub struct ResolvedFile
     /// Agent owners for this file
     pub agent:    Vec<String>,
     /// FileTracker category derived from the templates.yml section this file resolves from
-    pub category: String
+    pub category: String,
+    /// Template system that provides the source; `None` for overlay agent files
+    pub origin:   Option<String>
 }
 
 /// All files, fragments, and directories resolved from templates.yml for a given set of options
@@ -107,6 +109,47 @@ pub struct ResolvedFiles
     _temp_dir:       tempfile::TempDir
 }
 
+/// Collapses entries that copy the same source to the same target, unioning their owners
+///
+/// One skill can be reached from several catalog lists in a single run (e.g. a language and the
+/// top-level `skills`). Only entries with different sources for one target are real conflicts;
+/// preflight still reports those.
+fn merge_identical_entries(files: &mut Vec<ResolvedFile>)
+{
+    let mut index: HashMap<(PathBuf, PathBuf), usize> = HashMap::with_capacity(files.len());
+    let mut merged: Vec<ResolvedFile> = Vec::with_capacity(files.len());
+    for entry in files.drain(..)
+    {
+        match index.get(&(entry.target.clone(), entry.source.clone()))
+        {
+            | Some(&position) =>
+            {
+                let kept = &mut merged[position];
+                for lang in entry.lang
+                {
+                    if kept.lang.contains(&lang) == false
+                    {
+                        kept.lang.push(lang);
+                    }
+                }
+                for agent in entry.agent
+                {
+                    if kept.agent.contains(&agent) == false
+                    {
+                        kept.agent.push(agent);
+                    }
+                }
+            }
+            | None =>
+            {
+                index.insert((entry.target.clone(), entry.source.clone()), merged.len());
+                merged.push(entry);
+            }
+        }
+    }
+    *files = merged;
+}
+
 /// A resolved file's content with provenance metadata for the merge command
 pub struct ResolvedContent
 {
@@ -114,7 +157,9 @@ pub struct ResolvedContent
     pub lang:     Vec<String>,
     pub agent:    Vec<String>,
     /// FileTracker category carried from the resolved file (`"main"` for AGENTS.md)
-    pub category: String
+    pub category: String,
+    /// Template system carried from the resolved file; `None` for AGENTS.md, which merges fragments of every system
+    pub origin:   Option<String>
 }
 
 struct PreflightPlan
@@ -827,7 +872,8 @@ impl<'a> TemplateEngine<'a>
                         target:   target_path,
                         lang:     Self::owner_list(lang, LANG_NONE),
                         agent:    Self::owner_list(agent, AGENT_ALL),
-                        category: Self::tracker_category_for_section(category)
+                        category: Self::tracker_category_for_section(category),
+                        origin:   None
                     });
                 }
             };
@@ -892,7 +938,8 @@ impl<'a> TemplateEngine<'a>
                                 target:   target_path,
                                 lang:     Vec::new(),
                                 agent:    Self::owner_list(agent_name, AGENT_ALL),
-                                category: "agent".to_string()
+                                category: "agent".to_string(),
+                                origin:   None
                             });
                         }
                         else if local_cache_only == true
@@ -1005,7 +1052,8 @@ impl<'a> TemplateEngine<'a>
                         target:   target_path,
                         lang:     Self::owner_list(lang, LANG_NONE),
                         agent:    Self::owner_list(agent, AGENT_ALL),
-                        category: Self::tracker_category_for_section(category)
+                        category: Self::tracker_category_for_section(category),
+                        origin:   None
                     });
                 }
             };
@@ -1079,7 +1127,8 @@ impl<'a> TemplateEngine<'a>
                             target:   target_path,
                             lang:     Vec::new(),
                             agent:    Self::owner_list(agent_name, AGENT_ALL),
-                            category: "agent".to_string()
+                            category: "agent".to_string(),
+                            origin:   None
                         });
                     }
                 }
@@ -1171,6 +1220,11 @@ impl<'a> TemplateEngine<'a>
         }
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+        for entry in &mut files_to_copy
+        {
+            entry.origin = catalogs.origin_of(&entry.source).map(str::to_string);
+        }
+        merge_identical_entries(&mut files_to_copy);
 
         Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create, _temp_dir: temp_dir })
     }
@@ -1200,7 +1254,8 @@ impl<'a> TemplateEngine<'a>
             content:  fresh_main,
             lang:     options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default(),
             agent:    options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default(),
-            category: "main".to_string()
+            category: "main".to_string(),
+            origin:   None
         });
 
         for entry in &resolved.files
@@ -1212,7 +1267,8 @@ impl<'a> TemplateEngine<'a>
                     content,
                     lang: entry.lang.clone(),
                     agent: entry.agent.clone(),
-                    category: entry.category.clone()
+                    category: entry.category.clone(),
+                    origin: entry.origin.clone()
                 });
             }
         }
@@ -1698,6 +1754,7 @@ impl<'a> TemplateEngine<'a>
                     &entry.agent,
                     planned.category.clone()
                 );
+                file_tracker.set_origin(target, entry.origin.as_deref());
             }
         }
 
@@ -1814,7 +1871,8 @@ impl<'a> TemplateEngine<'a>
                             target,
                             lang: Self::owner_list(lang, LANG_NONE),
                             agent: Self::owner_list(agent, AGENT_ALL),
-                            category: "skill".to_string()
+                            category: "skill".to_string(),
+                            origin: None
                         });
                     }
                 }
@@ -1855,7 +1913,8 @@ impl<'a> TemplateEngine<'a>
                     target:   target_base.join(filename),
                     lang:     Self::owner_list(lang, LANG_NONE),
                     agent:    Self::owner_list(agent, AGENT_ALL),
-                    category: "skill".to_string()
+                    category: "skill".to_string(),
+                    origin:   None
                 });
             }
         }
@@ -1887,7 +1946,8 @@ mod tests
             target:   PathBuf::from(target),
             lang:     Vec::new(),
             agent:    Vec::new(),
-            category: "language".to_string()
+            category: "language".to_string(),
+            origin:   None
         }
     }
 
@@ -2869,7 +2929,7 @@ languages:
         fs::write(&source, "# Skill")?;
         let source_sha = FileTracker::calculate_sha256(&source)?;
 
-        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new(), category: "skill".to_string() }];
+        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new(), category: "skill".to_string(), origin: None }];
         let plan = PreflightPlan {
             files: vec![PlannedFileAction {
                 index:      0,
