@@ -132,10 +132,15 @@ pub struct TemplateConfig
 {
     #[serde(default = "default_version")]
     pub version:     u32,
+    /// Template system id; required for layers, optional for the baseline (see `template_layer`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id:          Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub main:        Option<MainConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub agents:      HashMap<String, AgentConfig>,
+    // Defaulted so a layer may ship only skills or agents.
+    #[serde(default)]
     pub languages:   HashMap<String, LanguageConfig>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub shared:      HashMap<String, SharedConfig>,
@@ -538,6 +543,7 @@ mod tests
     {
         TemplateConfig {
             version:     5,
+            id:          None,
             main:        None,
             agents:      HashMap::new(),
             languages:   HashMap::new(),

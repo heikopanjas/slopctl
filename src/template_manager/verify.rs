@@ -7,13 +7,16 @@ use std::{
 
 use owo_colors::OwoColorize;
 
-use super::TemplateManager;
+use super::{CatalogSource, TemplateManager};
 use crate::{
     Result,
-    agent_overlay::{EffectiveCatalogs, load_effective_catalogs},
+    agent_overlay::{EffectiveCatalogs, configured_layers, load_effective_catalogs},
     bom::{self, TemplateConfig},
+    config::LayerSpec,
+    git,
     github::{download_file, is_github_url, is_url, parse_github_url},
-    template_engine::load_template_config
+    template_engine::load_template_config,
+    template_layer::{self, SourceManifest}
 };
 
 impl TemplateManager
@@ -23,6 +26,7 @@ impl TemplateManager
     /// Runs four sequential checks and prints results:
     /// - **C – YAML structure**: parses `templates.yml`, validates version and required fields
     /// - **A – Local file integrity**: every source file/directory declared in `templates.yml` must exist in the local template cache
+    /// - **L – Template layers**: per configured layer, cache state, structure, file integrity and freshness, plus the override report
     /// - **D – Agent catalogs**: every agent must be in both `templates.yml` and `agent-defaults.yml`; overlay agents are listed and their sources and targets checked
     /// - **B – Source freshness**: downloads (or reads) `templates.yml` from the configured source and compares its content with the local copy
     ///
@@ -37,6 +41,16 @@ impl TemplateManager
     /// Returns an error summarising the number of issues found, or an I/O error if a
     /// critical operation fails before verification can complete.
     pub fn verify(&self, source: &str) -> Result<()>
+    {
+        self.verify_from(&CatalogSource::uri(source))
+    }
+
+    /// [`Self::verify`] against a source with optional git `ref` and subdirectory `path`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error summarising the number of issues found
+    pub fn verify_from(&self, source: &CatalogSource) -> Result<()>
     {
         let mut issues: Vec<String> = Vec::new();
 
@@ -53,8 +67,11 @@ impl TemplateManager
         // Section A: Local file integrity (only possible when YAML parsed successfully)
         if let Some(ref cfg) = config
         {
-            self.verify_local_integrity(cfg, &mut issues);
+            self.verify_local_integrity(cfg, &self.config_dir, &mut issues);
         }
+
+        // Section L: Template layers, each checked against its own cache
+        self.verify_layers(config.as_ref().map(|c| c.version), &mut issues);
 
         // Section D: Agent catalogs, including user overlays
         self.verify_agent_catalogs(config.as_ref(), &mut issues);
@@ -135,32 +152,13 @@ impl TemplateManager
             }
         }
 
-        // One source per skill name; agent-specific variants are only reported
-        let conflicts = crate::bom::skill_source_conflicts(&config);
-        if conflicts.is_empty() == true
-        {
-            println!("  {} no conflicting skill sources", "✓".green());
-        }
-        for conflict in &conflicts
-        {
-            let definitions: Vec<String> = conflict.definitions.iter().map(|(location, source)| format!("'{}' ({})", source, location)).collect();
-            if conflict.agent_variants == true
-            {
-                println!("  {} skill '{}' has agent-specific variants: {}", "!".yellow(), conflict.name, definitions.join(", "));
-            }
-            else
-            {
-                let msg = format!("skill '{}' has different sources: {}", conflict.name, definitions.join(", "));
-                println!("  {} {}", "✗".red(), msg);
-                issues.push(msg);
-            }
-        }
+        report_skill_conflicts(&config, issues);
 
         Some(config)
     }
 
     /// Section A: verify that every non-URL source file/dir exists in the local template cache
-    fn verify_local_integrity(&self, config: &TemplateConfig, issues: &mut Vec<String>)
+    fn verify_local_integrity(&self, config: &TemplateConfig, dir: &Path, issues: &mut Vec<String>)
     {
         println!("{} Local file integrity", "→".blue());
 
@@ -170,7 +168,7 @@ impl TemplateManager
         // main source
         if let Some(main) = &config.main
         {
-            check_source_file(&self.config_dir, &main.source, &mut checked, &mut local_issues);
+            check_source_file(dir, &main.source, &mut checked, &mut local_issues);
         }
 
         // agent instructions and prompts
@@ -181,15 +179,15 @@ impl TemplateManager
             let agent_cfg = &config.agents[agent];
             for mapping in &agent_cfg.instructions
             {
-                check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+                check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
             }
             for mapping in &agent_cfg.prompts
             {
-                check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+                check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
             }
             for skill in &agent_cfg.skills
             {
-                check_source_skill(&self.config_dir, &skill.source, &mut checked, &mut local_issues);
+                check_source_skill(dir, &skill.source, &mut checked, &mut local_issues);
             }
         }
 
@@ -201,11 +199,11 @@ impl TemplateManager
             let lang_cfg = &config.languages[lang];
             for mapping in &lang_cfg.files
             {
-                check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+                check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
             }
             for skill in &lang_cfg.skills
             {
-                check_source_skill(&self.config_dir, &skill.source, &mut checked, &mut local_issues);
+                check_source_skill(dir, &skill.source, &mut checked, &mut local_issues);
             }
         }
 
@@ -217,11 +215,11 @@ impl TemplateManager
             let shared_cfg = &config.shared[group];
             for mapping in &shared_cfg.files
             {
-                check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+                check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
             }
             for skill in &shared_cfg.skills
             {
-                check_source_skill(&self.config_dir, &skill.source, &mut checked, &mut local_issues);
+                check_source_skill(dir, &skill.source, &mut checked, &mut local_issues);
             }
         }
 
@@ -232,20 +230,20 @@ impl TemplateManager
         {
             for mapping in &config.integration[int_key].files
             {
-                check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+                check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
             }
         }
 
         // top-level skills
         for skill in &config.skills
         {
-            check_source_skill(&self.config_dir, &skill.source, &mut checked, &mut local_issues);
+            check_source_skill(dir, &skill.source, &mut checked, &mut local_issues);
         }
 
         // preamble, principles, and mission fragments
         for mapping in config.preamble.iter().chain(config.principles.iter()).chain(config.mission.iter())
         {
-            check_source_file(&self.config_dir, &mapping.source, &mut checked, &mut local_issues);
+            check_source_file(dir, &mapping.source, &mut checked, &mut local_issues);
         }
 
         if local_issues.is_empty() == true
@@ -304,14 +302,134 @@ impl TemplateManager
     }
 
     /// Section B: compare local `templates.yml` content with the remote/configured source
-    fn verify_source_freshness(&self, source: &str, issues: &mut Vec<String>)
+    fn verify_source_freshness(&self, source: &CatalogSource, issues: &mut Vec<String>)
     {
         println!("{} Source freshness", "→".blue());
+        check_freshness(source, &self.config_dir, issues);
+    }
 
-        let local_path = self.config_dir.join("templates.yml");
-        let local_content = match fs::read_to_string(&local_path)
+    /// Section L: verify every configured template layer and the merged result
+    fn verify_layers(&self, baseline_version: Option<u32>, issues: &mut Vec<String>)
+    {
+        let layers = match std::env::current_dir().map_err(anyhow::Error::from).and_then(|workspace| configured_layers(&workspace))
         {
-            | Ok(c) => c,
+            | Ok(layers) => layers,
+            | Err(e) =>
+            {
+                let msg = format!("template layer configuration: {}", e);
+                println!("{} Template layers\n  {} {}", "→".blue(), "✗".red(), msg);
+                issues.push(msg);
+                return;
+            }
+        };
+
+        for (spec, scope) in &layers
+        {
+            println!("{} Template layer '{}' ({}, {})", "→".blue(), spec.id.green(), scope, spec.uri);
+            let dir = template_layer::layer_cache_dir(&self.config_dir, &spec.id);
+            let unusable = match SourceManifest::read(&dir)
+            {
+                | Ok(Some(manifest)) if manifest.matches(spec) == true =>
+                {
+                    self.verify_layer_cache(spec, &dir, &manifest, baseline_version, issues);
+                    None
+                }
+                | Ok(Some(_)) => Some(format!("layer '{}' configuration changed since it was fetched - run: slopctl templates --update", spec.id)),
+                | Ok(None) => Some(format!("layer '{}' has not been fetched - run: slopctl templates --update", spec.id)),
+                | Err(e) => Some(format!("layer '{}': {}", spec.id, e))
+            };
+            if let Some(msg) = unusable
+            {
+                println!("  {} {}", "✗".red(), msg);
+                issues.push(msg);
+            }
+        }
+
+        if layers.is_empty() == false &&
+            let Ok(catalogs) = std::env::current_dir().map_err(anyhow::Error::from).and_then(|workspace| load_effective_catalogs(&self.config_dir, &workspace))
+        {
+            println!("{} Template layer overrides", "→".blue());
+            if catalogs.systems.overrides.is_empty() == true
+            {
+                println!("  {} no baseline items overridden", "✓".green());
+            }
+            for item in &catalogs.systems.overrides
+            {
+                println!("  {} {} from '{}' replaces '{}'", "→".blue(), item.item, item.winner, item.shadowed);
+            }
+        }
+    }
+
+    /// Checks a fetched layer cache: catalog structure, file integrity and freshness
+    fn verify_layer_cache(&self, spec: &LayerSpec, dir: &Path, manifest: &SourceManifest, baseline_version: Option<u32>, issues: &mut Vec<String>)
+    {
+        let config = match load_template_config(dir)
+        {
+            | Ok(config) => config,
+            | Err(e) =>
+            {
+                let msg = format!("layer '{}' templates.yml: {}", spec.id, e);
+                println!("  {} {}", "✗".red(), msg);
+                issues.push(msg);
+                return;
+            }
+        };
+
+        let mut structure: Vec<String> = Vec::new();
+        if config.id.as_deref() != Some(spec.id.as_str())
+        {
+            structure.push(format!("layer '{}' templates.yml must declare 'id: {}'", spec.id, spec.id));
+        }
+        if let Some(version) = baseline_version &&
+            version != config.version
+        {
+            structure.push(format!("layer '{}' uses templates.yml version {}, the baseline uses {}", spec.id, config.version, version));
+        }
+        structure.extend(collect_duplicate_target_issues(&config, dir));
+        structure.extend(
+            url_skill_sources(&config)
+                .into_iter()
+                .filter(|source| manifest.url_skills.contains_key(*source) == false)
+                .map(|source| format!("layer '{}' skill '{}' is not cached - run: slopctl templates --update", spec.id, source))
+        );
+        if structure.is_empty() == true
+        {
+            println!("  {} id, version and targets valid", "✓".green());
+        }
+        for msg in &structure
+        {
+            println!("  {} {}", "✗".red(), msg);
+        }
+        issues.extend(structure);
+
+        report_skill_conflicts(&config, issues);
+        self.verify_local_integrity(&config, dir, issues);
+        check_freshness(&CatalogSource::layer(spec), dir, issues);
+    }
+}
+
+/// Compares a cached catalog with its source and records a stale cache as an issue
+///
+/// Git sources compare the cached commit with the remote ref (`git ls-remote`); other sources
+/// compare `templates.yml` byte for byte. An unreachable source is only a warning (the network
+/// may be unavailable).
+fn check_freshness(source: &CatalogSource, dir: &Path, issues: &mut Vec<String>)
+{
+    let fresh = if git::is_git_url(source.uri) == true
+    {
+        let cached = SourceManifest::read(dir).ok().flatten().and_then(|manifest| manifest.commit);
+        git::remote_commit(source.uri, source.git_ref).map(|remote| cached.as_deref() == Some(remote.as_str()))
+    }
+    else
+    {
+        let remote_root = match source.path
+        {
+            | Some(path) if is_url(source.uri) == false => Path::new(source.uri).join(path).to_string_lossy().into_owned(),
+            | _ => source.uri.to_string()
+        };
+        match fs::read_to_string(dir.join("templates.yml"))
+        {
+            | Ok(local) => fetch_remote_templates_yml(&remote_root).map(|remote| remote == local),
             | Err(e) =>
             {
                 let msg = format!("cannot read local templates.yml: {}", e);
@@ -319,27 +437,55 @@ impl TemplateManager
                 issues.push(msg);
                 return;
             }
-        };
+        }
+    };
 
-        let remote_content = match fetch_remote_templates_yml(source)
+    match fresh
+    {
+        | Ok(true) => println!("  {} local templates match source", "✓".green()),
+        | Ok(false) =>
         {
-            | Ok(c) => c,
-            | Err(e) =>
-            {
-                println!("  {} could not fetch source: {}", "!".yellow(), e);
-                // Treat as a warning, not a hard issue (network may be unavailable)
-                return;
-            }
-        };
+            let msg = format!("local templates differ from source {}", source.uri);
+            println!("  {} {} — run: slopctl templates --update", "!".yellow(), msg);
+            issues.push(msg);
+        }
+        | Err(e) => println!("  {} could not fetch source: {}", "!".yellow(), e)
+    }
+}
 
-        if local_content == remote_content
+/// URL-based skill sources of a catalog, deduplicated
+fn url_skill_sources(config: &TemplateConfig) -> std::collections::BTreeSet<&str>
+{
+    config
+        .skills
+        .iter()
+        .chain(config.agents.values().flat_map(|agent| &agent.skills))
+        .chain(config.languages.values().flat_map(|lang| &lang.skills))
+        .chain(config.shared.values().flat_map(|group| &group.skills))
+        .map(|skill| skill.source.as_str())
+        .filter(|source| is_url(source) == true)
+        .collect()
+}
+
+/// Reports skill names with several sources: conflicts in shared lists are issues, agent variants warnings
+fn report_skill_conflicts(config: &TemplateConfig, issues: &mut Vec<String>)
+{
+    let conflicts = bom::skill_source_conflicts(config);
+    if conflicts.is_empty() == true
+    {
+        println!("  {} no conflicting skill sources", "✓".green());
+    }
+    for conflict in &conflicts
+    {
+        let definitions: Vec<String> = conflict.definitions.iter().map(|(location, source)| format!("'{}' ({})", source, location)).collect();
+        if conflict.agent_variants == true
         {
-            println!("  {} local templates match source", "✓".green());
+            println!("  {} skill '{}' has agent-specific variants: {}", "!".yellow(), conflict.name, definitions.join(", "));
         }
         else
         {
-            let msg = "local templates differ from source".to_string();
-            println!("  {} {} — run: slopctl templates --update", "!".yellow(), msg);
+            let msg = format!("skill '{}' has different sources: {}", conflict.name, definitions.join(", "));
+            println!("  {} {}", "✗".red(), msg);
             issues.push(msg);
         }
     }
@@ -628,7 +774,7 @@ mod tests
         let config = crate::template_engine::load_template_config(data_dir.path())?;
         let mut issues: Vec<String> = Vec::new();
 
-        manager.verify_local_integrity(&config, &mut issues);
+        manager.verify_local_integrity(&config, &manager.config_dir.clone(), &mut issues);
 
         assert!(issues.is_empty() == true, "unexpected issues: {:?}", issues);
         Ok(())
@@ -647,7 +793,7 @@ mod tests
         let config = crate::template_engine::load_template_config(data_dir.path())?;
         let mut issues: Vec<String> = Vec::new();
 
-        manager.verify_local_integrity(&config, &mut issues);
+        manager.verify_local_integrity(&config, &manager.config_dir.clone(), &mut issues);
 
         assert!(issues.iter().any(|i| i.contains("AGENTS.md") && i.contains("missing")) == true);
         Ok(())
@@ -666,7 +812,7 @@ mod tests
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let mut issues: Vec<String> = Vec::new();
 
-        manager.verify_source_freshness(source_dir.path().to_str().unwrap(), &mut issues);
+        manager.verify_source_freshness(&CatalogSource::uri(source_dir.path().to_str().unwrap()), &mut issues);
 
         assert!(issues.is_empty() == true, "unexpected freshness issues: {:?}", issues);
         Ok(())
@@ -684,7 +830,7 @@ mod tests
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         let mut issues: Vec<String> = Vec::new();
 
-        manager.verify_source_freshness(source_dir.path().to_str().unwrap(), &mut issues);
+        manager.verify_source_freshness(&CatalogSource::uri(source_dir.path().to_str().unwrap()), &mut issues);
 
         assert!(issues.iter().any(|i| i.contains("differ from source")) == true);
         Ok(())

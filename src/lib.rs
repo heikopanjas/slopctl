@@ -34,20 +34,22 @@ pub mod cli;
 mod config;
 mod download_manager;
 mod file_tracker;
+mod git;
 pub mod github;
 pub mod llm;
 pub mod model_defaults;
 mod template_engine;
+mod template_layer;
 mod template_manager;
 mod utils;
 
 pub use anyhow::Result;
 pub use bom::BillOfMaterials;
-pub use config::{Config, ConfigScope, EffectiveConfig};
+pub use config::{BaselineSource, Config, ConfigScope, EffectiveConfig};
 pub use download_manager::DownloadManager;
 pub use file_tracker::{AGENT_ALL, FileMetadata, FileStatus, FileTracker, LANG_NONE, SLOPCTL_DIR, legacy_tracker_path};
 pub use template_engine::{PartialSelectors, ResolvedContent, ResolvedFile, ResolvedFiles, TemplateContext, TemplateEngine, UpdateOptions, normalize_path};
-pub use template_manager::{MergeOptions, TemplateManager};
+pub use template_manager::{CatalogSource, MergeOptions, TemplateManager};
 pub use utils::{
     FileActionResponse, collect_files_recursive, confirm_action, copy_dir_all, copy_file_with_mkdir, prompt_file_modification, remove_file_and_cleanup_parents
 };

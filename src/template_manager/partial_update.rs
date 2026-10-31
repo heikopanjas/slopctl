@@ -240,6 +240,7 @@ impl TemplateManager
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
             file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
+            file_tracker.set_origin(target, entry.origin.as_deref());
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale
@@ -330,6 +331,7 @@ impl TemplateManager
         let mut changelog_skipped: Vec<String> = Vec::new();
         let mut agent_skipped: BTreeMap<String, usize> = BTreeMap::new();
         let mut up_to_date = 0usize;
+        let mut origin_switches: Vec<String> = Vec::new();
         for (target, entry) in &candidates
         {
             if target.exists() == false
@@ -364,11 +366,13 @@ impl TemplateManager
                         }
                         else
                         {
+                            origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
                             to_refresh.push((target, entry));
                         }
                     }
                     | FileStatus::Modified | FileStatus::NotTracked =>
                     {
+                        origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
                         if force == true
                         {
                             to_refresh.push((target, entry));
@@ -397,6 +401,10 @@ impl TemplateManager
         }
 
         let agent_skipped_total: usize = agent_skipped.values().sum();
+        for switch in &origin_switches
+        {
+            println!("{} {}", "→".blue(), switch);
+        }
 
         if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
         {
@@ -454,6 +462,7 @@ impl TemplateManager
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
             file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
+            file_tracker.set_origin(target, entry.origin.as_deref());
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale_to_remove
@@ -651,6 +660,18 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
     stale.sort();
     stale.dedup();
     stale
+}
+
+/// Describes a tracked file whose providing template system changed since it was installed
+///
+/// Happens when a layer is added, removed or reordered. Legacy entries without a recorded origin
+/// are not reported; the refresh records their origin.
+fn describe_origin_switch(tracker: &FileTracker, target: &Path, entry: &ResolvedFile, workspace: &Path) -> Option<String>
+{
+    let previous = tracker.get_metadata(target)?.origin.as_deref()?;
+    let current = entry.origin.as_deref()?;
+    require!(previous != current, None);
+    Some(format!("{}: now from template system '{}' (was '{}')", display_path(target, workspace), current, previous))
 }
 
 /// Renders a target path relative to the workspace for display

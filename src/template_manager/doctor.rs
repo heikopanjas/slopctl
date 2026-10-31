@@ -26,8 +26,9 @@ enum IssueKind
     UnmergedTemplate,
     /// File exists but was modified by the user since installation (informational)
     ModifiedFile,
-    /// File is tracked and present, but the current catalog no longer provides it (informational)
-    OrphanedFile
+    /// File is tracked and present, but the current catalog no longer provides it (informational);
+    /// carries the recorded template system when that system is not configured here
+    OrphanedFile(Option<String>)
 }
 
 /// A single detected issue in the workspace
@@ -64,7 +65,7 @@ impl TemplateManager
         let mut tracker = FileTracker::new(&workspace)?;
 
         let mut issues = Self::collect_issues(&tracker, &workspace, verbose)?;
-        issues.extend(self.collect_orphans(&tracker, &workspace).into_iter().map(|path| DoctorIssue { kind: IssueKind::OrphanedFile, path }));
+        issues.extend(self.collect_orphans(&tracker, &workspace).into_iter().map(|(path, origin)| DoctorIssue { kind: IssueKind::OrphanedFile(origin), path }));
 
         if issues.is_empty() == true
         {
@@ -79,7 +80,7 @@ impl TemplateManager
             for issue in &issues
             {
                 let rel = issue.path.strip_prefix(&workspace).unwrap_or(&issue.path);
-                match issue.kind
+                match &issue.kind
                 {
                     | IssueKind::MissingFile =>
                     {
@@ -93,15 +94,14 @@ impl TemplateManager
                     {
                         println!("  {} {} {} {}", "!".yellow(), "Modified:".yellow(), rel.display().to_string().yellow(), "(changed since install)".dimmed());
                     }
-                    | IssueKind::OrphanedFile =>
+                    | IssueKind::OrphanedFile(origin) =>
                     {
-                        println!(
-                            "  {} {} {} {}",
-                            "!".yellow(),
-                            "Orphaned:".yellow(),
-                            rel.display().to_string().yellow(),
-                            "(no longer provided by the templates)".dimmed()
-                        );
+                        let note = match origin
+                        {
+                            | Some(origin) => format!("(from template system '{}', which is not configured here)", origin),
+                            | None => "(no longer provided by the templates)".to_string()
+                        };
+                        println!("  {} {} {} {}", "!".yellow(), "Orphaned:".yellow(), rel.display().to_string().yellow(), note.dimmed());
                     }
                 }
             }
@@ -109,7 +109,7 @@ impl TemplateManager
             let missing_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::MissingFile)).count();
             let unmerged_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::UnmergedTemplate)).count();
             let modified_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::ModifiedFile)).count();
-            let orphaned_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::OrphanedFile)).count();
+            let orphaned_count = issues.iter().filter(|i| matches!(i.kind, IssueKind::OrphanedFile(_))).count();
 
             println!();
 
@@ -164,7 +164,7 @@ impl TemplateManager
             if orphaned_count > 0
             {
                 println!(
-                    "  {} {} orphaned file{} (remove with 'slopctl remove --lang' or '--agent', or delete manually)",
+                    "  {} {} orphaned file{} (remove with 'slopctl remove --source <id>', '--lang' or '--agent', or delete manually)",
                     "!".yellow(),
                     orphaned_count,
                     if orphaned_count == 1
@@ -296,7 +296,7 @@ impl TemplateManager
                 {
                     for issue in &smart_issues
                     {
-                        match issue.kind
+                        match &issue.kind
                         {
                             | SmartIssueKind::Contradiction =>
                             {
@@ -329,15 +329,20 @@ impl TemplateManager
     /// catalog: `update` deliberately leaves such files alone and `remove` owns their cleanup, so
     /// doctor is where they surface. Main files are excluded (AGENTS.md is always provided). The
     /// check is skipped when no template cache exists or the catalog cannot be resolved.
-    pub(super) fn collect_orphans(&self, tracker: &FileTracker, workspace: &Path) -> Vec<PathBuf>
+    ///
+    /// Each orphan carries its recorded template system id when that system is not part of the
+    /// effective catalog, e.g. a teammate's private layer.
+    pub(super) fn collect_orphans(&self, tracker: &FileTracker, workspace: &Path) -> Vec<(PathBuf, Option<String>)>
     {
         require!(self.has_global_templates() == true, Vec::new());
 
-        let resolved = load_effective_catalogs(&self.config_dir, workspace)
-            .and_then(|catalogs| self.resolve_workspace_sets(&catalogs, tracker, workspace, None, None, false, true));
-        let sets = match resolved
+        let resolved = load_effective_catalogs(&self.config_dir, workspace).and_then(|catalogs| {
+            let sets = self.resolve_workspace_sets(&catalogs, tracker, workspace, None, None, false, true)?;
+            Ok((catalogs, sets))
+        });
+        let (catalogs, sets) = match resolved
         {
-            | Ok(sets) => sets,
+            | Ok(resolved) => resolved,
             | Err(e) =>
             {
                 println!("{} Skipping template catalog check: {}", "!".yellow(), e);
@@ -346,12 +351,13 @@ impl TemplateManager
         };
         let provided: HashSet<PathBuf> = sets.iter().flat_map(|set| set.files.iter().map(|entry| normalize_path(&entry.target))).collect();
 
-        let mut orphans: Vec<PathBuf> = tracker
+        let mut orphans: Vec<(PathBuf, Option<String>)> = tracker
             .get_entries()
             .into_iter()
             .filter(|(_, metadata)| metadata.category != "main")
-            .map(|(rel_path, _)| normalize_path(&workspace.join(rel_path)))
-            .filter(|path| path.exists() == true && provided.contains(path) == false)
+            .map(|(rel_path, metadata)| (normalize_path(&workspace.join(rel_path)), metadata.origin.clone()))
+            .filter(|(path, _)| path.exists() == true && provided.contains(path) == false)
+            .map(|(path, origin)| (path, origin.filter(|id| catalogs.systems.contains(id) == false)))
             .collect();
         orphans.sort();
         orphans

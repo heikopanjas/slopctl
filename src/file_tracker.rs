@@ -29,7 +29,11 @@ pub struct FileMetadata
     pub agent:            Vec<String>,
     #[serde(default)]
     pub ref_count:        usize,
-    pub category:         String
+    pub category:         String,
+    /// Id of the template system that provided the installed content; `None` for legacy entries,
+    /// AGENTS.md (which merges every system) and overlay agent files
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin:           Option<String>
 }
 
 impl FileMetadata
@@ -327,7 +331,8 @@ impl FileTracker
         }
         else
         {
-            let mut metadata = FileMetadata { original_sha, template_version, installed_date: now, lang: Vec::new(), agent: Vec::new(), ref_count: 0, category };
+            let mut metadata =
+                FileMetadata { original_sha, template_version, installed_date: now, lang: Vec::new(), agent: Vec::new(), ref_count: 0, category, origin: None };
             for lang in langs
             {
                 metadata.add_lang(lang);
@@ -660,7 +665,8 @@ impl FileTracker
             lang:             Vec::new(),
             agent:            Vec::new(),
             ref_count:        0,
-            category:         category.to_string()
+            category:         category.to_string(),
+            origin:           None
         };
         metadata.add_lang(lang);
         metadata.add_agent(agent);
@@ -668,6 +674,18 @@ impl FileTracker
         self.metadata.insert(key, metadata);
 
         Ok(1)
+    }
+
+    /// Records which template system provided a tracked file
+    ///
+    /// Does nothing for untracked files; call after recording the installation.
+    pub fn set_origin(&mut self, file_path: &Path, origin: Option<&str>)
+    {
+        let relative_key = self.to_relative_key(file_path);
+        if let Some(metadata) = self.metadata.get_mut(&relative_key)
+        {
+            metadata.origin = origin.map(str::to_string);
+        }
     }
 
     /// Save metadata to disk
@@ -756,7 +774,8 @@ impl FileTracker
                     lang:             Vec::new(),
                     agent:            Vec::new(),
                     ref_count:        0,
-                    category:         legacy.category.clone()
+                    category:         legacy.category.clone(),
+                    origin:           None
                 };
                 if let Some(lang) = &legacy.lang
                 {

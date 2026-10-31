@@ -36,7 +36,13 @@ enum FileClass
     /// File does not exist on disk; write template content directly
     New
     {
-        target: PathBuf, content: String, lang: Vec<String>, agent: Vec<String>, category: String, display: String
+        target:   PathBuf,
+        content:  String,
+        lang:     Vec<String>,
+        agent:    Vec<String>,
+        category: String,
+        origin:   Option<String>,
+        display:  String
     },
     /// File exists and content matches template; skip
     Unchanged
@@ -55,6 +61,7 @@ enum FileClass
         lang:             Vec<String>,
         agent:            Vec<String>,
         category:         String,
+        origin:           Option<String>,
         display:          String,
         /// True when this file is the main AGENTS.md; enables skill-aware merging
         is_main:          bool
@@ -189,7 +196,7 @@ impl TemplateManager
         {
             match entry
             {
-                | FileClass::New { target, content, lang, agent, category, display } =>
+                | FileClass::New { target, content, lang, agent, category, origin, display } =>
                 {
                     if dry_run == true
                     {
@@ -206,6 +213,7 @@ impl TemplateManager
 
                         let sha = FileTracker::calculate_sha256(target)?;
                         file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
+                        file_tracker.set_origin(target, origin.as_deref());
                     }
                 }
                 | FileClass::Unchanged { display } =>
@@ -215,7 +223,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, display, is_main } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, origin, display, is_main } =>
                 {
                     if dry_run == true
                     {
@@ -352,6 +360,7 @@ impl TemplateManager
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
                                     file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
+                                    file_tracker.set_origin(target, origin.as_deref());
                                 }
                             }
                         }
@@ -481,6 +490,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
                 category: resolved.category.clone(),
+                origin: resolved.origin.clone(),
                 display
             });
         }
@@ -506,6 +516,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                         lang: resolved.lang.clone(),
                         agent: resolved.agent.clone(),
                         category: resolved.category.clone(),
+                        origin: resolved.origin.clone(),
                         display,
                         is_main
                     });
@@ -521,6 +532,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                     lang: resolved.lang.clone(),
                     agent: resolved.agent.clone(),
                     category: resolved.category.clone(),
+                    origin: resolved.origin.clone(),
                     display,
                     is_main
                 });
@@ -536,6 +548,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 lang: resolved.lang.clone(),
                 agent: resolved.agent.clone(),
                 category: resolved.category.clone(),
+                origin: resolved.origin.clone(),
                 display,
                 is_main
             });
@@ -733,7 +746,7 @@ mod tests
 
     fn rc(content: &str) -> ResolvedContent
     {
-        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() }
+        ResolvedContent { content: content.to_string(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string(), origin: None }
     }
 
     /// Synthetic model catalog covering the real `Provider` enum's supported
@@ -1046,9 +1059,9 @@ providers:
         let file_b = workspace.join("bravo.md");
 
         let mut map = HashMap::new();
-        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
-        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
-        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string() });
+        map.insert(file_c, ResolvedContent { content: "c".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string(), origin: None });
+        map.insert(file_a, ResolvedContent { content: "a".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string(), origin: None });
+        map.insert(file_b, ResolvedContent { content: "b".into(), lang: Vec::new(), agent: Vec::new(), category: "language".to_string(), origin: None });
 
         let classified = classify_files(&map, workspace);
         let displays: Vec<&str> = classified

@@ -23,6 +23,7 @@ slopctl is a command-line tool that helps you:
 - **agents.md standard** – Follow the [agents.md](https://agents.md) community standard (single AGENTS.md for all agents)
 - **Agent Skills support** – Define and install [Agent Skills](https://agentskills.io) (SKILL.md) from templates; local directories and full GitHub URLs are supported in `templates.yml`
 - **Custom agents without forking** – Add your own agent with a small `agent.yml` overlay in the workspace or your global config ([example](#example-add-an-agent-called-acme))
+- **Layered template systems** – Stack your own or private template systems (local folders, public or private git repos) on a baseline catalog; every installed file records which system it came from ([details](#adding-template-systems-layers))
 - **Keep catalogs synchronized** – Update global templates and agent defaults from remote sources
 - **AI-assisted merge** – Merge customized files with updated templates using LLM providers (OpenAI, Anthropic, Ollama, Mistral)
 - **Append-only decision log** – `UPDATES.md` keeps the "Recent Updates & Decisions" history below a changelog marker that init, update, and merge never overwrite
@@ -417,14 +418,16 @@ slopctl templates --update --verify --list
 - Overwrites existing global templates with new versions
 - `--verify` also cross-checks `templates.yml` against `agent-defaults.yml` (an agent must be in both) and checks [overlay agents](#adding-a-custom-agent)
 - Does NOT modify any files in the current project directory
-- **`--verify` checks three things in sequence:**
+- **`--verify` checks these things in sequence:**
   - **YAML structure** – parses `templates.yml`, checks version, checks for duplicate targets, and checks that each skill name has one source across top-level, language and shared skills (agent-specific variants are reported as warnings)
   - **Local file integrity** – every non-URL `source` file referenced in `templates.yml` must exist in the local cache
+  - **Template layers** – per configured layer: fetched and in sync with its config, id and version match, file integrity, and freshness (git layers compare the fetched commit with the remote); then every baseline item a layer overrides is listed
+  - **Agent catalogs** – every agent is known to both `templates.yml` and `agent-defaults.yml`; overlay agents are checked
   - **Source freshness** – fetches `templates.yml` from the configured source and compares it with the local copy; a mismatch recommends `slopctl templates --update`
 
 **Note:** Run `templates --update` first to download templates before using `init` to set up a project.
 
-**GitHub rate limits:** slopctl does not use GitHub authentication tokens. Unauthenticated access is subject to GitHub limits (~60 REST API requests/hour per IP, plus throttling on `raw.githubusercontent.com`). During `templates --update`, URL-based skill repositories are fetched with **one tarball download per repository** instead of recursive Contents API listing. HTTP 429/503 responses are retried with backoff. If limits are still exceeded, wait and retry `slopctl templates --update`. Use `update` to refresh workspace files from the local cache without additional network calls.
+**GitHub rate limits:** slopctl does not use GitHub authentication tokens. Unauthenticated access is subject to GitHub limits (~60 REST API requests/hour per IP, plus throttling on `raw.githubusercontent.com`). During `templates --update`, URL-based skill repositories (of the baseline and of every layer, whatever their source kind) are fetched with **one tarball download per repository** instead of recursive Contents API listing. HTTP 429/503 responses are retried with backoff. If limits are still exceeded, wait and retry `slopctl templates --update`. Use `update` to refresh workspace files from the local cache without additional network calls.
 
 ### `agents` - Manage Global Agent Defaults Catalog
 
@@ -541,12 +544,16 @@ slopctl remove --all [--force] [--dry-run]
 
 # Remove everything including AGENTS.md (full purge)
 slopctl remove --purge [--force] [--dry-run]
+
+# Remove every file a template system (e.g. a layer) provided
+slopctl remove --source <id> [--force] [--dry-run]
 ```
 
 **Options:**
 
 - `--agent <string>` - AI coding agent (e.g., claude, copilot, codex, cursor)
 - `--lang <string>` - Language to remove disk files and language-associated skills for (e.g., rust, c++, shell, swift). Skips `$instructions` fragments (merged into AGENTS.md) and `$userprofile` paths unless tracked in the workspace.
+- `--source <id>` - Remove every tracked file whose recorded template system is `<id>` (see [Adding Template Systems](#adding-template-systems-layers)); AGENTS.md and changelog-marker files are kept. Mutually exclusive with the other selectors.
 - `--all` - Remove all agent-specific files and skills (keeps AGENTS.md). Mutually exclusive with `--agent`, `--lang`, and `--purge`.
 - `--purge` - Remove all slopctl files including AGENTS.md (full cleanup). Mutually exclusive with `--agent`, `--lang`, and `--all`.
 - `--force` - Force removal without confirmation; combined with `--purge`, also overrides the customized-AGENTS.md preservation guard.
@@ -880,7 +887,7 @@ slopctl config --global --delete <k>  # Delete from global configuration
 
 Configuration keys follow the convention `<command>.<parameter>`, e.g. `templates.uri` configures the `templates` command and `merge.provider` configures the `merge` command.
 
-`templates.uri`, `templates.fallbackUri`, `agents.uri`, and `agents.fallbackUri` accept either a remote URL or a local filesystem path, so the same key works for `https://github.com/...` sources and local catalog directories.
+`templates.uri`, `templates.fallbackUri`, `agents.uri`, and `agents.fallbackUri` accept either a remote URL or a local filesystem path, so the same key works for `https://github.com/...` sources and local catalog directories. `templates.uri` and template layers also accept git URLs (see [Adding Template Systems](#adding-template-systems-layers)).
 
 **Examples:**
 
@@ -906,11 +913,23 @@ slopctl config --delete templates.uri
 # Delete from global config
 slopctl config --global --delete templates.uri
 
+# Use a git repository as the baseline (cloned with your git, so private repos work)
+slopctl config --global --set templates.uri git@github.com:heikopanjas/slopctl-templates.git
+slopctl config --global --set templates.path templates
+slopctl config --global --set templates.ref develop
+
 # Set fallback source for resilience (global)
 slopctl config --global --set templates.fallbackUri https://github.com/heikopanjas/slopctl-templates/tree/develop/templates
 
 # Set an independent agent defaults source
 slopctl config --global --set agents.uri https://github.com/myteam/templates/tree/main/defaults
+
+# Add a private template layer on top of the baseline (global, so it stays yours)
+slopctl config --global --set templates.layers.my-private.uri git@github.com:me/slopctl-private.git
+slopctl config --global --set templates.layers.my-private.path templates
+
+# Remove the layer again
+slopctl config --global --delete templates.layers.my-private
 
 # Set default LLM provider for merge (workspace-specific)
 slopctl config --set merge.provider anthropic
@@ -923,6 +942,11 @@ slopctl config --global --set merge.model claude-sonnet-4-6
 
 - `templates.uri` - Default template source (URL or local filesystem path) used by `templates --update` and `init` when `--from` is not specified
 - `templates.fallbackUri` - Fallback source (URL or local filesystem path) used when the primary source fails or is unreachable
+- `templates.ref` - Branch or tag when `templates.uri` is a git URL (default: the remote's default branch)
+- `templates.path` - Subdirectory of `templates.uri` that holds `templates.yml` (e.g. `templates` in a repository); `ref` and `path` are read from the same config scope as `templates.uri`, and `--from` and `templates.fallbackUri` do not use them
+- `templates.layers.<id>.uri` - Source of template layer `<id>` (local path, GitHub tree URL, or git URL); setting it for a new id appends the layer
+- `templates.layers.<id>.ref` - Branch or tag of a git layer (default: the remote's default branch)
+- `templates.layers.<id>.path` - Subdirectory of the repository or folder that holds the layer's `templates.yml`
 - `agents.uri` - Default agent defaults source used by `agents --update`; also used by `templates --update` when bootstrapping missing agent defaults
 - `agents.fallbackUri` - Fallback source for agent defaults when the primary source fails or is unreachable
 - `merge.provider` - Default LLM provider for the `merge` command (openai, anthropic, ollama, mistral)
@@ -947,6 +971,8 @@ Consumer commands (`templates --update`, `agents --update`, `models --update`, `
 - `agents --update` command uses `agents.uri` if set and `--from` not specified
 - `init` command uses `templates.uri` when downloading missing global templates
 - If primary source fails and `templates.fallbackUri` is configured, automatically tries the fallback
+- `templates --update` also fetches every configured template layer; `init` fetches layers that were never fetched or whose configuration changed
+- Template layers are not shadowed per key: global layers come first, then workspace layers; the same id in both scopes is an error
 - If missing during `templates --update`, `agent-defaults.yml` (and `model-defaults.yml`) is bootstrapped from `agents.uri` (`models.uri`), then its configured fallback, then the default `slopctl-templates` repository
 - Empty configuration file is valid (all defaults used)
 - `--list` (without `--global`) annotates each key with `[workspace]` or `[global]` to show its origin
@@ -1580,6 +1606,54 @@ slopctl remove --agent acme
 ```
 
 To make `acme` available in every project on your machine, put the same `acme/` directory under `~/.config/slopctl/agents/` (or `$XDG_CONFIG_HOME/slopctl/agents/`) instead.
+
+### Adding Template Systems (Layers)
+
+A template system is a complete catalog: a `templates.yml` plus the files and skills it references, and optionally an `agent-defaults.yml`. The baseline is the system fetched from `templates.uri`. Template layers stack more systems on top of it, so you can keep a team or community baseline and add your own content, including private skills, without forking it.
+
+**1. Create the layer.** A layer's `templates.yml` declares an `id` and only what it adds or changes:
+
+```yaml
+version: 5
+id: my-private
+languages:
+  swift:                       # extends the baseline's swift entry
+    files:
+      - source: swift-private-notes.md
+        target: '$instructions'
+    skills:
+      - source: skills/my-swiftui-review     # new skill, installed with --lang swift
+      - source: skills/swift-coding-conventions  # replaces the baseline skill of that name
+```
+
+**2. Configure it.** Private layers belong in the global config. The workspace config is committed, so workspace layers are for systems the whole team can reach:
+
+```bash
+slopctl config --global --set templates.layers.my-private.uri git@github.com:me/slopctl-private.git
+slopctl config --global --set templates.layers.my-private.path templates   # optional subdirectory
+slopctl config --global --set templates.layers.my-private.ref main         # optional branch or tag
+slopctl templates --update      # fetches the baseline and every layer
+slopctl templates --list        # shows the systems, where each skill comes from, and overrides
+slopctl init --lang swift       # installs baseline and layer content together
+```
+
+**Sources.** A layer `uri` can be a local folder, a public GitHub tree URL (same format as `templates.uri`), or a git URL (`git@host:org/repo.git`, `ssh://`, `https://….git`, `file://`) for public or private repositories on any host. Git sources are cloned with your installed `git`, so your SSH keys or credential helper authenticate; slopctl never handles credentials. `ref` applies to git sources only; a GitHub tree URL already names its branch and directory. Layer file sources must be relative paths inside the layer; URL sources are supported for skills.
+
+**Merge rules.** Layers are applied in configuration order (global, then workspace); for every item the later system wins:
+
+- `main` is replaced; `$instructions` fragments are matched by their source path relative to their system (same path replaces, a new one is appended); other files are matched by target
+- `languages`, `shared`, `integration`, and `agents` entries are merged field by field; new entries are added
+- A skill name has exactly one source across top-level, language, and shared skills: a layer that defines skill `x` anywhere replaces `x` everywhere, because all of them install into the same `<skill_dir>/x/` folder. Agent skill lists are merged per agent
+- A layer's `agent-defaults.yml` entries are merged by agent name, so a layer can bring a complete new agent
+- Every replacement is listed by `templates --list` and `templates --verify`
+
+**Provenance.** Every installed file records the template system it came from (`origin` in `.slopctl/tracker.yml`; AGENTS.md merges all systems and has none). This drives:
+
+- `update` reports when a file's providing system changes, e.g. after adding, removing, or reordering a layer
+- `doctor` lists files that the configured systems no longer provide as `Orphaned`, naming a system that is not configured on this machine (for example a teammate's private layer)
+- `remove --source <id>` removes every file a system installed; use it after dropping a layer from the config
+
+The layer cache lives next to the baseline cache: `~/.cache/slopctl/layers/<id>/`, with a `.slopctl-source.yml` manifest that records the source, the fetched commit, and the skill names behind each URL skill. Commands that read the cache refuse a layer that was never fetched or whose configuration changed since, and ask for `slopctl templates --update`.
 
 ## Technology Stack
 

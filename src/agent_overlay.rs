@@ -13,7 +13,7 @@
 use std::{
     collections::BTreeMap,
     fs,
-    path::{Component, Path, PathBuf}
+    path::{Path, PathBuf}
 };
 
 use serde::Deserialize;
@@ -22,9 +22,10 @@ use crate::{
     Result,
     agent_defaults::{self, AgentCatalog, AgentDefaultsEntry, PLACEHOLDER_WORKSPACE},
     bom::{self, AgentConfig, TemplateConfig},
-    config::ConfigScope,
+    config::{ConfigScope, EffectiveConfig, LayerSpec},
     file_tracker::SLOPCTL_DIR,
-    template_engine::load_template_config
+    template_engine::load_template_config,
+    template_layer::{self, TemplateSystems}
 };
 
 /// Directory name (below the global config dir or the workspace `.slopctl/`) holding overlay agents
@@ -45,16 +46,18 @@ pub struct OverlayAgent
     pub dir:   PathBuf
 }
 
-/// Shipped catalogs merged with all overlay agents
+/// Shipped catalogs merged with all template layers and overlay agents
 #[derive(Debug)]
 pub struct EffectiveCatalogs
 {
-    /// `templates.yml` including overlay agent sections
+    /// `templates.yml` including template layers and overlay agent sections
     pub templates: TemplateConfig,
-    /// `agent-defaults.yml` including overlay agent entries
+    /// `agent-defaults.yml` including template layers and overlay agent entries
     pub agents:    AgentCatalog,
     /// Overlay agents that were merged in, sorted by name
-    pub overlays:  Vec<OverlayAgent>
+    pub overlays:  Vec<OverlayAgent>,
+    /// Template systems (baseline and layers) that make up `templates`, with provenance
+    pub systems:   TemplateSystems
 }
 
 /// One parsed overlay agent before it is merged into the catalogs
@@ -79,7 +82,10 @@ struct AgentOverlayFile
     unknown:  BTreeMap<String, serde_yaml::Value>
 }
 
-/// Loads the shipped catalogs from `config_dir` and merges global and workspace overlays into them
+/// Loads the shipped catalogs from `config_dir` and merges template layers and overlays into them
+///
+/// Pipeline: baseline catalogs, then the configured template layers in precedence order (see
+/// [`crate::template_layer`]), then global and workspace overlay agents (add-only).
 ///
 /// # Arguments
 ///
@@ -88,11 +94,12 @@ struct AgentOverlayFile
 ///
 /// # Errors
 ///
-/// Returns an error if a shipped catalog cannot be loaded, an overlay is malformed, or an overlay
-/// name clashes with a shipped agent.
+/// Returns an error if a shipped catalog cannot be loaded, a configured layer is unusable, an
+/// overlay is malformed, or an overlay name clashes with a shipped agent.
 pub fn load_effective_catalogs(config_dir: &Path, workspace: &Path) -> Result<EffectiveCatalogs>
 {
-    load_effective_catalogs_from(config_dir, global_overlay_root().as_deref(), &workspace.join(SLOPCTL_DIR).join(AGENT_OVERLAY_DIR), false)
+    let layers = configured_layers(workspace)?;
+    load_effective_catalogs_from(config_dir, global_overlay_root().as_deref(), &workspace.join(SLOPCTL_DIR).join(AGENT_OVERLAY_DIR), &layers, false)
 }
 
 /// Like [`load_effective_catalogs`], but a missing shipped catalog file counts as empty
@@ -103,10 +110,33 @@ pub fn load_effective_catalogs(config_dir: &Path, workspace: &Path) -> Result<Ef
 /// # Errors
 ///
 /// Returns an error if a shipped catalog exists but is invalid, an overlay is malformed, or an
-/// overlay name clashes with a shipped agent.
+/// overlay name clashes with a shipped agent. Unusable template layers are skipped with a warning.
 pub fn load_effective_catalogs_lenient(config_dir: &Path, workspace: &Path) -> Result<EffectiveCatalogs>
 {
-    load_effective_catalogs_from(config_dir, global_overlay_root().as_deref(), &workspace.join(SLOPCTL_DIR).join(AGENT_OVERLAY_DIR), true)
+    let layers = configured_layers(workspace).unwrap_or_else(|e| {
+        eprintln!("! Ignoring template layers: {}", e);
+        Vec::new()
+    });
+    load_effective_catalogs_from(config_dir, global_overlay_root().as_deref(), &workspace.join(SLOPCTL_DIR).join(AGENT_OVERLAY_DIR), &layers, true)
+}
+
+/// Configured template layers for a workspace, in precedence order
+///
+/// Unit tests read only the workspace config so they never see the developer's global config.
+///
+/// # Errors
+///
+/// Returns an error if a config file cannot be parsed or the layer configuration is invalid
+pub fn configured_layers(workspace: &Path) -> Result<Vec<(LayerSpec, ConfigScope)>>
+{
+    #[cfg(test)]
+    {
+        EffectiveConfig { workspace: crate::config::Config::load_workspace(workspace)?, global: crate::config::Config::default() }.layers()
+    }
+    #[cfg(not(test))]
+    {
+        EffectiveConfig::load(workspace)?.layers()
+    }
 }
 
 /// Global overlay root; disabled in unit tests so they never read the developer's real config
@@ -122,7 +152,9 @@ fn global_overlay_root() -> Option<PathBuf>
     }
 }
 
-fn load_effective_catalogs_from(config_dir: &Path, global_root: Option<&Path>, workspace_root: &Path, lenient: bool) -> Result<EffectiveCatalogs>
+fn load_effective_catalogs_from(
+    config_dir: &Path, global_root: Option<&Path>, workspace_root: &Path, layers: &[(LayerSpec, ConfigScope)], lenient: bool
+) -> Result<EffectiveCatalogs>
 {
     let mut templates = if lenient == true && config_dir.join("templates.yml").exists() == false
     {
@@ -140,6 +172,7 @@ fn load_effective_catalogs_from(config_dir: &Path, global_root: Option<&Path>, w
     {
         agent_defaults::load_agent_catalog_from_dir(config_dir)?
     };
+    let systems = template_layer::apply_layers(&mut templates, &mut agents, config_dir, layers, lenient)?;
 
     // Workspace entries are inserted last so they shadow global ones with the same name.
     let mut loaded = BTreeMap::new();
@@ -167,7 +200,7 @@ fn load_effective_catalogs_from(config_dir: &Path, global_root: Option<&Path>, w
         bom::require_unique_skill_sources(&templates)?;
     }
 
-    Ok(EffectiveCatalogs { templates, agents, overlays })
+    Ok(EffectiveCatalogs { templates, agents, overlays, systems })
 }
 
 /// Loads every `<root>/<name>/agent.yml`; a missing root yields no overlays
@@ -230,7 +263,7 @@ fn parse_overlay(content: &str, dir_name: &str, agent_dir: &Path, scope: ConfigS
     for mapping in config.instructions.iter_mut().chain(config.prompts.iter_mut())
     {
         validate_target(&mapping.target, "target", scope)?;
-        mapping.source = rebase_source(&mapping.source, &base)?;
+        mapping.source = crate::utils::rebase_source(&mapping.source, &base)?;
     }
     for skill in &mut config.skills
     {
@@ -238,7 +271,7 @@ fn parse_overlay(content: &str, dir_name: &str, agent_dir: &Path, scope: ConfigS
         {
             validate_target(target, "skill target", scope)?;
         }
-        skill.source = rebase_source(&skill.source, &base)?;
+        skill.source = crate::utils::rebase_source(&skill.source, &base)?;
     }
     for directory in &config.directories
     {
@@ -259,43 +292,15 @@ fn validate_target(target: &str, field: &str, scope: ConfigScope) -> Result<()>
     Ok(())
 }
 
-/// Rewrites a relative source into an absolute path inside the agent directory
-///
-/// Absolute paths are used so every existing `config_dir.join(source)` site resolves overlay files
-/// unchanged. URLs, absolute paths and `..` components are rejected to confine sources to the agent
-/// directory. `std::path::absolute` is used on the base instead of `canonicalize` to avoid `\\?\` paths
-/// on Windows.
-fn rebase_source(source: &str, base: &Path) -> Result<String>
-{
-    require!(source.contains("://") == false, Err(anyhow::anyhow!("source '{}' must be a relative path, URLs are not allowed", source)));
-
-    let mut joined = base.to_path_buf();
-    let mut components = 0;
-    for component in Path::new(source).components()
-    {
-        match component
-        {
-            | Component::Normal(part) =>
-            {
-                joined.push(part);
-                components += 1;
-            }
-            | Component::CurDir =>
-            {}
-            | Component::ParentDir | Component::RootDir | Component::Prefix(_) =>
-            {
-                return Err(anyhow::anyhow!("source '{}' must stay inside the agent directory", source));
-            }
-        }
-    }
-    require!(components > 0, Err(anyhow::anyhow!("source '{}' must name a file or directory", source)));
-
-    // Components never keep a trailing separator, which `derive_name` relies on.
-    joined.to_str().map(str::to_string).ok_or_else(|| anyhow::anyhow!("source '{}' resolves to a non-UTF-8 path", source))
-}
-
 impl EffectiveCatalogs
 {
+    /// Id of the template system that provides `source`; `None` for overlay agent files
+    pub fn origin_of(&self, source: &Path) -> Option<&str>
+    {
+        require!(self.overlays.iter().any(|overlay| source.starts_with(&overlay.dir) == true) == false, None);
+        self.systems.origin_of(source)
+    }
+
     /// Returns the overlay record for an agent, if it came from an overlay
     pub fn overlay(&self, name: &str) -> Option<&OverlayAgent>
     {
@@ -431,7 +436,7 @@ mod tests
     {
         let cache = shipped_cache();
         let ws = TempDir::new().unwrap();
-        let catalogs = load_effective_catalogs_from(cache.path(), None, &ws.path().join(".slopctl/agents"), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), None, &ws.path().join(".slopctl/agents"), &[], false).unwrap();
         assert_eq!(catalogs.agents.agents.len(), 1);
         assert_eq!(catalogs.templates.agents.len(), 1);
         assert!(catalogs.overlays.is_empty() == true);
@@ -444,7 +449,7 @@ mod tests
         let global = TempDir::new().unwrap();
         let ws = TempDir::new().unwrap();
         write_overlay(global.path(), "fake", FAKE_OVERLAY);
-        let catalogs = load_effective_catalogs_from(cache.path(), Some(global.path()), &ws.path().join("agents"), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), Some(global.path()), &ws.path().join("agents"), &[], false).unwrap();
         assert!(catalogs.templates.agents.contains_key("fake") == true);
         assert!(catalogs.in_defaults("fake") == true);
         assert_eq!(catalogs.overlay("fake").unwrap().scope, ConfigScope::Global);
@@ -457,7 +462,7 @@ mod tests
         let ws = TempDir::new().unwrap();
         let root = ws.path().join("agents");
         write_overlay(&root, "fake", FAKE_OVERLAY);
-        let catalogs = load_effective_catalogs_from(cache.path(), None, &root, false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), None, &root, &[], false).unwrap();
         assert_eq!(catalogs.overlay("fake").unwrap().scope, ConfigScope::Workspace);
         assert!(catalogs.require_known_agent("fake").is_ok() == true);
     }
@@ -470,7 +475,7 @@ mod tests
         let ws = TempDir::new().unwrap();
         write_overlay(global.path(), "fake", FAKE_OVERLAY);
         write_overlay(ws.path(), "fake", &FAKE_OVERLAY.replace("FAKE.md", "WS.md"));
-        let catalogs = load_effective_catalogs_from(cache.path(), Some(global.path()), ws.path(), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), Some(global.path()), ws.path(), &[], false).unwrap();
         assert_eq!(catalogs.overlays.len(), 1);
         assert_eq!(catalogs.overlays[0].scope, ConfigScope::Workspace);
         assert!(catalogs.templates.agents["fake"].instructions[0].target.ends_with("WS.md") == true);
@@ -482,7 +487,7 @@ mod tests
         let cache = shipped_cache();
         let ws = TempDir::new().unwrap();
         write_overlay(ws.path(), "bogus", FAKE_OVERLAY);
-        let err = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap_err().to_string();
+        let err = load_effective_catalogs_from(cache.path(), None, ws.path(), &[], false).unwrap_err().to_string();
         assert!(err.contains("add-only") == true);
     }
 
@@ -496,9 +501,9 @@ mod tests
             "version: 5\nagents:\n  bogus: {}\nlanguages:\n  Rust++:\n    skills:\n      - source: skills/review\nskills:\n  - source: other/review\n"
         )
         .unwrap();
-        let err = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap_err().to_string();
+        let err = load_effective_catalogs_from(cache.path(), None, ws.path(), &[], false).unwrap_err().to_string();
         assert!(err.contains("skill 'review'") == true);
-        assert!(load_effective_catalogs_from(cache.path(), None, ws.path(), true).is_ok() == true);
+        assert!(load_effective_catalogs_from(cache.path(), None, ws.path(), &[], true).is_ok() == true);
     }
 
     #[test]
@@ -506,8 +511,8 @@ mod tests
     {
         let dir = TempDir::new().unwrap();
         let ws = TempDir::new().unwrap();
-        assert!(load_effective_catalogs_from(dir.path(), None, ws.path(), false).is_err() == true);
-        let catalogs = load_effective_catalogs_from(dir.path(), None, ws.path(), true).unwrap();
+        assert!(load_effective_catalogs_from(dir.path(), None, ws.path(), &[], false).is_err() == true);
+        let catalogs = load_effective_catalogs_from(dir.path(), None, ws.path(), &[], true).unwrap();
         assert!(catalogs.templates.agents.is_empty() == true);
         assert!(catalogs.agents.agents.is_empty() == true);
     }
@@ -612,7 +617,7 @@ mod tests
         let cache = shipped_cache();
         let ws = TempDir::new().unwrap();
         write_overlay(ws.path(), "fake", FAKE_OVERLAY);
-        let catalogs = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), None, ws.path(), &[], false).unwrap();
         assert_eq!(catalogs.agent_label("bogus"), "bogus");
         assert_eq!(catalogs.agent_label("fake"), "fake (overlay: workspace)");
     }
@@ -623,7 +628,7 @@ mod tests
         let cache = shipped_cache();
         let ws = TempDir::new().unwrap();
         write_overlay(ws.path(), "fake", FAKE_OVERLAY);
-        let catalogs = load_effective_catalogs_from(cache.path(), None, ws.path(), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), None, ws.path(), &[], false).unwrap();
         let err = catalogs.require_known_agent("nope").unwrap_err().to_string();
         assert!(err.contains("bogus, fake") == true);
     }
@@ -632,7 +637,7 @@ mod tests
     fn test_require_agent_consistent_templates_only_errors()
     {
         let cache = shipped_cache();
-        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), false).unwrap();
+        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), &[], false).unwrap();
         catalogs.templates.agents.insert("fake".to_string(), AgentConfig::default());
         let err = catalogs.require_agent_consistent("fake").unwrap_err().to_string();
         assert!(err.contains("agents --update") == true);
@@ -643,7 +648,7 @@ mod tests
     fn test_require_agent_consistent_defaults_only_errors()
     {
         let cache = shipped_cache();
-        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), false).unwrap();
+        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), &[], false).unwrap();
         catalogs.templates.agents.clear();
         assert!(catalogs.require_agent_consistent("bogus").is_err() == true);
     }
@@ -652,7 +657,7 @@ mod tests
     fn test_require_agent_consistent_unknown_ok()
     {
         let cache = shipped_cache();
-        let catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), false).unwrap();
+        let catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), &[], false).unwrap();
         assert!(catalogs.require_agent_consistent("nope").is_ok() == true);
     }
 
@@ -660,7 +665,7 @@ mod tests
     fn test_catalog_mismatches_reports_both_directions()
     {
         let cache = shipped_cache();
-        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), false).unwrap();
+        let mut catalogs = load_effective_catalogs_from(cache.path(), None, Path::new("/nonexistent"), &[], false).unwrap();
         catalogs.templates.agents.insert("fake".to_string(), AgentConfig::default());
         catalogs.agents.agents.push(AgentDefaultsEntry {
             name:                      "extra".to_string(),

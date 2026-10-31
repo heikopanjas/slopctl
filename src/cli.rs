@@ -128,6 +128,10 @@ pub enum Commands
         #[arg(short, long, conflicts_with = "purge")]
         lang: Option<String>,
 
+        /// Template system id (e.g. a template layer): remove every file it provided
+        #[arg(short, long, conflicts_with_all = ["agent", "lang", "all", "purge"])]
+        source: Option<String>,
+
         /// Remove all agent files and skills; AGENTS.md is kept
         #[arg(long, default_value = "false", conflicts_with = "purge")]
         all: bool,
