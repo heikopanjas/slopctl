@@ -4,6 +4,30 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-10-31 16:40 (v23.3.1, rename the default catalog to slopctl-starter)
+
+- renamed the GitHub repository `heikopanjas/slopctl-templates` to
+  `heikopanjas/slopctl-starter`; the default template, agent and model
+  sources, the V1 migration hint, README and AGENTS.md now use the new name
+- the catalog declares `id: slopctl-starter`, so files installed from it
+  record that origin instead of the generic `baseline`
+- older slopctl releases keep working: they hardcode the old URL and rely
+  on GitHub's rename redirects, verified for the web, raw file, contents
+  and tarball endpoints; they also ignore the new `id` key
+- never create a new repository named `slopctl-templates` under this
+  account; it would break those redirects for every older client
+- rationale: the catalog is a sample and starter kit for users' own
+  templates, and the repository name and id now say so
+- version bump: 23.3.0 to 23.3.1 (PATCH - default source location only)
+
+### 2026-10-31 16:15 (v23.3.0, correct ci trigger description)
+
+- AGENTS.md now states that build.yml runs on develop and feature/**
+  branches (push and pull request) across Linux, macOS and Windows
+- rationale: the old wording said develop only, which suggested feature
+  branches get no CI; the template layer branch was verified on all three
+  platforms by its own push
+
 ### 2026-10-31 14:55 (v23.3.0, git baseline with ref and path)
 
 - added `templates.ref` and `templates.path` so the baseline can be a git
