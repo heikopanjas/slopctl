@@ -141,8 +141,8 @@ pub enum Commands
         #[arg(long, default_value = "false")]
         purge: bool,
 
-        /// Skip confirmation prompt.
-        /// With --purge: also deletes a customized AGENTS.md.
+        /// Skip confirmation prompt and also delete installed files you modified.
+        /// With --purge: also deletes a customized AGENTS.md. Files slopctl did not install are never deleted.
         #[arg(short, long, default_value = "false")]
         force: bool,
 

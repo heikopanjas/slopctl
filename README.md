@@ -556,7 +556,7 @@ slopctl remove --source <id> [--force] [--dry-run]
 - `--source <id>` - Remove every tracked file whose recorded template system is `<id>` (see [Adding Template Systems](#adding-template-systems-layers)); AGENTS.md and changelog-marker files are kept. Mutually exclusive with the other selectors.
 - `--all` - Remove all agent-specific files and skills (keeps AGENTS.md). Mutually exclusive with `--agent`, `--lang`, and `--purge`.
 - `--purge` - Remove all slopctl files including AGENTS.md (full cleanup). Mutually exclusive with `--agent`, `--lang`, and `--all`.
-- `--force` - Force removal without confirmation; combined with `--purge`, also overrides the customized-AGENTS.md preservation guard.
+- `--force` - Remove without confirmation and also delete installed files you modified (or that hold merged content); combined with `--purge`, also overrides the customized-AGENTS.md preservation guard. Files slopctl did not install are never deleted, with or without `--force`.
 - `--dry-run` - Preview what would be deleted without making changes
 
 **Examples:**
@@ -590,10 +590,11 @@ slopctl remove --purge --dry-run
 
 **Behavior:**
 
+- **Only slopctl's own, unedited files are deleted.** Every mode applies the same rule to each candidate: a file slopctl did not install (no tracker entry) is never deleted, not even with `--force`; a file slopctl installed that you modified, or that holds `merge` output, is kept unless `--force` is given. Kept files are listed with the reason in the preview, the confirmation list, and the summary
 - Loads templates.yml from global storage to build Bill of Materials (BoM)
 - `--agent`: removes agent instruction, prompt, and skill files; candidates come from the BoM, tracked files solely owned by the agent, and files inside the agent's catalog directories (markers, skill dir, prompt dir)
 - Removing an agent or language releases its ownership across ALL tracker entries, so shared files keep correct owners and `status`/re-init stay truthful
-- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories (only files slopctl installed or the template skill ships; files you added to a skill directory are kept and reported); skips `$instructions` fragments; validates the language name against templates.yml
+- `--lang`: resolves the language's complete file list via `resolve_language_files` (honours `includes` chains); removes language-associated skill directories (files you added to a skill directory are kept and reported); skips `$instructions` fragments; validates the language name against templates.yml
 - `--all`: removes all agent files and skills from all agents; **NEVER touches AGENTS.md**
 - `--purge`: removes everything `--all` removes **plus** AGENTS.md; customized AGENTS.md is preserved unless `--force` is also given
 - Changelog-marker files (e.g. `UPDATES.md`) are preserved by `remove` and `--purge` regardless of tracked modification status; `--purge --force` overrides

@@ -4,6 +4,27 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:07 (v23.3.5, remove keeps user files)
+
+- fixed SPEC-39: `remove --agent`, `--all`, `--purge` and the last
+  cross-client sweep deleted files the user wrote (untracked skills,
+  a hand-written file at a catalog target) and edited copies of
+  installed files
+- every remove mode now passes its candidates through one gate,
+  `split_user_owned`: untracked files are never deleted, not even with
+  `--force`; modified and merged files only with `--force`
+- kept files are listed with the reason in the dry run, the
+  confirmation list and the summary
+- `--force` on remove now also means delete my edited copies outside
+  `--purge`; help text and README updated
+- removed the `--lang` special case for untracked catalog-shipped skill
+  files; the gate covers it
+- `remove` now drops a tracker entry only after the file was deleted
+  (part of SPEC-14)
+- rationale: collection code gathers broadly by location, so a single
+  last gate is the only place that can reliably protect user files
+- version bump: 23.3.4 to 23.3.5 (PATCH - bug fix)
+
 ### 2026-11-18 20:59 (v23.3.4, keep merged files on update and init)
 
 - fixed SPEC-10: `merge` recorded the merged SHA, so the file looked

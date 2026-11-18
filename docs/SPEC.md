@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.4)
+**Spec version:** 1 (describes slopctl v23.3.5)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -355,6 +355,8 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 >
 > **Problem.** `init` writes AGENTS.md, then directories, then files, and saves the tracker once at the end (`template_engine.rs:1517-1527`). `update` does the same. If a write fails halfway, the files already written are on disk but untracked. The next `init` fails preflight with "exists but is not tracked", which `--force` cannot override. `remove` calls `remove_entry` before the delete (`remove.rs:497`), so a failed delete leaves a file on disk that is no longer tracked.
 >
+> Since v23.3.5 `remove` drops a tracker entry only after the file was deleted.
+>
 > **Proposal.** Write a file, then record it. Delete a file, then unrecord it. Save the tracker after each step, or keep a journal and save once in a `Drop` guard. A failed run then leaves a tracker that matches the disk.
 
 ---
@@ -466,10 +468,10 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 | `init --agent <cross-client>` when only native-only agents exist | Language skills are not placed into `.agents/skills/`. A later bare `update` fills the gap. |
 | bare `update` | Resolves every installed language against every detected agent and places skills accordingly. Prunes tracked copies of still-resolved skills whose target was dropped. |
 | `update --skill S` | Resolves S for the detected agents. Prunes tracked copies of S that are not in the new set. Blocks on modified or untracked targets without `--force`. |
-| `remove --agent A` | Deletes **every** file under A's workspace `skill_dir`, tracked or not, modified or not. If A is a cross-client reader and no other detected agent is, deletes non-language files in `.agents/skills/`, counting untracked files as A's. |
-| `remove --lang L` | For each of L's skill names, deletes tracked or catalog-shipped files in all skill directories, keeping untracked user files. Deletes any tracked file whose last owner was L. |
+| `remove --agent A` | Deletes tracked, unedited files under A's workspace `skill_dir`, whatever their owners. If A is a cross-client reader and no other detected agent is, deletes tracked, unedited non-language files in `.agents/skills/`. Untracked files are kept; modified files only go with `--force` (since v23.3.5, [SPEC-39](#spec-39)). |
+| `remove --lang L` | For each of L's skill names, deletes tracked, unedited files in all skill directories. Deletes any tracked file whose last owner was L. |
 | skill removed upstream | Kept. `doctor` reports it as `Orphaned`. `remove` cleans it up. |
-| user-added skill | `remove --lang` keeps it. `remove --agent`, `remove --all` and the last-reader sweep delete it. First run without a tracker registers it ([SPEC-11](#spec-11)). |
+| user-added skill | Every `remove` mode keeps it, also with `--force`. First run without a tracker registers it, after which `remove` treats it as installed ([SPEC-11](#spec-11)). |
 
 ### 7.4 Problems
 
@@ -505,7 +507,7 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 
 > <a id="spec-21"></a>**SPEC-21** · P1 · skill ownership
 >
-> **Problem.** Language-skill copies in a native-only agent's directory carry `lang: [L]` and no agent owner. Removing the agent does not release anything, so v22.0.1 added "delete everything physically inside the agent's directories" (`remove.rs:480-492`). That rule also deletes untracked files and modified copies ([SPEC-39](#spec-39)). The ownership arrays cannot express "this copy exists because language L needs the skill **and** agent A reads this directory".
+> **Problem.** Language-skill copies in a native-only agent's directory carry `lang: [L]` and no agent owner. Removing the agent does not release anything, so v22.0.1 added "delete everything physically inside the agent's directories" (`in_agent_dir` in `remove.rs`). Until v23.3.5 that rule also deleted untracked files and modified copies ([SPEC-39](#spec-39)); it now applies to tracked, unedited files only, but deletion is still decided by location instead of need. The ownership arrays cannot express "this copy exists because language L needs the skill **and** agent A reads this directory".
 >
 > **Proposal.** Derive the need for a copy instead of storing it ([section 10.2](#102-skill-placement-as-reconciliation)). A copy is needed when at least one requirer (language, agent, workspace) needs the skill **and** at least one installed agent reads the directory (or no agent is installed and the directory is `.agents/skills/`).
 
@@ -517,7 +519,7 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 
 > <a id="spec-23"></a>**SPEC-23** · P1 · remove
 >
-> **Problem.** For an agent whose `skill_dir` is `.agents/skills` (possible through overlays and layers), `remove --agent` force-deletes everything in the shared directory by location (`remove.rs:133-162`). That includes every language skill, top-level skill and user file, even while other cross-client readers remain installed. The message "Keeping .agents/skills (still in use by ...)" is printed anyway.
+> **Problem.** For an agent whose `skill_dir` is `.agents/skills` (possible through overlays and layers), `remove --agent` deletes the shared directory's contents by location. That includes every language and top-level skill, even while other cross-client readers remain installed. Since v23.3.5 untracked and modified files survive ([SPEC-39](#spec-39)), but slopctl's own unedited copies are still wiped. The message "Keeping .agents/skills (still in use by ...)" is printed anyway.
 >
 > **Proposal.** Covered by [section 10.2](#102-skill-placement-as-reconciliation): `remove` deletes only copies that are no longer desired and are unedited. Until then, `remove --agent` MUST skip the location sweep when `skill_dir` equals the cross-client directory.
 
@@ -793,14 +795,16 @@ slopctl remove [-a|--agent <AGENT>] [-l|--lang <LANG>] [-s|--source <SOURCE>] [-
 | `-s`, `--source` | Remove every tracked file whose origin is this template system id. Conflicts with everything else. |
 | `--all` | Remove every agent's files and every skill. Keeps AGENTS.md. |
 | `--purge` | Remove everything slopctl installed, AGENTS.md included. Keeps a customized AGENTS.md and changelog-protected files. |
-| `-f`, `--force` | Skip the confirmation prompt. With `--purge`, also delete a customized AGENTS.md and changelog-protected files. |
+| `-f`, `--force` | Skip the confirmation prompt and also delete modified tracked files. With `--purge`, also delete a customized AGENTS.md and changelog-protected files. Never deletes untracked files. |
 | `-n`, `--dry-run` | Show what would be removed. |
 
 Precedence: `--purge`, `--source`, `--all` (error with `--agent` or `--lang`), then `--agent`/`--lang` (at least one required).
 
 What each mode collects:
 
-| Mode | Candidates | Deleted when |
+Every mode passes its candidates through one gate before deleting (`split_user_owned`, since v23.3.5): untracked files are kept, modified and merged files are kept unless `--force` is given, and kept files are listed with the reason.
+
+| Mode | Candidates | Deleted when (after the gate) |
 |---|---|---|
 | `--agent A` | A's catalog instruction and prompt files on disk; tracked files owned only by A; every file under A's workspace `skill_dir`; tracked skill files inside A's directories; for the last cross-client reader, non-language files in `.agents/skills/` | inside A's directories, or no owners left |
 | `--lang L` | L's catalog file targets; L's skill names in every skill directory (tracked or catalog-shipped only); every tracked file owned by L except `main` | no owners left |
@@ -821,6 +825,8 @@ After `--agent` or `--lang`, the owner is released on every tracker entry.
 > `remove --lang` keeps untracked files in skill directories, so the two modes follow opposite rules.
 >
 > **Proposal.** One rule for every mode except `--purge --force`: `remove` deletes only tracked files that are unedited. Modified tracked files are kept and listed with a `--force` hint. Untracked files are never deleted; they are listed as "left in place". `--purge` follows the same rule, and `--purge --force` deletes modified tracked files too, but still not untracked ones.
+>
+> **Resolved in v23.3.5.** `split_user_owned` runs on the candidates of every mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) after the changelog split and before the preview. Untracked files are kept with "not installed by slopctl", also under `--force`. Modified and merged files are kept with "modified, use --force to delete" unless `--force` is given, in every mode, so `--force` now also means "delete my edited copies" outside `--purge`. The `--lang` special case for catalog-shipped untracked files is gone. Workspaces without a tracker still register everything on disk before removal, so this protection depends on [SPEC-11](#spec-11) for them.
 
 > <a id="spec-38"></a>**SPEC-38** · P1 · remove · *verified*
 >
@@ -943,7 +949,7 @@ Writes a clap_complete script to stdout.
 | `init` | skip no-op guard, overwrite modified files and customized AGENTS.md; untracked still an error |
 | `update` (bare) | overwrite modified and untracked; delete modified stale skills |
 | `update` (partial) | allow modified and untracked targets |
-| `remove` | skip prompt; with `--purge` also delete customized AGENTS.md and changelog files |
+| `remove` | skip prompt and delete modified tracked files; with `--purge` also delete customized AGENTS.md and changelog files; never untracked files |
 
 > <a id="spec-41"></a>**SPEC-41** · P2 · flags
 >
@@ -1068,7 +1074,7 @@ Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_
 
 - Dry runs write nothing ([SPEC-48](#spec-48)).
 - Write, then record. Delete, then unrecord ([SPEC-14](#spec-14)).
-- Untracked files are never deleted ([SPEC-39](#spec-39)).
+- Untracked files are never deleted ([SPEC-39](#spec-39), done).
 - Registration is explicit ([SPEC-11](#spec-11)).
 - `--yes` answers prompts; `--force` replaces customized files ([SPEC-41](#spec-41)).
 - AGENTS.md is assembled from the full installed state and the stored mission ([SPEC-16](#spec-16)).
@@ -1085,7 +1091,7 @@ All issues are open unless marked resolved.
 | [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | explicit registration, `origin: user` |
 | [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | reconcile against full placement |
 | [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | never delete outside the workspace |
-| [SPEC-39](#spec-39) | P0 | remove | deletes untracked and modified user files | delete tracked, unedited files only |
+| [SPEC-39](#spec-39) | P0 | remove | deletes untracked and modified user files | **resolved in v23.3.5** |
 | [SPEC-01](#spec-01) | P1 | config | malformed config silently ignored | hard error |
 | [SPEC-05](#spec-05) | P1 | URL skills | `init` downloads live, `update` reads cache by wrong name | rewrite baseline URL skills at fetch |
 | [SPEC-12](#spec-12) | P1 | ownership | `ref_count 0` means shared and unknown | `workspace` owner, `user` origin |
@@ -1134,7 +1140,7 @@ All issues are open unless marked resolved.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11), [SPEC-48](#spec-48). Each can ship alone.
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11), [SPEC-48](#spec-48). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
 3. **Skill placement** (10.2): [SPEC-18](#spec-18), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).
