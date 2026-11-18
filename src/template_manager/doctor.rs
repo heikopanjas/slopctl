@@ -429,6 +429,14 @@ impl TemplateManager
                         println!("  {} {} {}", "✓".green(), "OK:      ".green(), rel.display().to_string().dimmed());
                     }
                 }
+                | FileStatus::Merged =>
+                {
+                    // Merged content is expected to differ from its template.
+                    if verbose == true
+                    {
+                        println!("  {} {} {}", "✓".green(), "Merged:  ".green(), rel.display().to_string().dimmed());
+                    }
+                }
                 | FileStatus::NotTracked =>
                 {
                     // Should not occur via get_entries; ignore defensively

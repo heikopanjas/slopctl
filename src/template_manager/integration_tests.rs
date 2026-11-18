@@ -1112,6 +1112,65 @@ fn test_reinit_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
 }
 
 #[test]
+fn test_update_full_keeps_merged_file_until_template_changes() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let target = workspace.path().join(".rpp.toml");
+    let merged = "max_width = 167\n# kept by merge\n";
+    simulate_merge(&target, merged, &fixture.config_dir.path().join("rpp-format.toml"))?;
+
+    // Regression (SPEC-10): merge re-recorded the tracker SHA, so the file read as
+    // Unmodified and a plain update replaced the merged content with the template.
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "update must keep a merge of the current template");
+
+    // A newer template is not applied over the merge; 'merge' is the update path.
+    fs::write(fixture.config_dir.path().join("rpp-format.toml"), "max_width = 120\n")?;
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "update must not overwrite a merged file when the template changes");
+
+    fixture.manager().update_full(None, None, true, false)?;
+    assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n", "update --force replaces the merged file");
+    let tracker = FileTracker::new(workspace.path())?;
+    assert_eq!(tracker.check_modification(&target)?, crate::file_tracker::FileStatus::Unmodified, "a forced refresh is a plain copy again");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_keeps_merged_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let target = workspace.path().join(".rpp.toml");
+    let merged = "max_width = 167\n# kept by merge\n";
+    simulate_merge(&target, merged, &fixture.config_dir.path().join("rpp-format.toml"))?;
+
+    // Regression (SPEC-10): init planned a plain Copy for the Unmodified-looking merged file.
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "init must keep a merge of the current template");
+    let tracker = FileTracker::new(workspace.path())?;
+    assert_eq!(tracker.check_modification(&target)?, crate::file_tracker::FileStatus::Merged, "the tracker refresh must keep the merged state");
+
+    fs::write(fixture.config_dir.path().join("rpp-format.toml"), "max_width = 120\n")?;
+    fixture.init(Some("foobar"), Some("Rust++"))?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "init must not overwrite a merged file when the template changes");
+
+    Ok(())
+}
+
+#[test]
 fn test_update_full_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
@@ -1729,6 +1788,20 @@ fn simulate_merge_resync(target: &Path) -> anyhow::Result<()>
     let sha = FileTracker::calculate_sha256(target)?;
     let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
     tracker.record_installation_with_owners(target, sha, 5, &[], &[], "integration".to_string());
+    tracker.save()?;
+    Ok(())
+}
+
+/// Writes `merged` to `target` and records it the way `merge` does: the merged
+/// content as installed, `template` as the template it was based on.
+fn simulate_merge(target: &Path, merged: &str, template: &Path) -> anyhow::Result<()>
+{
+    fs::write(target, merged)?;
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let installed_sha = FileTracker::calculate_sha256(target)?;
+    let template_sha = FileTracker::calculate_sha256(template)?;
+    let category = tracker.get_metadata(target).map(|metadata| metadata.category.clone()).unwrap_or_default();
+    tracker.record_installation_with_template(target, installed_sha, template_sha, 5, &[], &[], category);
     tracker.save()?;
     Ok(())
 }

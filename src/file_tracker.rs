@@ -21,6 +21,10 @@ pub const AGENT_ALL: &str = "all";
 pub struct FileMetadata
 {
     pub original_sha:     String,
+    /// SHA-256 of the template content the installed file was based on, stored only when it
+    /// differs from `original_sha` (a merged file); `None` means the file is a plain template copy
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_sha:     Option<String>,
     pub template_version: u32,
     pub installed_date:   String,
     #[serde(default)]
@@ -38,6 +42,12 @@ pub struct FileMetadata
 
 impl FileMetadata
 {
+    /// SHA-256 of the template content the installed file was based on
+    pub fn template_sha(&self) -> &str
+    {
+        self.template_sha.as_deref().unwrap_or(&self.original_sha)
+    }
+
     /// Keep owner arrays sorted, unique, and reflected in `ref_count`.
     fn normalize_ownership(&mut self)
     {
@@ -147,6 +157,8 @@ pub enum FileStatus
     Unmodified,
     /// File exists but SHA differs from original (user modified)
     Modified,
+    /// File exists and matches what slopctl wrote, but that content was merged and differs from its template
+    Merged,
     /// File was tracked but no longer exists on disk
     Deleted
 }
@@ -288,6 +300,12 @@ impl FileTracker
         Ok(format!("{:x}", hash))
     }
 
+    /// Calculate the SHA-256 checksum of in-memory content, formatted like `calculate_sha256`
+    pub fn calculate_sha256_bytes(content: &[u8]) -> String
+    {
+        format!("{:x}", Sha256::digest(content))
+    }
+
     /// Record a file installation with metadata
     ///
     /// The file path is stored relative to the workspace root.
@@ -305,17 +323,34 @@ impl FileTracker
         self.record_installation_with_owners(file_path, original_sha, template_version, &[lang], &[agent], category);
     }
 
-    /// Record a file installation with one or more language and agent owners.
+    /// Record a plain template copy with one or more language and agent owners.
     pub fn record_installation_with_owners(
         &mut self, file_path: &Path, original_sha: String, template_version: u32, langs: &[String], agents: &[String], category: String
     )
     {
+        let template_sha = original_sha.clone();
+        self.record_installation_with_template(file_path, original_sha, template_sha, template_version, langs, agents, category);
+    }
+
+    /// Record an installation whose content may differ from its template (e.g. a merged file).
+    ///
+    /// # Arguments
+    ///
+    /// * `original_sha` - SHA-256 of the content slopctl wrote
+    /// * `template_sha` - SHA-256 of the template content it was based on
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_installation_with_template(
+        &mut self, file_path: &Path, original_sha: String, template_sha: String, template_version: u32, langs: &[String], agents: &[String], category: String
+    )
+    {
         let now = chrono::Utc::now().to_rfc3339();
         let relative_key = self.to_relative_key(file_path);
+        let template_sha = (template_sha != original_sha).then_some(template_sha);
 
         if let Some(metadata) = self.metadata.get_mut(&relative_key)
         {
             metadata.original_sha = original_sha;
+            metadata.template_sha = template_sha;
             metadata.template_version = template_version;
             metadata.installed_date = now;
             metadata.category = category;
@@ -331,8 +366,17 @@ impl FileTracker
         }
         else
         {
-            let mut metadata =
-                FileMetadata { original_sha, template_version, installed_date: now, lang: Vec::new(), agent: Vec::new(), ref_count: 0, category, origin: None };
+            let mut metadata = FileMetadata {
+                original_sha,
+                template_sha,
+                template_version,
+                installed_date: now,
+                lang: Vec::new(),
+                agent: Vec::new(),
+                ref_count: 0,
+                category,
+                origin: None
+            };
             for lang in langs
             {
                 metadata.add_lang(lang);
@@ -366,7 +410,14 @@ impl FileTracker
         let current_sha = Self::calculate_sha256(&absolute)?;
         if current_sha == metadata.original_sha
         {
-            Ok(FileStatus::Unmodified)
+            if metadata.template_sha.is_some() == true
+            {
+                Ok(FileStatus::Merged)
+            }
+            else
+            {
+                Ok(FileStatus::Unmodified)
+            }
         }
         else
         {
@@ -660,6 +711,7 @@ impl FileTracker
 
         let mut metadata = FileMetadata {
             original_sha:     sha,
+            template_sha:     None,
             template_version: 0,
             installed_date:   now,
             lang:             Vec::new(),
@@ -769,6 +821,7 @@ impl FileTracker
 
                 let mut metadata = FileMetadata {
                     original_sha:     legacy.original_sha.clone(),
+                    template_sha:     None,
                     template_version: legacy.template_version,
                     installed_date:   legacy.installed_date.clone(),
                     lang:             Vec::new(),
@@ -864,6 +917,55 @@ agents:
 
         let sha = FileTracker::calculate_sha256(&test_file)?;
         assert_eq!(sha, "dffd6021bb2bd5b0af676290809ec3a53191dd81c7f70a4b28688a362182986f");
+        assert_eq!(FileTracker::calculate_sha256_bytes(b"Hello, World!"), sha);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_record_installation_with_template_reports_merged() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        let merged_file = workspace.join("merged.md");
+        fs::write(&merged_file, b"template plus user lines")?;
+        let installed_sha = FileTracker::calculate_sha256(&merged_file)?;
+        let template_sha = FileTracker::calculate_sha256_bytes(b"template");
+
+        tracker.record_installation_with_template(&merged_file, installed_sha.clone(), template_sha.clone(), 5, &[], &[], "language".into());
+        assert_eq!(tracker.check_modification(&merged_file)?, FileStatus::Merged);
+        assert_eq!(tracker.get_metadata(&merged_file).map(|metadata| metadata.template_sha().to_string()), Some(template_sha));
+
+        fs::write(&merged_file, b"edited after the merge")?;
+        assert_eq!(tracker.check_modification(&merged_file)?, FileStatus::Modified, "an edit after a merge is a modification");
+
+        // A plain copy over a merged file clears the template SHA again.
+        tracker.record_installation_with_owners(&merged_file, installed_sha.clone(), 5, &[], &[], "language".into());
+        let metadata = tracker.get_metadata(&merged_file).expect("entry must exist");
+        assert!(metadata.template_sha.is_none() == true);
+        assert_eq!(metadata.template_sha(), installed_sha);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_plain_copy_omits_template_sha_in_tracker_file() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        tracker.record_installation_with_template(&workspace.join("plain.md"), "sha1".into(), "sha1".into(), 5, &[], &[], "language".into());
+        tracker.record_installation_with_template(&workspace.join("merged.md"), "sha2".into(), "sha3".into(), 5, &[], &[], "language".into());
+        tracker.save()?;
+
+        let saved = fs::read_to_string(workspace.join(SLOPCTL_DIR).join(TRACKER_FILE))?;
+        assert_eq!(saved.matches("template_sha").count(), 1, "only the merged entry stores a template SHA:\n{}", saved);
+
+        let reloaded = FileTracker::new(workspace)?;
+        assert_eq!(reloaded.get_metadata(&workspace.join("merged.md")).map(|metadata| metadata.template_sha().to_string()), Some("sha3".to_string()));
 
         Ok(())
     }

@@ -1431,11 +1431,17 @@ impl<'a> TemplateEngine<'a>
                     {
                         conflicts.push(format!("target '{}' already exists but is not tracked", entry.target.display()));
                     }
-                    | FileStatus::Modified =>
+                    | status @ (FileStatus::Modified | FileStatus::Merged) =>
                     {
-                        let adds_new_owners =
-                            file_tracker.get_metadata(&entry.target).map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
-                        if adds_new_owners == true
+                        let metadata = file_tracker.get_metadata(&entry.target);
+                        // A merged file whose template is unchanged is current; only its owners need recording.
+                        let template_unchanged = status == FileStatus::Merged && metadata.is_some_and(|metadata| metadata.template_sha() == source_sha);
+                        let adds_new_owners = metadata.map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
+                        if template_unchanged == true
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                        }
+                        else if adds_new_owners == true
                         {
                             conflicts.push(format!(
                                 "target '{}' has local modifications and cannot be shared with a new language or agent; use 'slopctl merge' to combine it",
@@ -1746,8 +1752,18 @@ impl<'a> TemplateEngine<'a>
                     println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
                 }
 
-                file_tracker.record_installation_with_owners(
+                // A tracker refresh keeps the installed content, which may be a merge of the template.
+                let installed_sha = if planned.kind == PlannedFileActionKind::RefreshTracker
+                {
+                    file_tracker.get_metadata(target).map_or_else(|| planned.source_sha.clone(), |metadata| metadata.original_sha.clone())
+                }
+                else
+                {
+                    planned.source_sha.clone()
+                };
+                file_tracker.record_installation_with_template(
                     target,
+                    installed_sha,
                     planned.source_sha.clone(),
                     template_version,
                     &entry.lang,

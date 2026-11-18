@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-11-18 (v23.3.3)
+**Last updated:** 2026-11-18 (v23.3.4)
 
 <!-- {mission} -->
 
@@ -108,6 +108,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - `AGENTS.md` is a special main file: ownership can be tracked, but normal `remove --lang` and `remove --agent` must not delete it
 - Files carrying the changelog marker (`<!-- {changelog} -->`, e.g. `UPDATES.md`) are protected like `AGENTS.md`: `init` and `update` (full or `--file`) never write them, under any flag, and `update --file` on one is a hard error pointing to `merge`; `merge` is the only command that may refresh the template half above the marker, and `remove`/`remove --purge` preserve the whole file (purge overrides with `--force`). Protection is keyed on `template_engine::is_changelog_protected`/`file_contains_changelog_marker` finding the marker as its own trimmed line on the target, never on `FileStatus` — keying on `Modified` alone misses a file whose tracker SHA was re-recorded by `merge`, and matching the marker as a raw substring false-positives on docs that mention it as example text (e.g. the `recent-updates` skill)
 - Tracker categories (`main`/`agent`/`language`/`skill`/`integration`) are recorded from the templates.yml section a file resolves from, carried on `ResolvedFile.category`; they must never be derived from path substrings
+- Merged files: `original_sha` is what slopctl wrote; `template_sha` (set only by `merge`, only when it differs) is the template content that write was based on, and any plain copy clears it (`record_installation_with_owners`). `check_modification` reports such an unedited file as `FileStatus::Merged`. Every `FileStatus` match must treat `Merged` as customized content: never refresh it automatically, keep it while `template_sha` equals the current source SHA, point to `merge` when the template changed, and overwrite only with `--force`. A tracker refresh (`RefreshTracker`) keeps the installed SHA; it must never record the source SHA over a merged file
 - Init never hard-fails on a tracked modified file that adds no new owners: it plans `SkipModified` and keeps the local version; `merge` is the update path, `--force` overwrites. Owner-expanding conflicts and untracked collisions remain hard preflight errors
 - Command verb separation: `init` installs something new (a language or agent) and rejects a no-op re-init when everything requested is already tracker-installed (bypass with `--force`); bare `slopctl update` refreshes the whole workspace from the local cache (selectors narrow it); `merge` reconciles customized files. "Already installed" is determined from FileTracker owners (`get_installed_languages`/`get_installed_agents`), never from marker directories, because agents create their own markers
 - Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
