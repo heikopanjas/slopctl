@@ -4,6 +4,27 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 20:49 (v23.3.3, behavioral spec and review)
+
+- added `docs/SPEC.md`, a full behavioral spec of every command,
+  the catalog and config model, the tracker, AGENTS.md assembly and
+  skill placement, with file references into the code
+- the review behind it found 50 issues, recorded as `SPEC-NN` boxes with
+  severity and a proposed fix plus a register and a suggested fix order;
+  five are P0 data-loss paths, including merged files overwritten by the
+  next update and `update --agent` deleting other agents' same-named
+  skills (reproduced with a dry run)
+- the spec proposes a target model: installed means tracker-owned only,
+  skill placement as reconciliation against a desired state, two hashes
+  per tracked file, explicit registration, and no deletion outside the
+  workspace
+- AGENTS.md now points to the spec as the behavioral reference and
+  retires the word adopt in favor of registration and placement
+- rationale: skill adoption had no single definition and behavior was
+  spread over README, AGENTS.md rules and the code; no code changes yet,
+  fixes are picked from the register
+- version bump: 23.3.2 to 23.3.3 (PATCH - documentation only)
+
 ### 2026-10-31 18:28 (v23.3.2, fix flaky env var tests)
 
 - `config.rs` tests now use the crate-wide `crate::ENV_LOCK` instead of a

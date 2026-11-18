@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-31 (v23.3.2)
+**Last updated:** 2026-11-18 (v23.3.3)
 
 <!-- {mission} -->
 
@@ -168,6 +168,8 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Code comments: `///` doc comments on all public APIs; `//` for non-obvious implementation details only
 - API documentation: Generated via `cargo doc`; doc comment structure uses `# Arguments`, `# Errors`, `# Examples` sections
 - README updates: Required when adding or changing CLI commands, flags, or user-visible behavior
+- Behavioral spec: `docs/SPEC.md` is the reference for what every command and concept does. A change to behavior must update the spec in the same change. Known problems are tracked there as `SPEC-NN` issues with a severity and a proposed fix; mark an issue resolved in the spec when its fix ships, and never reuse an ID
+- Terminology: the word "adopt" is retired because it meant three different things. Use **registration** for recording files that already exist on disk in the tracker, and **placement** for deciding which skill directories receive a copy of a skill (see the glossary in `docs/SPEC.md`)
 - Changelog: Maintained in `UPDATES.md` at the repository root (append-only; see the `recent-updates` skill)
 
 <!-- {languages} -->
