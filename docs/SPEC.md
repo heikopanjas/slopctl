@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.5)
+**Spec version:** 1 (describes slopctl v23.3.6)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -66,7 +66,7 @@ These terms are normative. Code, docs and messages SHOULD use them with exactly 
 | **Skill copy** | One skill installed into one skill directory. A skill can have several copies. |
 | **Placement** | The rule that decides which skill directories receive a copy of a skill. Replaces the older words "adoption" and "distribution". |
 | **Hydration** | Current code's name for back-filling an agent's skill directory when that agent is added later. The target model folds it into placement. |
-| **Registration** | Recording a file that already exists on disk in the tracker. The code calls this "adoption" today. See [SPEC-18](#spec-18). |
+| **Registration** | Recording a file that already exists on disk in the tracker. Since v23.3.6 the only case is `init` recording an untracked file that is byte-identical to its template ([SPEC-11](#spec-11)). Older code called this "adoption" ([SPEC-18](#spec-18)). |
 | **Fragment** | A catalog entry whose target starts with `$instructions`. Its content is inserted into AGENTS.md instead of being written as a file. |
 | **Main file** | `AGENTS.md`, assembled from the `main` template and fragments. |
 | **Changelog-protected file** | A file containing the line `<!-- {changelog} -->` on its own (for example `UPDATES.md`). Everything below the marker belongs to the user. |
@@ -175,7 +175,7 @@ Parsed into `AgentCatalog { version: 1, agents: [...] }`. Agent order is the det
 |---|---|---|
 | `name` | yes | Unique agent id. |
 | `markers` | yes, at least one | Workspace-relative directories that indicate the agent. No `$`, no `..`, no file extension. |
-| `prompt_dir` | yes | Where the agent reads prompts or commands. Used by registration, `agents --list` and removal location checks. Installs use the catalog's own targets, not this field. |
+| `prompt_dir` | yes | Where the agent reads prompts or commands. Used by `agents --list` and removal location checks. Installs use the catalog's own targets, not this field. |
 | `skill_dir` | yes | The agent's own skill directory. |
 | `userprofile_skill_dir` | no | Target for `$userprofile` skills. Default `~/.agents/skills`. |
 | `reads_cross_client_skills` | yes | Whether the agent also reads `.agents/skills/`. |
@@ -260,18 +260,18 @@ An agent missing from the agent catalog counts as a cross-client reader (`reads_
 |---|---|
 | `original_sha` | SHA-256 of what slopctl wrote. For copied files: the source's SHA. For AGENTS.md: the assembled content's SHA. After `merge`: the merged content's SHA. |
 | `template_sha` | SHA-256 of the template content a merged file was based on. Stored only when it differs from `original_sha`; absent means the file is a plain template copy. Written by `merge`, cleared by any plain copy. |
-| `template_version` | Catalog `version` at install; `0` for registered files. |
+| `template_version` | Catalog `version` at install. Entries with `0` and no owners and no origin came from the removed registration and are dropped on load. |
 | `installed_date` | RFC 3339 timestamp. |
 | `lang`, `agent` | Owner arrays, sorted and unique. |
 | `ref_count` | Always `lang.len() + agent.len()`, recomputed on load and on every change (`normalize_ownership`). |
 | `category` | Catalog section the file came from. |
-| `origin` | Template system id. None for AGENTS.md, overlay files, registered and migrated entries. |
+| `origin` | Template system id. None for AGENTS.md, overlay files and migrated entries. |
 
 Paths outside the workspace (from `$userprofile` targets) are stored as absolute keys (`FileTracker::to_relative_key`).
 
 An unreadable tracker loads as empty with a warning. The next save moves it to `tracker.yml.bak` instead of overwriting it.
 
-Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `preamble`, `principles`, `mission` (section entries with real targets, `tracker_category_for_section`), and `command`, written only by registration (`file_tracker.rs:632`). Categories MUST come from the catalog section, never from path substrings.
+Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `preamble`, `principles`, `mission` (section entries with real targets, `tracker_category_for_section`), and, in trackers written before v23.3.6, `command` from the removed registration (such entries are dropped on load). Categories MUST come from the catalog section, never from path substrings.
 
 ### 5.2 File status
 
@@ -310,9 +310,9 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 
 > <a id="spec-12"></a>**SPEC-12** · P1 · ownership
 >
-> **Problem.** `ref_count == 0` has two unrelated meanings. Integration and section files (`UPDATES.md`, workspace-target mission files) are installed with no owners because they belong to the workspace as a whole. Registered files have no owners because nobody knows their owner. `is_unreferenced` returns true for both, so any sweep that deletes unreferenced files treats shared infrastructure and user files the same. `--all` and `--agent` never collect `integration` or `command` entries; only `--purge` removes them.
+> **Problem.** `ref_count == 0` has two unrelated meanings. Integration and section files (`UPDATES.md`, workspace-target mission files) are installed with no owners because they belong to the workspace as a whole. Until v23.3.6 registered files also had no owners, so sweeps treated shared infrastructure and user files the same. Registration is gone ([SPEC-11](#spec-11)), but "no owners" still cannot tell a workspace-wide file from one that nothing needs. `--all` and `--agent` never collect `integration` or `command` entries; only `--purge` removes them.
 >
-> **Proposal.** Make the owner explicit. Add a `workspace` owner for files installed for every workspace (integration, sections, top-level skills) and a `user` origin for registered files. `ref_count == 0` then means only "nothing needs this file", and `remove` can rely on it.
+> **Proposal.** Make the owner explicit. Add a `workspace` owner for files installed for every workspace (integration, sections, top-level skills). `ref_count == 0` then means only "nothing needs this file", and `remove` can rely on it.
 
 > <a id="spec-13"></a>**SPEC-13** · P2 · tracker format
 >
@@ -320,18 +320,13 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 >
 > **Proposal.** Use a `BTreeMap`. Add `format: 2` at the top. Skip and report a malformed entry instead of the whole file. Reject `none` and `all` as language or agent names at catalog load.
 
-### 5.4 Registration (code: "adoption") and migration
+### 5.4 Migration and registration
 
-`TemplateManager::try_migrate_tracker` (`template_manager/mod.rs:174`) runs when `.slopctl/tracker.yml` does not exist. Callers ignore its result. It runs from `status`, `doctor` (also `--smart`), `remove` (except `--source`), `update`, `merge` and `init`, including their dry runs.
+`TemplateManager::try_migrate_tracker` runs when `.slopctl/tracker.yml` does not exist and the legacy global `installed_files.json` does. Callers ignore its result. It runs from `status`, `doctor` (also `--smart`), `remove` (except `--source`), `update`, `merge` and `init`, including their dry runs ([SPEC-48](#spec-48)). It converts the legacy entries whose workspace equals the current directory. Agent owners are never set.
 
-1. **Migration.** Entries in the legacy global `installed_files.json` whose workspace equals the current directory are converted. Agent owners are never set.
-2. **Registration.** `FileTracker::adopt_untracked_files_from_catalog` records, for every agent in the catalog (installed or not):
-   - `AGENTS.md` as `main`;
-   - any marker that is a file, as `agent`;
-   - every file in every skill subdirectory of every workspace `skill_dir` and of `.agents/skills`, as `skill`;
-   - every top-level file in every workspace `prompt_dir`, as `command`.
+A file without a tracker entry belongs to the user. Nothing records it automatically. The only registration is in `init`: an untracked file at a catalog target that is byte-identical to its template is planned as `RefreshTracker` and recorded with owners, because "slopctl installed this" is then true.
 
-   Each file is recorded with its current SHA, `template_version: 0`, and no owners (the `LANG_NONE`/`AGENT_ALL` sentinels it passes are dropped by normalization).
+Until v23.3.6 `try_migrate_tracker` also ran `FileTracker::adopt_untracked_files_from_catalog`, which recorded every file in every workspace skill and prompt directory, `AGENTS.md`, and file markers with their current SHA, `template_version: 0` and no owners. `FileTracker::new` drops such entries (`is_registration_leftover`: version 0, no owners, no origin), so those files are untracked again.
 
 > <a id="spec-11"></a>**SPEC-11** · P0 · registration · *verified*
 >
@@ -349,6 +344,11 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 > - Registration MUST NOT run implicitly. It becomes an explicit step (`slopctl doctor --fix`, or `init` when it finds no tracker, after printing what it will register).
 > - Registered files get `origin: user`, which marks them as never being a plain template copy, even though they have no `template_sha` ([SPEC-10](#spec-10)). `update` and `init` treat them as modified. `remove` never deletes them.
 > - Only files that match a catalog target are registered. Everything else in skill and prompt directories stays untracked and therefore untouchable.
+>
+> **Resolved in v23.3.6**, more strictly than proposed. There is no explicit registration step and no `origin: user`, because a registered user file would behave exactly like an untracked one, which every command already respects ([SPEC-39](#spec-39)).
+> - `adopt_untracked_files_from_catalog` is deleted. `try_migrate_tracker` only converts the legacy global tracker, so read-only commands no longer create `.slopctl/tracker.yml`.
+> - `init` records an untracked file only when it is byte-identical to its template. A differing one is still a preflight error, now with a hint to use `merge` or move the file aside.
+> - Entries an earlier version registered are dropped when the tracker loads (`FileMetadata::is_registration_leftover`), so `update` and `remove` treat those files as the user's again.
 > - Migration of the legacy JSON stays automatic but MUST NOT run in dry-run mode.
 
 > <a id="spec-14"></a>**SPEC-14** · P1 · atomicity
@@ -471,7 +471,7 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 | `remove --agent A` | Deletes tracked, unedited files under A's workspace `skill_dir`, whatever their owners. If A is a cross-client reader and no other detected agent is, deletes tracked, unedited non-language files in `.agents/skills/`. Untracked files are kept; modified files only go with `--force` (since v23.3.5, [SPEC-39](#spec-39)). |
 | `remove --lang L` | For each of L's skill names, deletes tracked, unedited files in all skill directories. Deletes any tracked file whose last owner was L. |
 | skill removed upstream | Kept. `doctor` reports it as `Orphaned`. `remove` cleans it up. |
-| user-added skill | Every `remove` mode keeps it, also with `--force`. First run without a tracker registers it, after which `remove` treats it as installed ([SPEC-11](#spec-11)). |
+| user-added skill | Every command treats it as the user's: `update` skips it, `remove` keeps it (also with `--force`), and nothing registers it ([SPEC-11](#spec-11), since v23.3.6). |
 
 ### 7.4 Problems
 
@@ -485,6 +485,8 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 > Nobody reading the code can tell which one a message or a test refers to. The skill model built on top of them has no single rule for who owns a copy.
 >
 > **Proposal.** Retire the word. Use **registration** for (1) and **placement** for (2). Rename the function, the console message ("Adopted N existing file(s)") and the two tests.
+>
+> **Resolved in v23.3.6.** The registration function and its console message are gone ([SPEC-11](#spec-11)). The comment and the two tests now say placement (`test_init_cross_client_then_native_places_skills`, `test_remove_lang_removes_native_agent_skill_copies`). The word no longer appears in the code or the README; old UPDATES.md entries keep it, since the log is append-only.
 
 > <a id="spec-19"></a>**SPEC-19** · P1 · installed agents · *verified*
 >
@@ -628,7 +630,7 @@ slopctl init [-l|--lang <LANG>] [-a|--agent <AGENT>] [-m|--mission <MISSION>] [-
 Pipeline:
 1. If the cache has no baseline, fetch it (with fallback) and bootstrap the agent and model catalogs. With `--dry-run`, print a message and exit 0.
 2. Fetch layers that are configured but not cached.
-3. Run migration and registration if no tracker exists ([SPEC-11](#spec-11)).
+3. Migrate the legacy global tracker if no tracker exists.
 4. **No-op guard.** Unless `--force`, fail when every requested language and agent is already installed.
 5. Check the baseline `version` (2 to 5).
 6. Resolve files (`resolve_all_files`): sections, language files, integration files, agent directories, instructions and prompts, then agent, language and top-level skills, then hydration. Missing sources are dropped silently.
@@ -644,7 +646,8 @@ Pipeline:
 | Unmodified, SHA differs, adds owners | error, "use merge" |
 | Unmodified, SHA differs, no new owners | `Copy` |
 | Deleted (tracked, missing) | `Copy` |
-| Not tracked | error, even with `--force` |
+| Not tracked, identical to the source | `RefreshTracker` (records the file as installed) |
+| Not tracked, differs | error, even with `--force` |
 | Modified or merged with changed template, adds owners | error |
 | Merged, template unchanged | `RefreshTracker` (owners only, merged content and hashes kept) |
 | Modified or merged with changed template, `--force` | `Copy` |
@@ -683,7 +686,7 @@ slopctl update [--file <FILE>]... [-s|--skill <SKILL>]... [-l|--lang <LANG>] [-a
 `update` never touches AGENTS.md, never fetches, and reads only the local cache.
 
 **Bare update** (`update_full`, `partial_update.rs:282`):
-1. Require the cache, migrate and register ([SPEC-11](#spec-11)), load the strict catalogs.
+1. Require the cache, migrate the legacy tracker, load the strict catalogs.
 2. `resolve_workspace_sets`: every installed language (or `--lang`) crossed with every detected agent (or `--agent`).
 3. Collect candidates keyed by normalized target. Last one wins ([SPEC-34](#spec-34)).
 4. Compute stale skill copies ([SPEC-22](#spec-22)).
@@ -730,7 +733,7 @@ slopctl update [--file <FILE>]... [-s|--skill <SKILL>]... [-l|--lang <LANG>] [-a
 >
 > **Problem.** Bare update reports untracked files at catalog targets as "local modifications preserved", which suggests slopctl installed them.
 >
-> **Proposal.** Report them separately: "exists but not installed by slopctl: <path> (use `--force` to replace or `slopctl doctor --fix` to register)".
+> **Proposal.** Report them separately: "exists but not installed by slopctl: <path> (use `--force` to replace it or `slopctl merge` to combine it)".
 
 ### 8.5 `merge`
 
@@ -748,7 +751,7 @@ slopctl merge [-l|--lang <LANG>] [-a|--agent <AGENT>] [-m|--mission <MISSION>] [
 | `-v`, `--verbose` | Token counts, unchanged files, and the chat in both directions. |
 
 Pipeline:
-1. Migrate and register, load the strict catalogs. `merge` may use the network ([SPEC-05](#spec-05)).
+1. Migrate the legacy tracker, load the strict catalogs. `merge` may use the network ([SPEC-05](#spec-05)).
 2. Build the expected content per target: AGENTS.md from `generate_fresh_main`, every other file from its source.
 3. Classify:
    - **New**: target missing.
@@ -826,7 +829,7 @@ After `--agent` or `--lang`, the owner is released on every tracker entry.
 >
 > **Proposal.** One rule for every mode except `--purge --force`: `remove` deletes only tracked files that are unedited. Modified tracked files are kept and listed with a `--force` hint. Untracked files are never deleted; they are listed as "left in place". `--purge` follows the same rule, and `--purge --force` deletes modified tracked files too, but still not untracked ones.
 >
-> **Resolved in v23.3.5.** `split_user_owned` runs on the candidates of every mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) after the changelog split and before the preview. Untracked files are kept with "not installed by slopctl", also under `--force`. Modified and merged files are kept with "modified, use --force to delete" unless `--force` is given, in every mode, so `--force` now also means "delete my edited copies" outside `--purge`. The `--lang` special case for catalog-shipped untracked files is gone. Workspaces without a tracker still register everything on disk before removal, so this protection depends on [SPEC-11](#spec-11) for them.
+> **Resolved in v23.3.5.** `split_user_owned` runs on the candidates of every mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) after the changelog split and before the preview. Untracked files are kept with "not installed by slopctl", also under `--force`. Modified and merged files are kept with "modified, use --force to delete" unless `--force` is given, in every mode, so `--force` now also means "delete my edited copies" outside `--purge`. The `--lang` special case for catalog-shipped untracked files is gone. Until v23.3.6, workspaces without a tracker registered everything on disk before removal; [SPEC-11](#spec-11) removed that.
 
 > <a id="spec-38"></a>**SPEC-38** · P1 · remove · *verified*
 >
@@ -888,7 +891,7 @@ slopctl doctor [-f|--fix] [-n|--dry-run] [-v|--verbose] [--smart]
 > - `doctor` does not check for: entries with no owners, absolute keys, a `.bak` tracker, stale or unfetched layers, catalog mismatches, untracked files at catalog targets, or detected-but-not-installed agents.
 >
 >
-> **Proposal.** Correct the hints. `--fix` on `Missing` offers to restore the file with `update` and prunes only when the catalog no longer provides it. Add `requires = "fix"` to `--dry-run`. Preserve line endings and record the SHA. Add the missing checks, and make registration ([SPEC-11](#spec-11)) a `--fix` action.
+> **Proposal.** Correct the hints. `--fix` on `Missing` offers to restore the file with `update` and prunes only when the catalog no longer provides it. Add `requires = "fix"` to `--dry-run`. Preserve line endings and record the SHA. Add the missing checks.
 
 > <a id="spec-45"></a>**SPEC-45** · P2 · doctor --smart
 >
@@ -906,7 +909,7 @@ Prints the cache location, its version and the available agents and languages; w
 
 > <a id="spec-46"></a>**SPEC-46** · P1 · status · *verified*
 >
-> **Problem.** "Installed agents" comes from markers (`list.rs:172-179`), "installed languages" from the tracker. A repository where someone once ran Claude Code shows `claude` as installed. `status -v` lists the catalog files of every agent present on disk as managed, even files slopctl never wrote. `status` also writes a tracker through registration ([SPEC-11](#spec-11)).
+> **Problem.** "Installed agents" comes from markers (`list.rs:172-179`), "installed languages" from the tracker. A repository where someone once ran Claude Code shows `claude` as installed. `status -v` lists the catalog files of every agent present on disk as managed, even files slopctl never wrote. Until v23.3.6 `status` also wrote a tracker through registration ([SPEC-11](#spec-11)); now only the legacy migration can still write one.
 >
 > **Proposal.** Installed agents from the tracker. A separate line "Detected, not installed". Managed files from the tracker only. `status` is read-only.
 
@@ -935,12 +938,11 @@ Writes a clap_complete script to stdout.
 > <a id="spec-48"></a>**SPEC-48** · P1 · dry run
 >
 > **Problem.** `--dry-run` writes to disk.
-> - Migration and registration run before every dry-run branch (`update.rs:33`, `partial_update.rs:53`, `:290`, `merge.rs:124`, `smart.rs:93`) and save `tracker.yml` when they find anything. Migration also rewrites the legacy global `installed_files.json`.
+> - Migration runs before every dry-run branch (`update.rs:33`, `partial_update.rs:53`, `:290`, `merge.rs:124`, `smart.rs:93`) and saves `tracker.yml` when it finds anything. (Until v23.3.6 registration did the same, much more often.) Migration also rewrites the legacy global `installed_files.json`.
 > - `merge -n` always calls `file_tracker.save()` (`merge.rs:378`). That creates `.slopctl/tracker.yml` and can rename an unreadable tracker to `.bak`.
-> - `remove -n` runs registration too.
 >
 >
-> **Proposal.** A dry run MUST NOT write any file, in the workspace or outside it. Migration and registration compute an in-memory tracker in dry-run mode and report what they would record.
+> **Proposal.** A dry run MUST NOT write any file, in the workspace or outside it. Migration computes an in-memory tracker in dry-run mode and report what they would record.
 
 ### 9.2 `--force`
 
@@ -983,7 +985,7 @@ The client uses a fixed 300 s timeout and a 32768-token output limit (`llm.rs:23
 
 > <a id="spec-50"></a>**SPEC-50** · P2 · workspace root
 >
-> **Problem.** slopctl uses the current directory as the workspace. Running it from a subdirectory creates a second `.slopctl/` there, and `status` writes one through registration.
+> **Problem.** slopctl uses the current directory as the workspace. Running it from a subdirectory creates a second `.slopctl/` there, and until v23.3.6 `status` wrote one through registration.
 >
 > **Proposal.** Search upward for `.slopctl/` (stop at the git root or `$HOME`) and use that directory. Without one, `init` uses the current directory and every other command errors with "not a slopctl workspace".
 
@@ -1064,7 +1066,6 @@ Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_
 | pristine | disk = installed = template | yes, when the template changes |
 | merged | disk = installed ≠ template | no; `update` points to `merge` when the template changes |
 | modified | disk ≠ installed | no; `--force` or `merge` |
-| registered | `origin: user` ([SPEC-11](#spec-11), not implemented yet) | no; treated as modified |
 
 ### 10.4 Files outside the workspace
 
@@ -1075,7 +1076,7 @@ Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_
 - Dry runs write nothing ([SPEC-48](#spec-48)).
 - Write, then record. Delete, then unrecord ([SPEC-14](#spec-14)).
 - Untracked files are never deleted ([SPEC-39](#spec-39), done).
-- Registration is explicit ([SPEC-11](#spec-11)).
+- Nothing registers user files implicitly ([SPEC-11](#spec-11), done).
 - `--yes` answers prompts; `--force` replaces customized files ([SPEC-41](#spec-41)).
 - AGENTS.md is assembled from the full installed state and the stored mission ([SPEC-16](#spec-16)).
 
@@ -1088,7 +1089,7 @@ All issues are open unless marked resolved.
 | ID | Sev | Area | Summary | Fix direction |
 |---|---|---|---|---|
 | [SPEC-10](#spec-10) | P0 | tracker | `update`/`init` overwrite merged files | **resolved in v23.3.4** |
-| [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | explicit registration, `origin: user` |
+| [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | **resolved in v23.3.6** |
 | [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | reconcile against full placement |
 | [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | never delete outside the workspace |
 | [SPEC-39](#spec-39) | P0 | remove | deletes untracked and modified user files | **resolved in v23.3.5** |
@@ -1099,7 +1100,7 @@ All issues are open unless marked resolved.
 | [SPEC-15](#spec-15) | P1 | AGENTS.md | three definitions of customized; CRLF marker | two-hash status |
 | [SPEC-16](#spec-16) | P1 | AGENTS.md | assembled from flags only; languages and mission lost | assemble from installed state |
 | [SPEC-17](#spec-17) | P1 | changelog | substring split in merge; source vs target check; skills unchecked | one line-based check |
-| [SPEC-18](#spec-18) | P1 | terminology | "adopt" has three meanings | registration and placement |
+| [SPEC-18](#spec-18) | P1 | terminology | "adopt" has three meanings | **resolved in v23.3.6** |
 | [SPEC-19](#spec-19) | P1 | installed | markers vs tracker; detected agents become installed via skills | tracker only (10.1) |
 | [SPEC-20](#spec-20) | P1 | skills | top-level skill owners taken from flags | workspace owner |
 | [SPEC-21](#spec-21) | P1 | skills | native copies have no agent owner; delete by location | placement (10.2) |
@@ -1140,9 +1141,9 @@ All issues are open unless marked resolved.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11), [SPEC-48](#spec-48). Each can ship alone.
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
-3. **Skill placement** (10.2): [SPEC-18](#spec-18), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
+3. **Skill placement** (10.2): [SPEC-18](#spec-18) (done), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).
 5. **AGENTS.md**: [SPEC-15](#spec-15), [SPEC-16](#spec-16), [SPEC-17](#spec-17), [SPEC-36](#spec-36).
 6. Everything else, P1 before P2.
