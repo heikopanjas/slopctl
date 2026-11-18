@@ -1238,6 +1238,7 @@ mod tests
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# Rust++ Coding Conventions")?;
+        record_lang_skill_files(workspace.path(), &[&skill_file])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1251,7 +1252,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_lang_discovers_untracked_url_skill_by_source_path_name() -> anyhow::Result<()>
+    fn test_remove_lang_discovers_url_skill_by_source_path_name() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1267,6 +1268,7 @@ mod tests
         let nested_file = skill_dir.join("references/guides/topic.md");
         fs::create_dir_all(nested_file.parent().ok_or_else(|| anyhow::anyhow!("missing nested skill parent"))?)?;
         fs::write(&nested_file, "# Topic")?;
+        record_lang_skill_files(workspace.path(), &[&skill_file, &nested_file])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1274,7 +1276,7 @@ mod tests
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         manager.remove(None, Some("Rust++"), true, false)?;
 
-        assert!(skill_file.exists() == false, "untracked URL skill must be removed using the source path's skill name");
+        assert!(skill_file.exists() == false, "an installed URL skill must be found by the source path's skill name");
         assert!(nested_file.exists() == false);
         assert!(skill_dir.exists() == false, "empty skill root must be removed after its nested files");
         Ok(())
@@ -1304,7 +1306,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_agent_discovers_untracked_skill_files() -> anyhow::Result<()>
+    fn test_remove_agent_without_tracker_keeps_untracked_files() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1331,12 +1333,22 @@ mod tests
         let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
-        // Positive: untracked skill under the agent's skill dir must be deleted
-        assert!(skill_file.exists() == false);
-        // Negative: the agent file itself is also removed (it was in the skill dir's parent scope)
-        // and the workspace root must not have been disturbed
-        assert!(workspace.path().exists() == true, "workspace root must not be deleted");
+        // Regression (SPEC-11): without a tracker, remove used to register every file on disk
+        // as a slopctl install first and then delete it. Untracked files belong to the user.
+        assert!(skill_file.exists() == true, "an untracked skill must survive remove in a workspace without a tracker");
+        assert!(agent_file.exists() == true, "an untracked file at a catalog target must survive as well");
         Ok(())
+    }
+
+    /// Records existing files in the workspace tracker as unmodified Rust++ skill files
+    fn record_lang_skill_files(workspace: &std::path::Path, files: &[&std::path::Path]) -> anyhow::Result<()>
+    {
+        let mut tracker = FileTracker::new(workspace)?;
+        for file in files
+        {
+            tracker.record_installation(file, FileTracker::calculate_sha256(file)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        }
+        tracker.save()
     }
 
     /// Writes `content` to `path` and records it in the workspace tracker as an unmodified skill file
@@ -1904,17 +1916,17 @@ mod tests
         Ok(())
     }
 
-    // ── Regression: adopted native-agent skill copies inherit lang ───────────
+    // ── Regression: native-agent skill copies inherit lang ───────────────────
 
     #[test]
-    fn test_remove_lang_removes_adopted_native_agent_skill_copies() -> anyhow::Result<()>
+    fn test_remove_lang_removes_native_agent_skill_copies() -> anyhow::Result<()>
     {
         // Scenario: init --agent codex --lang swift → init --agent claude → remove --lang swift
         //
-        // After `init --agent claude` the cross-client skills in .agents/skills/ are
-        // adopted to .claude/skills/ (native-only agent). The adoption previously stamped
-        // every copy with lang: LANG_NONE, so `remove --lang swift` could not find them.
-        // After the fix, adopted copies carry the original lang and are properly removed.
+        // After `init --agent claude` the language skills are placed into .claude/skills/
+        // as well (native-only agent). Placement previously stamped every copy with
+        // lang: LANG_NONE, so `remove --lang swift` could not find them. After the fix,
+        // native copies carry the original lang and are properly removed.
 
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1927,7 +1939,7 @@ mod tests
         let cc_skill_file = cc_skill_dir.join("SKILL.md");
         fs::write(&cc_skill_file, "# CppScript Conventions")?;
 
-        // Same skill adopted to native agent dir (tracked with lang: CppScript after fix)
+        // Same skill placed into the native agent dir (tracked with lang: CppScript after fix)
         let native_skill_dir = workspace.path().join(".fake/skills/cppscript-conventions");
         fs::create_dir_all(&native_skill_dir)?;
         let native_skill_file = native_skill_dir.join("SKILL.md");
@@ -1946,7 +1958,7 @@ mod tests
 
         assert!(result.is_ok() == true);
         assert!(cc_skill_file.exists() == false, "cross-client lang skill must be removed");
-        assert!(native_skill_file.exists() == false, "adopted native-agent copy must also be removed");
+        assert!(native_skill_file.exists() == false, "the native-agent copy must also be removed");
 
         let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");

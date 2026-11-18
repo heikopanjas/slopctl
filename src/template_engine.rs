@@ -1205,7 +1205,7 @@ impl<'a> TemplateEngine<'a>
             }
 
             // When adding a native-only agent after language install, hydrate language skills from
-            // templates into the agent's native skill dir (replaces broad .agents/skills/ adoption).
+            // templates into the agent's native skill dir (placement, not a copy of .agents/skills/).
             if native_only_agent == true &&
                 options.lang.is_none() == true &&
                 let Some(agent_name) = options.agent &&
@@ -1429,7 +1429,20 @@ impl<'a> TemplateEngine<'a>
                     }
                     | FileStatus::NotTracked =>
                     {
-                        conflicts.push(format!("target '{}' already exists but is not tracked", entry.target.display()));
+                        // An untracked file is the user's. Only content identical to the template
+                        // is recorded as an install, because then "slopctl installed this" is true.
+                        if FileTracker::calculate_sha256(&entry.target)? == source_sha
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                        }
+                        else
+                        {
+                            conflicts.push(format!(
+                                "target '{}' already exists, was not installed by slopctl, and differs from the template; use 'slopctl merge' to combine it or move \
+                                 it aside",
+                                entry.target.display()
+                            ));
+                        }
                     }
                     | status @ (FileStatus::Modified | FileStatus::Merged) =>
                     {
@@ -3019,7 +3032,23 @@ languages:
         {
             panic!("expected preflight error");
         };
-        assert!(err.to_string().contains("not tracked") == true);
+        assert!(err.to_string().contains("was not installed by slopctl") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_preflight_untracked_file_identical_to_template_is_recorded() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let (plan, files) = preflight_toplevel_cross_client_skill("# Skill", None, "# Skill")?;
+
+        let skill_action = plan
+            .files
+            .iter()
+            .find(|action| files[action.index].target.ends_with(".agents/skills/git-workflow/SKILL.md"))
+            .ok_or_else(|| anyhow::anyhow!("skill must be planned"))?;
+        assert_eq!(skill_action.kind, PlannedFileActionKind::RefreshTracker, "an untracked copy of the template is recorded, not copied or rejected");
         Ok(())
     }
 

@@ -414,7 +414,7 @@ fn test_init_then_remove_agent_then_remove_lang_leaves_clean() -> anyhow::Result
 // ── Agent switching ──────────────────────────────────────────────────────────
 
 #[test]
-fn test_init_cross_client_then_native_adopts_skills() -> anyhow::Result<()>
+fn test_init_cross_client_then_native_places_skills() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
     let fixture = IntegrationFixture::new()?;
@@ -426,10 +426,10 @@ fn test_init_cross_client_then_native_adopts_skills() -> anyhow::Result<()>
     let cross_client_skills = workspace.path().join(".agents/skills");
     assert!(has_skill_md_under(&cross_client_skills) == true, "cross-client skills must exist after first init");
 
-    // Second: install native-only agent → should adopt skills into .bogus/skills/
+    // Second: install native-only agent → skills must be placed into .bogus/skills/ too
     fixture.init(Some("bogus"), Some("Rust++"))?;
     let native_skills = workspace.path().join(".bogus/skills");
-    assert!(has_skill_md_under(&native_skills) == true, "skills must be adopted into .bogus/skills/ for native-only agent");
+    assert!(has_skill_md_under(&native_skills) == true, "skills must be placed into .bogus/skills/ for a native-only agent");
 
     Ok(())
 }
@@ -1139,6 +1139,60 @@ fn test_update_full_keeps_merged_file_until_template_changes() -> anyhow::Result
     assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n", "update --force replaces the merged file");
     let tracker = FileTracker::new(workspace.path())?;
     assert_eq!(tracker.check_modification(&target)?, crate::file_tracker::FileStatus::Unmodified, "a forced refresh is a plain copy again");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_keeps_previously_registered_user_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    // Reproduce an older tracker that registered the user's own version of a catalog target
+    // from disk: current SHA, template version 0, no owners.
+    let target = workspace.path().join(".rpp.toml");
+    let user_content = "max_width = 100\n# my own settings\n";
+    fs::write(&target, user_content)?;
+    let mut tracker = FileTracker::new(workspace.path())?;
+    tracker.remove_entry(&target);
+    tracker.record_installation(&target, FileTracker::calculate_sha256(&target)?, 0, "none".into(), "all".into(), "command".into());
+    tracker.save()?;
+
+    // Regression (SPEC-11): the registered file read as an unmodified install and update replaced it.
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, user_content, "update must not overwrite a file slopctl only registered");
+
+    Ok(())
+}
+
+#[test]
+fn test_init_records_untracked_file_identical_to_template() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+    let target = workspace.path().join(".rpp.toml");
+    forget_tracker_entry(&target)?;
+
+    // An untracked copy of the template is recorded as installed, so a second init succeeds.
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let tracker = FileTracker::new(workspace.path())?;
+    assert!(tracker.get_metadata(&target).is_some_and(|metadata| metadata.has_lang("Rust++")) == true, "identical file must be recorded with its owner");
+
+    // An untracked file that differs stays the user's: init refuses instead of taking it over.
+    forget_tracker_entry(&target)?;
+    fs::write(&target, "max_width = 100\n")?;
+    let result = fixture.init(Some("foobar"), Some("Rust++"));
+    assert!(result.is_err() == true, "a differing untracked file must block init");
+    assert_eq!(fs::read_to_string(&target)?, "max_width = 100\n");
 
     Ok(())
 }

@@ -4,6 +4,28 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:15 (v23.3.6, no implicit registration of user files)
+
+- fixed SPEC-11: in a workspace without a tracker, every command
+  (including `status`, `doctor` and dry runs) recorded all files in
+  skill and prompt directories, AGENTS.md and file markers as pristine
+  installs with no owners, so `update` overwrote them and `remove`
+  deleted them
+- deleted `adopt_untracked_files_from_catalog`; `try_migrate_tracker`
+  now only converts the legacy global tracker and no longer needs the
+  catalog, so read-only commands stop creating `.slopctl/tracker.yml`
+- `init` records an untracked file only when it is byte-identical to its
+  template; a differing one stays a preflight error, now pointing to
+  `merge`
+- tracker load drops entries an earlier version registered (template
+  version 0, no owners, no origin), so those files are the user's again
+- decision: no explicit registration command and no `origin: user`; a
+  registered user file would behave exactly like an untracked one, which
+  every command already respects since SPEC-39
+- fixed SPEC-18: the word adopt is gone from code and tests; the
+  remaining comment and two test names now say placement
+- version bump: 23.3.5 to 23.3.6 (PATCH - bug fix)
+
 ### 2026-11-18 21:07 (v23.3.5, remove keeps user files)
 
 - fixed SPEC-39: `remove --agent`, `--all`, `--purge` and the last

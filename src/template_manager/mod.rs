@@ -164,43 +164,30 @@ impl TemplateManager
         Self::slopctl_dir(workspace).join("tracker.yml").exists()
     }
 
-    /// Attempt migration from the global tracker and adopt untracked files
+    /// Migrate this workspace's entries from the legacy global tracker
     ///
-    /// If `.slopctl/tracker.yml` does not exist, runs two passes:
-    /// 1. Migrates matching entries from the global `installed_files.json`
-    /// 2. Scans the workspace for known slopctl-managed files (instructions, skills, commands) and adopts any that are not yet tracked
+    /// Runs only when `.slopctl/tracker.yml` does not exist, and converts the entries of the
+    /// global `installed_files.json` that belong to this workspace. Files on disk without a
+    /// tracker record are never registered here: they belong to the user (see `docs/SPEC.md`,
+    /// SPEC-11). `init` records an untracked file only when it is identical to its template.
     ///
-    /// Returns the total number of entries migrated + adopted.
+    /// Returns the number of migrated entries.
     pub fn try_migrate_tracker(&self, workspace: &Path) -> Result<usize>
     {
-        if Self::is_workspace_initialized(workspace) == true
+        let global_path = file_tracker::legacy_tracker_path(&self.config_dir);
+        if Self::is_workspace_initialized(workspace) == true || global_path.exists() == false
         {
             return Ok(0);
         }
 
         let mut tracker = FileTracker::new(workspace)?;
-        let mut total = 0usize;
-
-        let global_path = file_tracker::legacy_tracker_path(&self.config_dir);
-        if global_path.exists() == true
+        let migrated = tracker.migrate_from_global(&global_path)?;
+        if migrated > 0
         {
-            let migrated = tracker.migrate_from_global(&global_path)?;
-            if migrated > 0
-            {
-                println!("{} Migrated {} tracked file(s) from global tracker", "→".blue(), migrated);
-                total += migrated;
-            }
+            println!("{} Migrated {} tracked file(s) from global tracker", "→".blue(), migrated);
         }
 
-        let catalogs = crate::agent_overlay::load_effective_catalogs(&self.config_dir, workspace)?;
-        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &catalogs.agents)?;
-        if adopted > 0
-        {
-            println!("{} Adopted {} existing file(s) into .slopctl/", "→".blue(), adopted);
-            total += adopted;
-        }
-
-        Ok(total)
+        Ok(migrated)
     }
 
     /// Extract a skill name from an installed skill file path

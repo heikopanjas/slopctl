@@ -100,6 +100,16 @@ impl FileMetadata
         self.ref_count == 0
     }
 
+    /// Returns true for an entry an older slopctl registered from disk instead of installing
+    ///
+    /// Registration recorded existing files with `template_version` 0, no owners and no origin,
+    /// which made user files look like pristine installs. Such entries are dropped on load, so
+    /// those files count as the user's again (`docs/SPEC.md`, SPEC-11).
+    fn is_registration_leftover(&self) -> bool
+    {
+        self.template_version == 0 && self.is_unreferenced() == true && self.origin.is_none() == true
+    }
+
     /// Add a unique language owner, incrementing `ref_count` only on change.
     fn add_lang(&mut self, lang: &str)
     {
@@ -269,6 +279,7 @@ impl FileTracker
         {
             meta.normalize_ownership();
         }
+        metadata.retain(|_, meta| meta.is_registration_leftover() == false);
 
         Ok(Self { workspace: workspace.to_path_buf(), metadata_path, metadata, unparseable: Cell::new(unparseable) })
     }
@@ -582,152 +593,6 @@ impl FileTracker
         self.get_metadata(file_path).map(|meta| meta.is_unreferenced()).unwrap_or(true)
     }
 
-    /// Adopt existing slopctl-managed files using a specific agent catalog
-    ///
-    /// Scans the workspace for agent instruction files, skills, and commands
-    /// using the given `AgentCatalog`. Any files found on disk that are not
-    /// already in the tracker are adopted with their current SHA and a
-    /// `template_version` of 0 (indicating adoption rather than a template
-    /// install).
-    ///
-    /// # Returns
-    ///
-    /// The number of files adopted.
-    pub fn adopt_untracked_files_from_catalog(&mut self, workspace: &Path, catalog: &crate::agent_defaults::AgentCatalog) -> anyhow::Result<usize>
-    {
-        use crate::agent_defaults;
-
-        let mut adopted = 0usize;
-        let userprofile = dirs::home_dir().unwrap_or_default();
-
-        // Adopt AGENTS.md (category "main")
-        let agents_md = workspace.join("AGENTS.md");
-        if agents_md.exists() == true
-        {
-            adopted += self.try_adopt(&agents_md, LANG_NONE, AGENT_ALL, "main")?;
-        }
-
-        // Adopt agent instruction files (category "agent") for all known agents.
-        // Agent markers are directories used for detection, not managed files, so they
-        // are skipped here and skills/prompts are adopted by the directory scans below.
-        for agent in &catalog.agents
-        {
-            for marker in &agent.markers
-            {
-                let path = workspace.join(marker);
-                if path.is_file() == true
-                {
-                    adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "agent")?;
-                }
-            }
-        }
-
-        // Adopt skills (category "skill") from all workspace-scoped skill directories
-        for agent in &catalog.agents
-        {
-            if agent.skill_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
-            {
-                let skill_dir = agent_defaults::resolve_placeholder_path(&agent.skill_dir, workspace, &userprofile);
-                if skill_dir.exists() == true &&
-                    let Ok(entries) = fs::read_dir(&skill_dir)
-                {
-                    for entry in entries.flatten()
-                    {
-                        if entry.path().is_dir() == true
-                        {
-                            let mut files = Vec::new();
-                            crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
-                            for file in files
-                            {
-                                adopted += self.try_adopt(&file, LANG_NONE, AGENT_ALL, "skill")?;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also scan the cross-client skill directory
-        let cross_client = agent_defaults::resolve_placeholder_path(agent_defaults::CROSS_CLIENT_SKILL_DIR, workspace, &userprofile);
-        if cross_client.exists() == true &&
-            let Ok(entries) = fs::read_dir(&cross_client)
-        {
-            for entry in entries.flatten()
-            {
-                if entry.path().is_dir() == true
-                {
-                    let mut files = Vec::new();
-                    crate::utils::collect_files_recursive(&entry.path(), &mut files)?;
-                    for file in files
-                    {
-                        adopted += self.try_adopt(&file, LANG_NONE, AGENT_ALL, "skill")?;
-                    }
-                }
-            }
-        }
-
-        // Adopt commands/prompts from all workspace-scoped prompt directories
-        for agent in &catalog.agents
-        {
-            if agent.prompt_dir.starts_with(agent_defaults::PLACEHOLDER_WORKSPACE) == true
-            {
-                let prompt_dir = agent_defaults::resolve_placeholder_path(&agent.prompt_dir, workspace, &userprofile);
-                if prompt_dir.exists() == true &&
-                    let Ok(entries) = fs::read_dir(&prompt_dir)
-                {
-                    for entry in entries.flatten()
-                    {
-                        let path = entry.path();
-                        if path.is_file() == true
-                        {
-                            adopted += self.try_adopt(&path, LANG_NONE, AGENT_ALL, "command")?;
-                        }
-                    }
-                }
-            }
-        }
-
-        if adopted > 0
-        {
-            self.save()?;
-        }
-
-        Ok(adopted)
-    }
-
-    /// Try to adopt a single file if not already tracked
-    ///
-    /// Returns 1 if the file was adopted, 0 if it was already tracked.
-    fn try_adopt(&mut self, file_path: &Path, lang: &str, agent: &str, category: &str) -> anyhow::Result<usize>
-    {
-        let key = self.to_relative_key(file_path);
-        if self.metadata.contains_key(&key) == true
-        {
-            return Ok(0);
-        }
-
-        let sha = Self::calculate_sha256(file_path)?;
-        let now = chrono::Utc::now().to_rfc3339();
-
-        let mut metadata = FileMetadata {
-            original_sha:     sha,
-            template_sha:     None,
-            template_version: 0,
-            installed_date:   now,
-            lang:             Vec::new(),
-            agent:            Vec::new(),
-            ref_count:        0,
-            category:         category.to_string(),
-            origin:           None
-        };
-        metadata.add_lang(lang);
-        metadata.add_agent(agent);
-        metadata.normalize_ownership();
-        self.metadata.insert(key, metadata);
-
-        Ok(1)
-    }
-
     /// Records which template system provided a tracked file
     ///
     /// Does nothing for untracked files; call after recording the installation.
@@ -879,35 +744,6 @@ mod tests
 
     use super::*;
 
-    fn synthetic_catalog() -> crate::agent_defaults::AgentCatalog
-    {
-        crate::agent_defaults::parse_agent_catalog(
-            r#"
-version: 1
-agents:
-  - name: bogus
-    markers:
-      - .bogus
-    prompt_dir: '$workspace/.bogus/commands'
-    skill_dir: '$workspace/.bogus/skills'
-    reads_cross_client_skills: false
-  - name: fake
-    markers:
-      - .fake
-    prompt_dir: '$workspace/.fake/commands'
-    skill_dir: '$workspace/.fake/skills'
-    reads_cross_client_skills: true
-  - name: foobar
-    markers:
-      - .foobar
-    prompt_dir: '$workspace/.foobar/commands'
-    skill_dir: '$workspace/.agents/skills'
-    reads_cross_client_skills: true
-"#
-        )
-        .expect("synthetic catalog should parse")
-    }
-
     #[test]
     fn test_calculate_sha256() -> anyhow::Result<()>
     {
@@ -946,6 +782,27 @@ agents:
         let metadata = tracker.get_metadata(&merged_file).expect("entry must exist");
         assert!(metadata.template_sha.is_none() == true);
         assert_eq!(metadata.template_sha(), installed_sha);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_drops_registration_leftovers() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path();
+        let mut tracker = FileTracker::new(workspace)?;
+
+        // Older versions registered files from disk with version 0, no owners and no origin.
+        tracker.record_installation(&workspace.join("registered.md"), "sha1".into(), 0, LANG_NONE.into(), AGENT_ALL.into(), "command".into());
+        tracker.record_installation(&workspace.join("UPDATES.md"), "sha2".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "integration".into());
+        tracker.record_installation(&workspace.join("lang.toml"), "sha3".into(), 0, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let reloaded = FileTracker::new(workspace)?;
+        assert!(reloaded.get_metadata(&workspace.join("registered.md")).is_none() == true, "a registration leftover must be dropped");
+        assert!(reloaded.get_metadata(&workspace.join("UPDATES.md")).is_some() == true, "an installed file without owners must be kept");
+        assert!(reloaded.get_metadata(&workspace.join("lang.toml")).is_some() == true, "an owned entry must be kept");
 
         Ok(())
     }
@@ -1413,74 +1270,6 @@ agents:
         let mut tracker = FileTracker::new(workspace)?;
         let count = tracker.migrate_from_global(&PathBuf::from("/nonexistent/tracker.json"))?;
         assert_eq!(count, 0);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_adopt_untracked_files_discovers_agents_and_skills() -> anyhow::Result<()>
-    {
-        let temp_dir = TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        // AGENTS.md → "main"
-        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-        fs::create_dir_all(workspace.join(".bogus"))?;
-        fs::create_dir_all(workspace.join(".bogus/skills/git-workflow"))?;
-        fs::write(workspace.join(".bogus/skills/git-workflow/SKILL.md"), b"# Skill")?;
-        fs::create_dir_all(workspace.join(".bogus/commands"))?;
-        fs::write(workspace.join(".bogus/commands/init-session.md"), b"# Command")?;
-
-        let mut tracker = FileTracker::new(workspace)?;
-        assert_eq!(tracker.get_entries().len(), 0);
-
-        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
-        assert_eq!(adopted, 3);
-
-        let entries = tracker.get_entries();
-        assert_eq!(entries.len(), 3);
-
-        let categories: Vec<&str> = entries.iter().map(|(_, m)| m.category.as_str()).collect();
-        assert!(categories.contains(&"main"));
-        assert!(categories.contains(&"skill"));
-        assert!(categories.contains(&"command"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_adopt_skips_already_tracked() -> anyhow::Result<()>
-    {
-        let temp_dir = TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-
-        let mut tracker = FileTracker::new(workspace)?;
-        tracker.record_installation(&workspace.join("AGENTS.md"), "sha1".into(), 5, LANG_NONE.into(), AGENT_ALL.into(), "main".into());
-        assert_eq!(tracker.get_entries().len(), 1);
-
-        let adopted = tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
-        assert_eq!(adopted, 0);
-        assert_eq!(tracker.get_entries().len(), 1);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_adopt_sets_template_version_zero() -> anyhow::Result<()>
-    {
-        let temp_dir = TempDir::new()?;
-        let workspace = temp_dir.path();
-
-        fs::write(workspace.join("AGENTS.md"), b"# Instructions")?;
-
-        let mut tracker = FileTracker::new(workspace)?;
-        tracker.adopt_untracked_files_from_catalog(workspace, &synthetic_catalog())?;
-
-        let entries = tracker.get_entries();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].1.template_version, 0);
 
         Ok(())
     }

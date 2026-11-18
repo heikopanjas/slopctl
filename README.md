@@ -519,6 +519,7 @@ slopctl init --lang rust --dry-run
 - Checks for local modifications to AGENTS.md (detects if template marker has been removed)
 - If local AGENTS.md has been customized and `--force` is not specified, skips AGENTS.md
 - Tracked files with local modifications that add no new owners are skipped (local version kept); `merge` is their update path, `--force` overwrites
+- **Files slopctl did not install** belong to you. A file at a template target that is byte-identical to the template is recorded as installed; one that differs stops init with a hint to combine it with `slopctl merge` or move it aside. slopctl never records your existing files on its own, so no command overwrites or deletes them
 - If `--force` is specified, overwrites local files regardless of modifications
 - If `--dry-run` is specified, shows what would be created/modified without making changes
 - Files are placed according to `templates.yml` configuration with placeholder resolution:
