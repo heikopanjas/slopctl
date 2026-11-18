@@ -4,6 +4,27 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 20:59 (v23.3.4, keep merged files on update and init)
+
+- fixed SPEC-10: `merge` recorded the merged SHA, so the file looked
+  unmodified and the next `update` or `init` replaced the merge with the
+  plain template without warning
+- the tracker now stores an optional `template_sha` next to
+  `original_sha`, written by `merge` only when the two differ; plain
+  copies clear it, so existing trackers load and save unchanged
+- new `FileStatus::Merged`: `init` and `update` keep a merged file while
+  its template is unchanged, skip it with a merge hint when the template
+  changed, and replace it only with `--force`; partial update needs
+  `--force` to select one; `doctor` reports it as ok
+- `merge` no longer sends an unedited merge of the current template back
+  to the LLM on every run
+- `init` tracker refreshes keep the installed SHA instead of writing the
+  source SHA over it
+- rationale: the tracker could not tell what slopctl wrote from what the
+  template contained, which is the root cause behind the overwrite
+- version bump: 23.3.3 to 23.3.4 (PATCH - bug fix, tracker format is
+  backward compatible)
+
 ### 2026-11-18 20:49 (v23.3.3, behavioral spec and review)
 
 - added `docs/SPEC.md`, a full behavioral spec of every command,

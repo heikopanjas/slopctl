@@ -794,6 +794,8 @@ slopctl merge --list-models                      # List available models from th
 
 **Changelog preservation:** For files carrying the `<!-- {changelog} -->` marker (AGENTS.md-style templates, `UPDATES.md`), only the content above the marker is compared and merged; the user-owned log below the marker is never sent to the LLM and is re-attached verbatim.
 
+**Merged files:** After a merge, the tracker records both the merged content and the template it was based on. A later `merge` skips a merged file that nobody edited and whose template has not changed, so it is not sent to the LLM again.
+
 **Merge candidates:** Files that are both user-modified (SHA changed since install) AND have an updated template source. Includes tracked files, skill files, and untracked files that exist on disk with a matching template source. Without `--agent`, all agents detected in the workspace are included, so every agent's instruction and prompt files participate.
 
 ### `update` - Refresh Installed Templates
@@ -807,6 +809,8 @@ Files and skills are routed to the same workspace locations as `init`. The scope
 In full-workspace mode, a missing agent instruction or prompt file is only recreated for an agent that owns at least one tracker entry — never for an agent known solely from its marker directory. Files it refuses to create for that reason are reported per agent with a `slopctl init --agent <name>` hint, and `--force` does not override this. An explicit `--agent <name>` that owns nothing in the tracker errors immediately with the same hint, rather than silently doing nothing.
 
 When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
+
+Files written by `merge` are tracked as merged: the tracker remembers which template content the merge was based on. `update` and `init` leave a merged file alone while that template is unchanged. When the template changes, they skip the file with a hint to run `slopctl merge` again; `--force` replaces it with the plain template. Selecting a merged file with `--file`/`--skill` needs `--force`, like a customized file.
 
 This differs from `templates --update` (which downloads/updates the *global* catalog) and from `init` (which installs something *new*: a language or an agent). `AGENTS.md` and changelog-marker files (e.g. `UPDATES.md`) are never refreshed by `update`, under any flag; use `merge`.
 

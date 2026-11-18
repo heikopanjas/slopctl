@@ -193,7 +193,7 @@ impl TemplateManager
             {
                 match tracker.check_modification(target)?
                 {
-                    | FileStatus::Modified | FileStatus::NotTracked => blocked.push(display_path(target, &workspace)),
+                    | FileStatus::Modified | FileStatus::Merged | FileStatus::NotTracked => blocked.push(display_path(target, &workspace)),
                     | FileStatus::Unmodified | FileStatus::Deleted =>
                     {}
                 }
@@ -328,6 +328,7 @@ impl TemplateManager
         // untracked ones (kept with a report; --force overwrites), drop up-to-date copies.
         let mut to_refresh: Vec<(&PathBuf, &ResolvedFile)> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
+        let mut merged_skipped: Vec<String> = Vec::new();
         let mut changelog_skipped: Vec<String> = Vec::new();
         let mut agent_skipped: BTreeMap<String, usize> = BTreeMap::new();
         let mut up_to_date = 0usize;
@@ -370,6 +371,25 @@ impl TemplateManager
                             to_refresh.push((target, entry));
                         }
                     }
+                    | FileStatus::Merged =>
+                    {
+                        // A merged file is current while its template is unchanged; once the
+                        // template moves on, 'merge' is the update path and --force overwrites.
+                        let source_sha = FileTracker::calculate_sha256(&entry.source)?;
+                        if tracker.get_metadata(target).is_some_and(|metadata| metadata.template_sha() == source_sha) == true
+                        {
+                            up_to_date += 1;
+                        }
+                        else if force == true
+                        {
+                            origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
+                            to_refresh.push((target, entry));
+                        }
+                        else
+                        {
+                            merged_skipped.push(display_path(target, &workspace));
+                        }
+                    }
                     | FileStatus::Modified | FileStatus::NotTracked =>
                     {
                         origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
@@ -390,7 +410,7 @@ impl TemplateManager
         let mut stale_to_remove: Vec<&PathBuf> = Vec::new();
         for target in &stale
         {
-            if force == false && tracker.check_modification(target)? == FileStatus::Modified
+            if force == false && matches!(tracker.check_modification(target)?, FileStatus::Modified | FileStatus::Merged) == true
             {
                 skipped.push(display_path(target, &workspace));
             }
@@ -408,8 +428,13 @@ impl TemplateManager
 
         if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
         {
-            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len() + changelog_skipped.len() + agent_skipped_total);
+            println!(
+                "{} Workspace is up to date ({} file(s) checked)",
+                "✓".green(),
+                up_to_date + skipped.len() + merged_skipped.len() + changelog_skipped.len() + agent_skipped_total
+            );
             report_skipped(&skipped);
+            report_merged_skipped(&merged_skipped);
             report_changelog_skipped(&changelog_skipped);
             report_agent_skipped(&agent_skipped);
             println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
@@ -434,6 +459,10 @@ impl TemplateManager
             for path in &skipped
             {
                 println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), path);
+            }
+            for path in &merged_skipped
+            {
+                println!("  {} {} (skipped - merged, template changed)", "○".yellow(), path);
             }
             for path in &changelog_skipped
             {
@@ -477,6 +506,7 @@ impl TemplateManager
         file_tracker.save()?;
 
         report_skipped(&skipped);
+        report_merged_skipped(&merged_skipped);
         report_changelog_skipped(&changelog_skipped);
         report_agent_skipped(&agent_skipped);
         println!("{} Refreshed {} file(s); {} already up to date", "✓".green(), to_refresh.len(), up_to_date);
@@ -609,6 +639,18 @@ fn report_skipped(skipped: &[String])
     for path in skipped
     {
         println!("  {} {} (skipped - local modifications preserved; use 'slopctl merge' or --force)", "○".yellow(), path.yellow());
+    }
+}
+
+/// Reports merged targets whose template changed since the merge
+///
+/// The installed content is a merge of an older template; refreshing it would drop
+/// the merged changes, so `merge` is the update path and `--force` overwrites.
+fn report_merged_skipped(skipped: &[String])
+{
+    for path in skipped
+    {
+        println!("  {} {} (skipped - merged file, template changed; use 'slopctl merge' or --force)", "○".yellow(), path.yellow());
     }
 }
 

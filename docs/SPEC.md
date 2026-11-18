@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.3)
+**Spec version:** 1 (describes slopctl v23.3.4)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -258,7 +258,8 @@ An agent missing from the agent catalog counts as a cross-client reader (`reads_
 
 | Field | Meaning |
 |---|---|
-| `original_sha` | SHA-256 recorded at install. For copied files: the source's SHA. For AGENTS.md: the assembled content's SHA. After `merge`: the merged content's SHA. |
+| `original_sha` | SHA-256 of what slopctl wrote. For copied files: the source's SHA. For AGENTS.md: the assembled content's SHA. After `merge`: the merged content's SHA. |
+| `template_sha` | SHA-256 of the template content a merged file was based on. Stored only when it differs from `original_sha`; absent means the file is a plain template copy. Written by `merge`, cleared by any plain copy. |
 | `template_version` | Catalog `version` at install; `0` for registered files. |
 | `installed_date` | RFC 3339 timestamp. |
 | `lang`, `agent` | Owner arrays, sorted and unique. |
@@ -281,6 +282,7 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 | `NotTracked` | No entry. |
 | `Deleted` | Entry exists, file does not. |
 | `Unmodified` | File SHA equals `original_sha`. |
+| `Merged` | File SHA equals `original_sha` and the entry has a `template_sha`: an unedited merge result. |
 | `Modified` | File SHA differs. |
 
 > <a id="spec-10"></a>**SPEC-10** · P0 · tracker · *verified*
@@ -292,6 +294,13 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 > - `installed_sha`: SHA of what slopctl wrote.
 >
 > The status then answers two separate questions: did the user edit the file (`disk ≠ installed_sha`), and is the file a plain copy of its template (`installed_sha == template_sha`). Automatic refresh (`init`, bare `update`) MUST only replace a file that is unedited **and** a plain copy. A merged file whose template moved on is reported as "merged, template changed, run `slopctl merge`". Old entries load with `template_sha = original_sha`.
+>
+> **Resolved in v23.3.4.** `original_sha` keeps its role as the installed hash, and an optional `template_sha` is stored only for merged files, so existing trackers load unchanged. `check_modification` reports the new `FileStatus::Merged`.
+> - `init`: a merged file with an unchanged template gets `RefreshTracker`, which records owners and keeps both hashes. With a changed template it is treated like a modified file (`SkipModified`, `Copy` with `--force`, error when owners would be added).
+> - Bare `update`: up to date while the template is unchanged; skipped with a `merge` hint when it changed; `--force` refreshes. Stale merged skill files are kept like modified ones.
+> - Partial `update`: a selected merged file needs `--force`.
+> - `merge`: records `template_sha` and skips unedited merges of the current template instead of calling the LLM again (`settle_current_merges`).
+> - `doctor`: reports merged files as OK.
 
 ### 5.3 Ownership
 
@@ -338,7 +347,7 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 >
 > **Proposal.**
 > - Registration MUST NOT run implicitly. It becomes an explicit step (`slopctl doctor --fix`, or `init` when it finds no tracker, after printing what it will register).
-> - Registered files get `origin: user`, and `installed_sha` set but `template_sha` unset, so they never count as plain copies ([SPEC-10](#spec-10)). `update` and `init` treat them as modified. `remove` never deletes them.
+> - Registered files get `origin: user`, which marks them as never being a plain template copy, even though they have no `template_sha` ([SPEC-10](#spec-10)). `update` and `init` treat them as modified. `remove` never deletes them.
 > - Only files that match a catalog target are registered. Everything else in skill and prompt directories stays untracked and therefore untouchable.
 > - Migration of the legacy JSON stays automatic but MUST NOT run in dry-run mode.
 
@@ -634,9 +643,10 @@ Pipeline:
 | Unmodified, SHA differs, no new owners | `Copy` |
 | Deleted (tracked, missing) | `Copy` |
 | Not tracked | error, even with `--force` |
-| Modified, adds owners | error |
-| Modified, `--force` | `Copy` |
-| Modified | `SkipModified` |
+| Modified or merged with changed template, adds owners | error |
+| Merged, template unchanged | `RefreshTracker` (owners only, merged content and hashes kept) |
+| Modified or merged with changed template, `--force` | `Copy` |
+| Modified or merged with changed template | `SkipModified` |
 
 8. With `--dry-run`, print the plan and stop.
 9. Write AGENTS.md (skipped when customized, unless `--force`), create directories, copy files, save the tracker.
@@ -679,14 +689,15 @@ slopctl update [--file <FILE>]... [-s|--skill <SKILL>]... [-l|--lang <LANG>] [-a
    - Missing: create it if the category is not `agent`, or the target is still tracked, or an owning agent is installed. Otherwise report "run `slopctl init --agent X`".
    - Changelog-protected: skip.
    - Unmodified or Deleted: refresh when the source SHA differs.
+   - Merged: up to date while the template is unchanged; otherwise skipped with a `merge` hint, or refreshed with `--force`.
    - Modified or not tracked: refresh only with `--force`.
-6. Write, prune stale copies, save the tracker.
+6. Write, prune stale copies (modified and merged ones only with `--force`), save the tracker.
 
 **Partial update** (`update_partial`, `partial_update.rs:45`):
 1. Same setup. Language is `--lang` or the first installed language. Agents are the effective agent scope.
 2. `--file` matches language files, integration files, agent instructions and prompts. `--skill` matches agent, language and top-level skills. A missing cached source is a hard error.
 3. Errors: AGENTS.md selected; selected source contains the changelog marker; a file inside a skill directory (use `--skill`); no match (lists what exists).
-4. Any modified or untracked target without `--force` fails the whole run.
+4. Any modified, merged or untracked target without `--force` fails the whole run.
 5. Write, prune, save.
 
 > <a id="spec-31"></a>**SPEC-31** · P1 · update
@@ -741,8 +752,9 @@ Pipeline:
    - **New**: target missing.
    - **Unchanged**: identical, or both changelog-protected and identical above the marker.
    - **Diverged**: everything else. For changelog-protected files only the part above the marker is sent.
+   - A diverged file that is an unedited merge (`Merged`) of the current template is moved back to **Unchanged** (`settle_current_merges`).
 4. If anything diverged, resolve the LLM provider (section 3.3).
-5. New files are written and recorded. Diverged files stream into `<file>.partial`; on success the result replaces the file (or goes to `.merged`), the partial is removed, and the merged SHA is recorded. A truncated response keeps the partial. A failure prints a warning. An existing `.partial` skips the file.
+5. New files are written and recorded. Diverged files stream into `<file>.partial`; on success the result replaces the file (or goes to `.merged`), the partial is removed, and the merged SHA is recorded together with the template's SHA. A truncated response keeps the partial. A failure prints a warning. An existing `.partial` skips the file.
 6. Save the tracker (also in dry run, [SPEC-48](#spec-48)).
 
 For AGENTS.md the prompt includes an `<available_skills>` block so the model can drop prose that a skill already covers.
@@ -759,7 +771,7 @@ For AGENTS.md the prompt includes an `<available_skills>` block so the model can
 > <a id="spec-37"></a>**SPEC-37** · P2 · merge
 >
 > **Problem.**
-> - Every file that differs from its template goes to the LLM, including unedited files that a plain copy would refresh. That costs tokens and risks hallucinated changes.
+> - Every file that differs from its template goes to the LLM, including unedited files that a plain copy would refresh. That costs tokens and risks hallucinated changes. (Since v23.3.4, unedited merges of the current template are skipped.)
 > - New files are created for agents that are only detected, bypassing the `update` gate ([SPEC-19](#spec-19)).
 > - `Unchanged` never repairs a stale tracker SHA.
 > - A truncated or failed merge still exits 0.
@@ -978,6 +990,7 @@ The client uses a fixed 300 s timeout and a 32768-token output limit (`llm.rs:23
 > - README lines 1454 and 1731 list Vibe as native-only; v22.6.0 made it a cross-client reader.
 > - The `CROSS_CLIENT_SKILL_DIR` doc comment names Gemini CLI, which is not in the catalog.
 > - The `command` and section tracker categories are not documented in AGENTS.md.
+> - README lists a `merge --list-models` / `-L` option that the CLI does not have.
 >
 >
 > **Proposal.** Fix the comments and README in one docs pass. From now on, this spec is updated in the same change as the behavior.
@@ -1038,14 +1051,14 @@ The same reconciliation can later replace the per-file logic for language and ag
 
 ### 10.3 Two hashes per tracked file
 
-`template_sha` and `installed_sha` ([SPEC-10](#spec-10)). Statuses:
+Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_sha` ([SPEC-10](#spec-10)). Statuses:
 
 | Status | Condition | Automatic refresh |
 |---|---|---|
 | pristine | disk = installed = template | yes, when the template changes |
 | merged | disk = installed ≠ template | no; `update` points to `merge` when the template changes |
 | modified | disk ≠ installed | no; `--force` or `merge` |
-| registered | `template_sha` unset | no; treated as modified |
+| registered | `origin: user` ([SPEC-11](#spec-11), not implemented yet) | no; treated as modified |
 
 ### 10.4 Files outside the workspace
 
@@ -1064,11 +1077,11 @@ The same reconciliation can later replace the per-file logic for language and ag
 
 ## 11. Issue register
 
-All issues are open.
+All issues are open unless marked resolved.
 
 | ID | Sev | Area | Summary | Fix direction |
 |---|---|---|---|---|
-| [SPEC-10](#spec-10) | P0 | tracker | `update`/`init` overwrite merged files | two hashes (10.3) |
+| [SPEC-10](#spec-10) | P0 | tracker | `update`/`init` overwrite merged files | **resolved in v23.3.4** |
 | [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | explicit registration, `origin: user` |
 | [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | reconcile against full placement |
 | [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | never delete outside the workspace |
@@ -1121,7 +1134,7 @@ All issues are open.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10), [SPEC-39](#spec-39), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11), [SPEC-48](#spec-48). Each can ship alone. SPEC-10 needs a tracker format change, so pair it with [SPEC-13](#spec-13).
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11), [SPEC-48](#spec-48). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
 3. **Skill placement** (10.2): [SPEC-18](#spec-18), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).

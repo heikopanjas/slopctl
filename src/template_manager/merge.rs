@@ -13,7 +13,7 @@ use super::TemplateManager;
 use crate::{
     EffectiveConfig, Result,
     agent_overlay::load_effective_catalogs,
-    file_tracker::FileTracker,
+    file_tracker::{FileStatus, FileTracker},
     llm::{ChatMessage, ChatResponse, LlmClient, Provider},
     model_defaults::{self, ModelCatalog},
     template_engine::{self, CHANGELOG_MARKER, ResolvedContent, TemplateEngine, UpdateOptions}
@@ -64,7 +64,9 @@ enum FileClass
         origin:           Option<String>,
         display:          String,
         /// True when this file is the main AGENTS.md; enables skill-aware merging
-        is_main:          bool
+        is_main:          bool,
+        /// SHA-256 of the full template content, recorded so a later update can tell the merge is current
+        template_sha:     String
     }
 }
 
@@ -144,7 +146,8 @@ impl TemplateManager
             }
             map
         };
-        let classified = classify_files(&content_map, &workspace);
+        let mut file_tracker = FileTracker::new(&workspace)?;
+        let classified = settle_current_merges(classify_files(&content_map, &workspace), &file_tracker)?;
         let skills = collect_skills(&content_map);
 
         let new_count = classified.iter().filter(|c| matches!(c, FileClass::New { .. })).count();
@@ -185,7 +188,6 @@ impl TemplateManager
             None
         };
 
-        let mut file_tracker = FileTracker::new(&workspace)?;
         let template_version = template_engine::load_template_config(&self.config_dir).map(|c| c.version).unwrap_or(0);
 
         let mut total_input: u64 = 0;
@@ -223,7 +225,7 @@ impl TemplateManager
                         println!("  {} {} (unchanged)", "○".dimmed(), display.dimmed());
                     }
                 }
-                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, origin, display, is_main } =>
+                | FileClass::Diverged { target, template_content, user_content, user_changelog, lang, agent, category, origin, display, is_main, template_sha } =>
                 {
                     if dry_run == true
                     {
@@ -359,7 +361,7 @@ impl TemplateManager
                                 {
                                     println!("  {} merged {}", "✓".green(), display.yellow());
                                     let sha = FileTracker::calculate_sha256(target)?;
-                                    file_tracker.record_installation_with_owners(target, sha, template_version, lang, agent, category.clone());
+                                    file_tracker.record_installation_with_template(target, sha, template_sha.clone(), template_version, lang, agent, category.clone());
                                     file_tracker.set_origin(target, origin.as_deref());
                                 }
                             }
@@ -480,6 +482,7 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
     {
         let display = target.strip_prefix(workspace).unwrap_or(target).display().to_string();
         let template_content = &resolved.content;
+        let template_sha = FileTracker::calculate_sha256_bytes(template_content.as_bytes());
         let is_main = target.file_name().is_some_and(|n| n == "AGENTS.md");
 
         if target.exists() == false
@@ -518,7 +521,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                         category: resolved.category.clone(),
                         origin: resolved.origin.clone(),
                         display,
-                        is_main
+                        is_main,
+                        template_sha
                     });
                 }
             }
@@ -534,7 +538,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                     category: resolved.category.clone(),
                     origin: resolved.origin.clone(),
                     display,
-                    is_main
+                    is_main,
+                    template_sha
                 });
             }
         }
@@ -550,7 +555,8 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
                 category: resolved.category.clone(),
                 origin: resolved.origin.clone(),
                 display,
-                is_main
+                is_main,
+                template_sha
             });
         }
     }
@@ -568,6 +574,32 @@ fn classify_files(content_map: &HashMap<PathBuf, ResolvedContent>, workspace: &P
     });
 
     classified
+}
+
+/// Reclassifies diverged files that are an unedited merge of the current template as unchanged
+///
+/// A merged file differs from its template by design. Without this step every merged file
+/// would go back to the LLM on each run, although neither the user nor the template changed
+/// it since the last merge.
+fn settle_current_merges(classified: Vec<FileClass>, tracker: &FileTracker) -> Result<Vec<FileClass>>
+{
+    let mut settled = Vec::with_capacity(classified.len());
+    for class in classified
+    {
+        let is_current_merge = match &class
+        {
+            | FileClass::Diverged { target, template_sha, .. } =>
+                tracker.check_modification(target)? == FileStatus::Merged &&
+                    tracker.get_metadata(target).is_some_and(|metadata| metadata.template_sha() == template_sha) == true,
+            | FileClass::New { .. } | FileClass::Unchanged { .. } => false
+        };
+        match class
+        {
+            | FileClass::Diverged { display, .. } if is_current_merge == true => settled.push(FileClass::Unchanged { display }),
+            | other => settled.push(other)
+        }
+    }
+    Ok(settled)
 }
 
 /// Prints the outgoing chat messages to stdout for verbose mode
@@ -969,6 +1001,30 @@ providers:
         let classified = classify_files(&map, workspace);
         assert_eq!(classified.len(), 1);
         assert!(matches!(&classified[0], FileClass::New { display, .. } if display == "new_file.md") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_settle_current_merges_skips_merged_file_until_template_changes() -> anyhow::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let workspace = dir.path();
+
+        let target = workspace.join("merged.md");
+        fs::write(&target, "template plus user lines")?;
+        let mut tracker = FileTracker::new(workspace)?;
+        let installed_sha = FileTracker::calculate_sha256(&target)?;
+        tracker.record_installation_with_template(&target, installed_sha, FileTracker::calculate_sha256_bytes(b"template"), 5, &[], &[], "language".into());
+
+        let mut map = HashMap::new();
+        map.insert(normalize_path(&target), rc("template"));
+        let settled = settle_current_merges(classify_files(&map, workspace), &tracker)?;
+        assert!(matches!(&settled[0], FileClass::Unchanged { .. }) == true, "an unedited merge of the current template needs no LLM call");
+
+        map.insert(normalize_path(&target), rc("newer template"));
+        let settled = settle_current_merges(classify_files(&map, workspace), &tracker)?;
+        assert!(matches!(&settled[0], FileClass::Diverged { .. }) == true, "a template change after the merge needs a new merge");
+
         Ok(())
     }
 
