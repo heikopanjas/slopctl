@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-11-18 (v23.3.6)
+**Last updated:** 2026-11-18 (v23.3.7)
 
 <!-- {mission} -->
 
@@ -118,6 +118,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 
 ### Catalog Clash Resilience
 
+- Stale skill pruning in `update` (`collect_stale_skill_files`) compares against the complete workspace resolution (`desired_targets`), never against a scope narrowed by `--agent`/`--lang`/`--skill`; a narrowed run additionally prunes only inside the skill directories its selected set writes to. Several agents ship skills with the same name (e.g. `init-session`), so a narrowed comparison deletes other agents' copies
 - One source per skill name: top-level, language and shared skills install into the same skill directories, so a name defined with two different sources there is a hard error in the strict loader (`bom::require_unique_skill_sources`, called from `load_effective_catalogs`) and an error in `templates --verify`. Agent skill lists may carry their own variant (they install into the agent's own directory); verify only warns about those. The lenient loader skips the check so `remove`/`status` keep working
 - Include resolution tracks only the current include path (a stack, not a visited set), so a group or language reached through two paths (a diamond) is not a cycle. Identical entries reached twice are deduped (`resolve_language_files`/`resolve_language_skills`); only different sources for one target are a "duplicate target" error. The engine likewise collapses resolved entries with the same source and target, unioning their owners (`merge_identical_entries`), so a skill listed in a language and the top-level list installs once
 - `fetch_catalog` (`template_manager/mod.rs`) is the only way a catalog enters a cache directory: it stages into a sibling dir and swaps it in after a successful fetch, so files dropped upstream never linger and a failed fetch keeps the old cache. `agent-defaults.yml`, `model-defaults.yml` and the legacy tracker have their own update paths and are carried over

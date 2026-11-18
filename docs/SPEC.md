@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.6)
+**Spec version:** 1 (describes slopctl v23.3.7)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -466,8 +466,8 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 | `init --agent <native-only>` (no `--lang`) | Agent skills to its dir. Top-level skills placed again with the new agent added as owner on every copy. Installed languages' skills hydrated into its dir. |
 | `init --agent <native-only> --lang L2` with L1 installed | No hydration. L1's skills are missing from the new agent's dir until a bare `update`. |
 | `init --agent <cross-client>` when only native-only agents exist | Language skills are not placed into `.agents/skills/`. A later bare `update` fills the gap. |
-| bare `update` | Resolves every installed language against every detected agent and places skills accordingly. Prunes tracked copies of still-resolved skills whose target was dropped. |
-| `update --skill S` | Resolves S for the detected agents. Prunes tracked copies of S that are not in the new set. Blocks on modified or untracked targets without `--force`. |
+| bare `update` | Resolves every installed language against every detected agent and places skills accordingly. Prunes tracked copies of still-resolved skills that the whole workspace no longer produces; with `--agent`/`--lang` only inside the skill directories the run writes to (since v23.3.7). |
+| `update --skill S` | Resolves S for the detected agents. Prunes tracked copies of S that the whole workspace no longer produces, with the same scope limit. Blocks on modified, merged or untracked targets without `--force`. |
 | `remove --agent A` | Deletes tracked, unedited files under A's workspace `skill_dir`, whatever their owners. If A is a cross-client reader and no other detected agent is, deletes tracked, unedited non-language files in `.agents/skills/`. Untracked files are kept; modified files only go with `--force` (since v23.3.5, [SPEC-39](#spec-39)). |
 | `remove --lang L` | For each of L's skill names, deletes tracked, unedited files in all skill directories. Deletes any tracked file whose last owner was L. |
 | skill removed upstream | Kept. `doctor` reports it as `Orphaned`. `remove` cleans it up. |
@@ -518,6 +518,8 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 > **Problem.** With `--agent X`, bare `update` resolves only X. It then collects the names of resolved skills and treats every tracked copy of those names outside the new set as stale (`partial_update.rs:316-319`, `collect_stale_skill_files` at `:634`). codex, vibe, goose and cline all ship an `init-session` skill, so `update --agent codex` deletes `.vibe/skills/init-session`, `.goose/skills/init-session` and `.cline/skills/init-session`. `update --agent codex --skill init-session` does the same. Reproduced: after `init --agent codex` and `init --agent vibe`, `update --agent codex --dry-run` lists `.vibe/skills/init-session/SKILL.md` as stale.
 >
 > **Proposal.** Staleness is decided per directory against the full desired state, never against a narrowed candidate set. `--agent` and `--lang` narrow what gets written, not what is compared. With [section 10.2](#102-skill-placement-as-reconciliation) a copy is stale only when the full placement no longer contains it.
+>
+> **Resolved in v23.3.7.** `collect_stale_skill_files` treats a tracked skill file as stale only when neither the selected set nor the complete workspace resolution (`desired_targets`, no `--lang`/`--agent` narrowing) produces it. When `--agent` or `--lang` narrows the run, pruning is also limited to the skill directories the selected set writes to, so `update --agent codex` prunes a file dropped upstream from `.codex/skills/init-session/` but leaves `.vibe/skills/init-session/` to the next bare `update`. Both bare and partial update use the rule. The original reproduction (`init --agent codex`, `init --agent vibe`, `update --agent codex --dry-run`) no longer lists the vibe copy.
 
 > <a id="spec-23"></a>**SPEC-23** · P1 · remove
 >
@@ -689,7 +691,7 @@ slopctl update [--file <FILE>]... [-s|--skill <SKILL>]... [-l|--lang <LANG>] [-a
 1. Require the cache, migrate the legacy tracker, load the strict catalogs.
 2. `resolve_workspace_sets`: every installed language (or `--lang`) crossed with every detected agent (or `--agent`).
 3. Collect candidates keyed by normalized target. Last one wins ([SPEC-34](#spec-34)).
-4. Compute stale skill copies ([SPEC-22](#spec-22)).
+4. Compute stale skill copies against the whole workspace ([SPEC-22](#spec-22)).
 5. Classify each candidate:
    - Missing: create it if the category is not `agent`, or the target is still tracked, or an owning agent is installed. Otherwise report "run `slopctl init --agent X`".
    - Changelog-protected: skip.
@@ -1090,7 +1092,7 @@ All issues are open unless marked resolved.
 |---|---|---|---|---|
 | [SPEC-10](#spec-10) | P0 | tracker | `update`/`init` overwrite merged files | **resolved in v23.3.4** |
 | [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | **resolved in v23.3.6** |
-| [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | reconcile against full placement |
+| [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | **resolved in v23.3.7** |
 | [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | never delete outside the workspace |
 | [SPEC-39](#spec-39) | P0 | remove | deletes untracked and modified user files | **resolved in v23.3.5** |
 | [SPEC-01](#spec-01) | P1 | config | malformed config silently ignored | hard error |
@@ -1141,7 +1143,7 @@ All issues are open unless marked resolved.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22) (done), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
 3. **Skill placement** (10.2): [SPEC-18](#spec-18) (done), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).
