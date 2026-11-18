@@ -4,6 +4,22 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:21 (v23.3.7, narrowed update keeps other agents skills)
+
+- fixed SPEC-22: `update --agent X` (also with `--skill`) compared stale
+  skill files only against X's own targets, so it deleted every other
+  agent's copy of a same-named skill, e.g. vibe, goose and cline
+  `init-session` on `update --agent codex`
+- `collect_stale_skill_files` now treats a tracked skill file as stale
+  only when the complete workspace resolution (`desired_targets`, no
+  narrowing) no longer produces it
+- a run narrowed by `--agent` or `--lang` additionally prunes only inside
+  the skill directories it writes to; the next bare `update` handles the
+  rest
+- rationale: scope flags narrow what update writes, never what it
+  compares against
+- version bump: 23.3.6 to 23.3.7 (PATCH - bug fix)
+
 ### 2026-11-18 21:15 (v23.3.6, no implicit registration of user files)
 
 - fixed SPEC-11: in a workspace without a tracker, every command

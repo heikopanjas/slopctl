@@ -810,7 +810,7 @@ Files and skills are routed to the same workspace locations as `init`. The scope
 
 In full-workspace mode, a missing agent instruction or prompt file is only recreated for an agent that owns at least one tracker entry — never for an agent known solely from its marker directory. Files it refuses to create for that reason are reported per agent with a `slopctl init --agent <name>` hint, and `--force` does not override this. An explicit `--agent <name>` that owns nothing in the tracker errors immediately with the same hint, rather than silently doing nothing.
 
-When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved.
+When a skill is refreshed, slopctl-managed files that were removed upstream are also deleted from the workspace and pruned from the tracker. User-added files inside the skill directory that slopctl does not track are preserved. A file counts as removed upstream only when the whole workspace no longer needs it, so `--agent`/`--lang` never delete another agent's copy of a skill with the same name; a narrowed run also prunes only inside the skill directories it refreshes.
 
 Files written by `merge` are tracked as merged: the tracker remembers which template content the merge was based on. `update` and `init` leave a merged file alone while that template is unchanged. When the template changes, they skip the file with a hint to run `slopctl merge` again; `--force` replaces it with the plain template. Selecting a merged file with `--file`/`--skill` needs `--force`, like a customized file.
 

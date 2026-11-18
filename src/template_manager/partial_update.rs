@@ -183,7 +183,8 @@ impl TemplateManager
             ));
         }
 
-        let stale = collect_stale_skill_files(&tracker, &workspace, skills, &selected);
+        let desired = self.desired_targets(&catalogs, &tracker, &workspace, force, dry_run)?;
+        let stale = collect_stale_skill_files(&tracker, &workspace, skills, &selected, &desired, agent.is_some() == true || lang.is_some() == true);
 
         // Guard customized or untracked targets unless forced.
         let mut blocked: Vec<String> = Vec::new();
@@ -315,8 +316,18 @@ impl TemplateManager
 
         // Prune tracked files of still-resolved skills that were removed upstream.
         // Skills that left the catalog entirely are untouched; 'remove' owns that case.
+        // Staleness is judged against the whole workspace, never a narrowed scope.
+        let narrowed = lang.is_some() == true || agent.is_some() == true;
+        let desired = if narrowed == true
+        {
+            self.desired_targets(&catalogs, &tracker, &workspace, force, dry_run)?
+        }
+        else
+        {
+            candidates.keys().cloned().collect()
+        };
         let resolved_skill_names: Vec<String> = candidates.keys().filter_map(|target| skill_name_of(target)).collect::<BTreeSet<String>>().into_iter().collect();
-        let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates);
+        let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates, &desired, narrowed);
 
         // Per-agent installed-ness, probed once: an agent counts as installed when it owns
         // at least one tracker entry. Never derived from marker dirs (agents create their
@@ -572,6 +583,17 @@ impl TemplateManager
 
         Ok(resolved_sets)
     }
+
+    /// Resolves every target the whole workspace should have, ignoring `--lang`/`--agent` narrowing
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if resolution fails
+    fn desired_targets(&self, catalogs: &EffectiveCatalogs, tracker: &FileTracker, workspace: &Path, force: bool, dry_run: bool) -> Result<BTreeSet<PathBuf>>
+    {
+        let sets = self.resolve_workspace_sets(catalogs, tracker, workspace, None, None, force, dry_run)?;
+        Ok(sets.iter().flat_map(|set| set.files.iter().map(|entry| normalize_path(&entry.target))).collect())
+    }
 }
 
 /// Resolves the effective agent scope for update commands
@@ -672,8 +694,16 @@ fn skill_name_of(target: &Path) -> Option<String>
     TemplateManager::extract_skill_name_from_path(target)
 }
 
-/// Collects tracked skill files for the requested skills that are absent from the new source set
-fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_skills: &[String], selected: &BTreeMap<PathBuf, &ResolvedFile>) -> Vec<PathBuf>
+/// Collects tracked skill files of the requested skills that no longer have a template source
+///
+/// A file is stale only when neither the selected set nor the complete workspace resolution
+/// (`desired`) produces it. Comparing against the selected set alone treated other agents'
+/// copies of a same-named skill as stale whenever `--agent` narrowed the scope (SPEC-22).
+/// When `narrowed`, pruning is further limited to the skill directories the selected set
+/// writes to, so a narrowed run never deletes outside its own scope.
+fn collect_stale_skill_files(
+    tracker: &FileTracker, workspace: &Path, requested_skills: &[String], selected: &BTreeMap<PathBuf, &ResolvedFile>, desired: &BTreeSet<PathBuf>, narrowed: bool
+) -> Vec<PathBuf>
 {
     if requested_skills.is_empty() == true
     {
@@ -681,15 +711,17 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
     }
 
     let requested: HashSet<&str> = requested_skills.iter().map(|s| s.as_str()).collect();
-    let new_targets: BTreeSet<PathBuf> =
-        selected.keys().filter(|target| skill_name_of(target).is_some_and(|name| requested.contains(name.as_str()))).cloned().collect();
+    let is_requested = |target: &Path| skill_name_of(target).is_some_and(|name| requested.contains(name.as_str()));
+    let selected_roots: BTreeSet<PathBuf> =
+        selected.keys().filter(|target| is_requested(target) == true).filter_map(|target| TemplateManager::skill_root_from_path(target)).collect();
 
     let mut stale: Vec<PathBuf> = tracker
         .get_entries_by_category("skill")
         .into_iter()
         .filter_map(|(relative_path, _meta)| {
             let absolute = normalize_path(&workspace.join(relative_path));
-            if skill_name_of(&absolute).is_some_and(|name| requested.contains(name.as_str())) == true && new_targets.contains(&absolute) == false
+            let in_scope = narrowed == false || TemplateManager::skill_root_from_path(&absolute).is_some_and(|root| selected_roots.contains(&root));
+            if is_requested(&absolute) == true && selected.contains_key(&absolute) == false && desired.contains(&absolute) == false && in_scope == true
             {
                 Some(absolute)
             }

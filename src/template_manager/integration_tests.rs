@@ -2120,6 +2120,49 @@ fn test_update_full_narrowed_agent_keeps_other_agent_skill_copy() -> anyhow::Res
 }
 
 #[test]
+fn test_update_narrowed_agent_keeps_other_agents_same_named_skill() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let d = fixture.config_dir.path();
+    let templates = d.join("templates.yml");
+    let yaml = fs::read_to_string(&templates)?
+        .replace("  bogus:\n    instructions:\n", "  bogus:\n    skills:\n      - source: 'skills/init-session'\n    instructions:\n")
+        .replace("  fake:\n    prompts:\n", "  fake:\n    skills:\n      - source: 'skills/init-session'\n    prompts:\n");
+    fs::write(&templates, yaml)?;
+    let skill_source = d.join("skills/init-session");
+    fs::create_dir_all(&skill_source)?;
+    fs::write(skill_source.join("SKILL.md"), "---\nname: init-session\n---\n# init-session\n")?;
+    fs::write(skill_source.join("notes.md"), "# notes\n")?;
+
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+    let fake_copy = workspace.path().join(".fake/skills/init-session");
+    let bogus_copy = workspace.path().join(".bogus/skills/init-session");
+    assert!(fake_copy.join("SKILL.md").exists() == true && bogus_copy.join("SKILL.md").exists() == true);
+
+    // Regression (SPEC-22): the narrowed run compared only against its own agent's targets
+    // and pruned every other agent's copy of a same-named skill as stale.
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+    assert!(bogus_copy.join("SKILL.md").exists() == true, "update --agent fake must keep bogus's init-session");
+    fixture.manager().update_partial(&[], &["init-session".to_string()], None, Some("fake"), false, false)?;
+    assert!(bogus_copy.join("SKILL.md").exists() == true, "update --agent fake --skill init-session must keep bogus's init-session");
+
+    // A file dropped upstream is still pruned, but a narrowed run only prunes inside its own scope.
+    fs::remove_file(skill_source.join("notes.md"))?;
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+    assert!(fake_copy.join("notes.md").exists() == false, "a stale file in the narrowed scope must be pruned");
+    assert!(bogus_copy.join("notes.md").exists() == true, "a narrowed run must not prune outside its scope");
+    fixture.manager().update_full(None, None, false, false)?;
+    assert!(bogus_copy.join("notes.md").exists() == false, "a bare update prunes the remaining stale file");
+    assert!(bogus_copy.join("SKILL.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
 fn test_remove_lang_keeps_untracked_file_in_skill_dir() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
