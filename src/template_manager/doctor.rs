@@ -61,7 +61,7 @@ impl TemplateManager
     pub fn doctor(&self, fix: bool, dry_run: bool, verbose: bool, smart: bool) -> Result<()>
     {
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, fix == true && dry_run == false);
         let mut tracker = FileTracker::new(&workspace)?;
 
         let mut issues = Self::collect_issues(&tracker, &workspace, verbose)?;

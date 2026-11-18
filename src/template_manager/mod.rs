@@ -167,12 +167,14 @@ impl TemplateManager
     /// Migrate this workspace's entries from the legacy global tracker
     ///
     /// Runs only when `.slopctl/tracker.yml` does not exist, and converts the entries of the
-    /// global `installed_files.json` that belong to this workspace. Files on disk without a
+    /// global `installed_files.json` that belong to this workspace. Only commands that write
+    /// files pass `apply`; dry runs and read-only commands just report pending entries, since
+    /// migrating writes the workspace tracker and the global file (SPEC-48). Files on disk without a
     /// tracker record are never registered here: they belong to the user (see `docs/SPEC.md`,
     /// SPEC-11). `init` records an untracked file only when it is identical to its template.
     ///
     /// Returns the number of migrated entries.
-    pub fn try_migrate_tracker(&self, workspace: &Path) -> Result<usize>
+    pub fn try_migrate_tracker(&self, workspace: &Path, apply: bool) -> Result<usize>
     {
         let global_path = file_tracker::legacy_tracker_path(&self.config_dir);
         if Self::is_workspace_initialized(workspace) == true || global_path.exists() == false
@@ -181,10 +183,18 @@ impl TemplateManager
         }
 
         let mut tracker = FileTracker::new(workspace)?;
-        let migrated = tracker.migrate_from_global(&global_path)?;
-        if migrated > 0
+        let migrated = tracker.migrate_from_global(&global_path, apply)?;
+        if migrated > 0 && apply == true
         {
             println!("{} Migrated {} tracked file(s) from global tracker", "→".blue(), migrated);
+        }
+        else if migrated > 0
+        {
+            println!(
+                "{} {} tracked file(s) in the legacy global tracker belong to this workspace; the next command that writes files migrates them",
+                "→".blue(),
+                migrated
+            );
         }
 
         Ok(migrated)

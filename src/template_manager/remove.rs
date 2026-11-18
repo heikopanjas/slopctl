@@ -127,7 +127,7 @@ impl TemplateManager
     pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&current_dir);
+        let _ = self.try_migrate_tracker(&current_dir, dry_run == false);
         let catalogs = load_effective_catalogs_lenient(&self.config_dir, &current_dir)?;
         // A catalog mismatch must not block removal: tracker records still identify the agent's files.
         if let Some(agent_name) = agent &&
@@ -724,7 +724,7 @@ impl TemplateManager
     pub fn remove_purge(&self, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&current_dir);
+        let _ = self.try_migrate_tracker(&current_dir, dry_run == false);
 
         let PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped, kept } = self.collect_purge_targets(&current_dir, force)?;
 

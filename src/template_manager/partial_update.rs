@@ -50,7 +50,7 @@ impl TemplateManager
         );
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, dry_run == false);
 
         let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
         let config = &catalogs.templates;
@@ -288,7 +288,7 @@ impl TemplateManager
         );
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, dry_run == false);
 
         let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
         let config = &catalogs.templates;

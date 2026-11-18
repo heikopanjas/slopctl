@@ -640,17 +640,20 @@ impl FileTracker
     ///
     /// Reads the global `installed_files.json`, extracts entries whose
     /// `workspace` field matches this tracker's workspace root, converts
-    /// their absolute paths to relative, and inserts them. The migrated
-    /// entries are removed from the global file which is saved back.
+    /// their absolute paths to relative, and inserts them. With `apply`, the tracker
+    /// is saved and the migrated entries are removed from the global file; without it,
+    /// nothing is written and only the in-memory tracker changes (for dry runs and
+    /// read-only commands).
     ///
     /// # Arguments
     ///
     /// * `global_tracker_path` - Path to the global `installed_files.json`
+    /// * `apply` - Whether to write the result to disk
     ///
     /// # Returns
     ///
     /// The number of entries migrated, or 0 if the global file does not exist.
-    pub fn migrate_from_global(&mut self, global_tracker_path: &Path) -> anyhow::Result<usize>
+    pub fn migrate_from_global(&mut self, global_tracker_path: &Path, apply: bool) -> anyhow::Result<usize>
     {
         if global_tracker_path.exists() == false
         {
@@ -716,7 +719,7 @@ impl FileTracker
             }
         }
 
-        if count > 0
+        if count > 0 && apply == true
         {
             self.save()?;
 
@@ -1178,6 +1181,34 @@ mod tests
     }
 
     #[test]
+    fn test_migrate_from_global_without_apply_writes_nothing() -> anyhow::Result<()>
+    {
+        let temp_dir = TempDir::new()?;
+        let workspace = temp_dir.path().join("project");
+        fs::create_dir_all(&workspace)?;
+        let workspace_canon = fs::canonicalize(&workspace)?;
+        let global_tracker = temp_dir.path().join(LEGACY_TRACKER_FILE);
+        let global_data = serde_json::json!({
+            workspace_canon.join("AGENTS.md").to_string_lossy().to_string(): {
+                "original_sha": "sha_a",
+                "template_version": 5,
+                "installed_date": "2026-01-01T00:00:00+00:00",
+                "lang": "Rust++",
+                "category": "main",
+                "workspace": workspace_canon.to_string_lossy().to_string()
+            }
+        });
+        let global_json = serde_json::to_string_pretty(&global_data)?;
+        fs::write(&global_tracker, &global_json)?;
+
+        let mut tracker = FileTracker::new(&workspace)?;
+        assert_eq!(tracker.migrate_from_global(&global_tracker, false)?, 1, "pending entries are still counted");
+        assert!(workspace.join(SLOPCTL_DIR).exists() == false, "no tracker may be written without apply");
+        assert_eq!(fs::read_to_string(&global_tracker)?, global_json, "the global file must stay untouched without apply");
+        Ok(())
+    }
+
+    #[test]
     fn test_migrate_from_global() -> anyhow::Result<()>
     {
         let temp_dir = TempDir::new()?;
@@ -1219,7 +1250,7 @@ mod tests
         fs::write(&global_tracker, serde_json::to_string_pretty(&global_data)?)?;
 
         let mut tracker_a = FileTracker::new(&workspace_a)?;
-        let migrated = tracker_a.migrate_from_global(&global_tracker)?;
+        let migrated = tracker_a.migrate_from_global(&global_tracker, true)?;
         assert_eq!(migrated, 1);
 
         let entries = tracker_a.get_entries();
@@ -1262,7 +1293,7 @@ mod tests
         fs::write(&global_tracker, serde_json::to_string_pretty(&global_data)?)?;
 
         let mut tracker = FileTracker::new(&workspace)?;
-        let migrated = tracker.migrate_from_global(&global_tracker)?;
+        let migrated = tracker.migrate_from_global(&global_tracker, true)?;
         assert_eq!(migrated, 1);
 
         assert!(global_tracker.exists() == false);
@@ -1277,7 +1308,7 @@ mod tests
         let workspace = temp_dir.path();
 
         let mut tracker = FileTracker::new(workspace)?;
-        let count = tracker.migrate_from_global(&PathBuf::from("/nonexistent/tracker.json"))?;
+        let count = tracker.migrate_from_global(&PathBuf::from("/nonexistent/tracker.json"), true)?;
         assert_eq!(count, 0);
 
         Ok(())

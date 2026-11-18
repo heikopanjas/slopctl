@@ -90,7 +90,7 @@ impl TemplateManager
         let client = LlmClient::new(provider, model_name.as_deref(), &catalog)?;
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, false);
         let tracker = FileTracker::new(&workspace)?;
 
         // Find the installed AGENTS.md (category "main") or fall back to workspace root
