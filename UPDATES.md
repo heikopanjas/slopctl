@@ -4,6 +4,22 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:48 (v23.3.9, dry runs write nothing)
+
+- fixed SPEC-48: the legacy global tracker migration ran before every
+  dry-run branch and from `status` and `doctor`, saving
+  `.slopctl/tracker.yml` and rewriting the global `installed_files.json`;
+  `merge -n` always saved the tracker
+- `try_migrate_tracker` and `migrate_from_global` take an `apply` flag;
+  only commands that write files apply the migration, the rest print how
+  many legacy entries are pending
+- `merge -n` no longer saves the tracker
+- new regression test runs every dry run and read-only command against a
+  workspace with pending legacy entries and compares the workspace and
+  the global file byte for byte; AGENTS.md asks to extend it for new
+  dry-run paths
+- version bump: 23.3.8 to 23.3.9 (PATCH - bug fix)
+
 ### 2026-11-18 21:35 (v23.3.8, never delete files outside the workspace)
 
 - fixed the data-loss part of SPEC-25: skills installed to

@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.8)
+**Spec version:** 1 (describes slopctl v23.3.9)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -322,7 +322,7 @@ Categories written today: `main`, `agent`, `language`, `skill`, `integration`, `
 
 ### 5.4 Migration and registration
 
-`TemplateManager::try_migrate_tracker` runs when `.slopctl/tracker.yml` does not exist and the legacy global `installed_files.json` does. Callers ignore its result. It runs from `status`, `doctor` (also `--smart`), `remove` (except `--source`), `update`, `merge` and `init`, including their dry runs ([SPEC-48](#spec-48)). It converts the legacy entries whose workspace equals the current directory. Agent owners are never set.
+`TemplateManager::try_migrate_tracker` runs when `.slopctl/tracker.yml` does not exist and the legacy global `installed_files.json` does. Callers ignore its result. It is called from `status`, `doctor` (also `--smart`), `remove` (except `--source`), `update`, `merge` and `init`. Only commands that write files apply it: `init`, `update`, `merge` and `remove` outside a dry run, and `doctor --fix` without `--dry-run`. Dry runs and read-only commands only report how many entries are pending ([SPEC-48](#spec-48), since v23.3.9). It converts the legacy entries whose workspace equals the current directory. Agent owners are never set.
 
 A file without a tracker entry belongs to the user. Nothing records it automatically. The only registration is in `init`: an untracked file at a catalog target that is byte-identical to its template is planned as `RefreshTracker` and recorded with owners, because "slopctl installed this" is then true.
 
@@ -634,7 +634,7 @@ slopctl init [-l|--lang <LANG>] [-a|--agent <AGENT>] [-m|--mission <MISSION>] [-
 Pipeline:
 1. If the cache has no baseline, fetch it (with fallback) and bootstrap the agent and model catalogs. With `--dry-run`, print a message and exit 0.
 2. Fetch layers that are configured but not cached.
-3. Migrate the legacy global tracker if no tracker exists.
+3. Migrate the legacy global tracker if no tracker exists (with `--dry-run`, only report pending entries).
 4. **No-op guard.** Unless `--force`, fail when every requested language and agent is already installed.
 5. Check the baseline `version` (2 to 5).
 6. Resolve files (`resolve_all_files`): sections, language files, integration files, agent directories, instructions and prompts, then agent, language and top-level skills, then hydration. Missing sources are dropped silently.
@@ -764,7 +764,7 @@ Pipeline:
    - A diverged file that is an unedited merge (`Merged`) of the current template is moved back to **Unchanged** (`settle_current_merges`).
 4. If anything diverged, resolve the LLM provider (section 3.3).
 5. New files are written and recorded. Diverged files stream into `<file>.partial`; on success the result replaces the file (or goes to `.merged`), the partial is removed, and the merged SHA is recorded together with the template's SHA. A truncated response keeps the partial. A failure prints a warning. An existing `.partial` skips the file.
-6. Save the tracker (also in dry run, [SPEC-48](#spec-48)).
+6. Save the tracker, except in a dry run (since v23.3.9, [SPEC-48](#spec-48)).
 
 For AGENTS.md the prompt includes an `<available_skills>` block so the model can drop prose that a skill already covers.
 
@@ -913,7 +913,7 @@ Prints the cache location, its version and the available agents and languages; w
 
 > <a id="spec-46"></a>**SPEC-46** · P1 · status · *verified*
 >
-> **Problem.** "Installed agents" comes from markers (`list.rs:172-179`), "installed languages" from the tracker. A repository where someone once ran Claude Code shows `claude` as installed. `status -v` lists the catalog files of every agent present on disk as managed, even files slopctl never wrote. Until v23.3.6 `status` also wrote a tracker through registration ([SPEC-11](#spec-11)); now only the legacy migration can still write one.
+> **Problem.** "Installed agents" comes from markers (`list.rs:172-179`), "installed languages" from the tracker. A repository where someone once ran Claude Code shows `claude` as installed. `status -v` lists the catalog files of every agent present on disk as managed, even files slopctl never wrote. Until v23.3.6 `status` also wrote a tracker through registration ([SPEC-11](#spec-11)); since v23.3.9 `status` writes nothing at all ([SPEC-48](#spec-48)).
 >
 > **Proposal.** Installed agents from the tracker. A separate line "Detected, not installed". Managed files from the tracker only. `status` is read-only.
 
@@ -945,8 +945,9 @@ Writes a clap_complete script to stdout.
 > - Migration runs before every dry-run branch (`update.rs:33`, `partial_update.rs:53`, `:290`, `merge.rs:124`, `smart.rs:93`) and saves `tracker.yml` when it finds anything. (Until v23.3.6 registration did the same, much more often.) Migration also rewrites the legacy global `installed_files.json`.
 > - `merge -n` always calls `file_tracker.save()` (`merge.rs:378`). That creates `.slopctl/tracker.yml` and can rename an unreadable tracker to `.bak`.
 >
+> **Proposal.** A dry run MUST NOT write any file, in the workspace or outside it. Migration computes an in-memory tracker in dry-run mode and reports what it would record.
 >
-> **Proposal.** A dry run MUST NOT write any file, in the workspace or outside it. Migration computes an in-memory tracker in dry-run mode and report what they would record.
+> **Resolved in v23.3.9.** `try_migrate_tracker` and `FileTracker::migrate_from_global` take an `apply` flag. Without it the migration runs in memory only and prints how many legacy entries belong to the workspace; the tracker and the global file stay untouched. Commands pass `apply` only when they write files, so `status`, `doctor` without `--fix`, `doctor --fix --dry-run`, `doctor --smart` and every `--dry-run` write nothing. `merge -n` no longer saves the tracker. A regression test runs every dry run and read-only command against a workspace with pending legacy entries and a merge candidate, and compares the workspace and the global file byte for byte.
 
 ### 9.2 `--force`
 
@@ -1077,7 +1078,7 @@ Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_
 
 ### 10.5 Safety guarantees
 
-- Dry runs write nothing ([SPEC-48](#spec-48)).
+- Dry runs write nothing ([SPEC-48](#spec-48), done).
 - Write, then record. Delete, then unrecord ([SPEC-14](#spec-14)).
 - Untracked files are never deleted ([SPEC-39](#spec-39), done).
 - Nothing registers user files implicitly ([SPEC-11](#spec-11), done).
@@ -1118,7 +1119,7 @@ All issues are open unless marked resolved.
 | [SPEC-38](#spec-38) | P1 | remove | owners leak after `--all`, early return, `--purge` | release in every mode |
 | [SPEC-40](#spec-40) | P1 | remove | preview overstates deletions | compute plan once |
 | [SPEC-46](#spec-46) | P1 | status | agents from markers; writes tracker | tracker only, read-only |
-| [SPEC-48](#spec-48) | P1 | dry run | dry runs write tracker files | in-memory only |
+| [SPEC-48](#spec-48) | P1 | dry run | dry runs write tracker files | **resolved in v23.3.9** |
 | [SPEC-02](#spec-02) | P2 | config | unknown fields, no value validation, scope confusion | validate |
 | [SPEC-03](#spec-03) | P2 | config CLI | modes not exclusive | clap conflicts |
 | [SPEC-04](#spec-04) | P2 | catalog | unknown keys ignored; ambiguous include names | reject |
@@ -1145,7 +1146,7 @@ All issues are open unless marked resolved.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25) (deletion done), [SPEC-22](#spec-22) (done), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25) (deletion done), [SPEC-22](#spec-22) (done), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48) (done). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
 3. **Skill placement** (10.2): [SPEC-18](#spec-18) (done), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).

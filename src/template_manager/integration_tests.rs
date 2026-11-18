@@ -1197,6 +1197,79 @@ fn test_init_records_untracked_file_identical_to_template() -> anyhow::Result<()
     Ok(())
 }
 
+/// Snapshot of every file under `root` with its content, for comparing before and after a command
+fn snapshot_tree(root: &Path) -> anyhow::Result<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>>
+{
+    let mut files = Vec::new();
+    crate::utils::collect_files_recursive(root, &mut files)?;
+    files.into_iter().map(|file| Ok((file.clone(), fs::read(&file)?))).collect()
+}
+
+#[test]
+fn test_dry_runs_and_read_only_commands_write_nothing() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // A workspace installed by an old slopctl: files on disk, entries only in the legacy global tracker.
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+    fs::remove_dir_all(workspace.path().join(".slopctl"))?;
+    let workspace_canon = fs::canonicalize(workspace.path())?;
+    let legacy = crate::file_tracker::legacy_tracker_path(fixture.config_dir.path());
+    let legacy_data = serde_json::json!({
+        workspace_canon.join(".rpp.toml").to_string_lossy().to_string(): {
+            "original_sha": FileTracker::calculate_sha256(&workspace.path().join(".rpp.toml"))?,
+            "template_version": 5,
+            "installed_date": "2026-01-01T00:00:00+00:00",
+            "lang": "Rust++",
+            "category": "language",
+            "workspace": workspace_canon.to_string_lossy().to_string()
+        }
+    });
+    fs::write(&legacy, serde_json::to_string_pretty(&legacy_data)?)?;
+    // A diverged file makes 'merge -n' list a merge instead of returning early as up to date.
+    fs::write(workspace.path().join(".gitignore"), "target/\nmine/\n")?;
+
+    let before = snapshot_tree(workspace.path())?;
+    let legacy_before = fs::read(&legacy)?;
+    let manager = fixture.manager();
+    let dry_init = UpdateOptions {
+        lang:             None,
+        agent:            Some("fake"),
+        mission:          None,
+        force:            false,
+        dry_run:          true,
+        partial:          None,
+        local_cache_only: false
+    };
+
+    // Regression (SPEC-48): the legacy migration saved tracker.yml and pruned the global file
+    // before every dry-run branch, and 'merge -n' always saved the tracker.
+    manager.update(&dry_init)?;
+    manager.update_full(None, None, false, true)?;
+    // Untracked targets block a partial refresh without --force; the failing run must not write either.
+    assert!(manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, true).is_err() == true);
+    manager.merge(&MergeOptions { lang: Some("Rust++"), agent: None, mission: None }, true, false, false)?;
+    manager.remove(None, Some("Rust++"), false, true)?;
+    manager.remove_purge(false, true)?;
+    manager.status(false)?;
+    manager.doctor(false, false, false, false)?;
+    manager.doctor(true, true, false, false)?;
+
+    assert_eq!(snapshot_tree(workspace.path())?, before, "dry runs and read-only commands must not change the workspace");
+    assert_eq!(fs::read(&legacy)?, legacy_before, "dry runs and read-only commands must not touch the legacy global tracker");
+
+    // The first command that writes files performs the migration.
+    manager.update_full(None, None, false, false)?;
+    let tracker = FileTracker::new(workspace.path())?;
+    assert!(tracker.get_metadata(&workspace.path().join(".rpp.toml")).is_some_and(|metadata| metadata.has_lang("Rust++")) == true);
+    assert!(legacy.exists() == false, "a migrated legacy tracker with no other workspaces is removed");
+
+    Ok(())
+}
+
 #[test]
 fn test_reinit_keeps_merged_file() -> anyhow::Result<()>
 {

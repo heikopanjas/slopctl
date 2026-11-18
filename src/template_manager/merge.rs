@@ -123,7 +123,7 @@ impl TemplateManager
         };
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, dry_run == false);
 
         // Without --agent, union the resolved content across all detected agents so
         // every agent's instruction and prompt files participate in the merge.
@@ -377,7 +377,11 @@ impl TemplateManager
             }
         }
 
-        file_tracker.save()?;
+        // A dry run records nothing; saving would still create or rewrite tracker.yml.
+        if dry_run == false
+        {
+            file_tracker.save()?;
+        }
 
         if dry_run == true
         {

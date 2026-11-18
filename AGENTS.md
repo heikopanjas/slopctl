@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-11-18 (v23.3.8)
+**Last updated:** 2026-11-18 (v23.3.9)
 
 <!-- {mission} -->
 
@@ -88,6 +88,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use debug builds (`cargo build`) during development; reserve release builds for CI and deployment
 - Branch model: `develop` is the active branch; `main` receives stable merges only
 - Always use `--dry-run` to verify CLI behavior before writing destructive tests
+- A dry run and a read-only command (`status`, `doctor` without `--fix`, `doctor --smart`) must not write any file, in the workspace or outside it. Pass `apply = false` to `try_migrate_tracker` from them, and never call `FileTracker::save()` on a dry-run path; `test_dry_runs_and_read_only_commands_write_nothing` guards this, so add new dry-run commands to it
 - Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
 - One public struct or major component per source file; shared helpers go in `utils.rs`
 

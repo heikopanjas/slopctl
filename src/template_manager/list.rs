@@ -113,7 +113,7 @@ impl TemplateManager
     fn list_workspace(&self, verbose: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&current_dir);
+        let _ = self.try_migrate_tracker(&current_dir, false);
 
         println!("{}", "slopctl status".bold());
         println!();
