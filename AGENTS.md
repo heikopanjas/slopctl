@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-10-09 (v23.2.1)
+**Last updated:** 2026-11-18 (v23.3.9)
 
 <!-- {mission} -->
 
@@ -13,10 +13,11 @@ slopctl is a Rust CLI tool that manages coding agent instruction files (AGENTS.m
 - **Language:** Rust (Edition 2024, nightly toolchain)
 - **CLI Framework:** clap v4.5 (derive API) with clap_complete for shell completions
 - **HTTP:** reqwest v0.12 (blocking, json) for GitHub API and template downloads; flate2 + tar for pure-Rust tarball extraction (cross-platform skill caching)
+- **Git:** the user's `git` CLI (via `std::process::Command`) for git template sources; no git library dependency
 - **Serialization:** serde + serde_yaml for templates.yml, agent-defaults.yml, model-defaults.yml, and file tracker, serde_json for legacy migration
 - **Version Control:** Git
 - **Package Manager:** Cargo
-- **CI/CD:** GitHub Actions (build.yml on develop, release.yml on main)
+- **CI/CD:** GitHub Actions (build.yml on develop and feature/** branches, push and pull request, Linux/macOS/Windows matrix; release.yml on main)
 - **License:** MIT
 - **Website:** <https://slopctl.me> (also set as `homepage` in `Cargo.toml`)
 
@@ -87,6 +88,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Use debug builds (`cargo build`) during development; reserve release builds for CI and deployment
 - Branch model: `develop` is the active branch; `main` receives stable merges only
 - Always use `--dry-run` to verify CLI behavior before writing destructive tests
+- A dry run and a read-only command (`status`, `doctor` without `--fix`, `doctor --smart`) must not write any file, in the workspace or outside it. Pass `apply = false` to `try_migrate_tracker` from them, and never call `FileTracker::save()` on a dry-run path; `test_dry_runs_and_read_only_commands_write_nothing` guards this, so add new dry-run commands to it
 - Keep `main.rs` thin (CLI parsing and dispatch only); business logic belongs in library modules
 - One public struct or major component per source file; shared helpers go in `utils.rs`
 
@@ -107,11 +109,34 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - `AGENTS.md` is a special main file: ownership can be tracked, but normal `remove --lang` and `remove --agent` must not delete it
 - Files carrying the changelog marker (`<!-- {changelog} -->`, e.g. `UPDATES.md`) are protected like `AGENTS.md`: `init` and `update` (full or `--file`) never write them, under any flag, and `update --file` on one is a hard error pointing to `merge`; `merge` is the only command that may refresh the template half above the marker, and `remove`/`remove --purge` preserve the whole file (purge overrides with `--force`). Protection is keyed on `template_engine::is_changelog_protected`/`file_contains_changelog_marker` finding the marker as its own trimmed line on the target, never on `FileStatus` — keying on `Modified` alone misses a file whose tracker SHA was re-recorded by `merge`, and matching the marker as a raw substring false-positives on docs that mention it as example text (e.g. the `recent-updates` skill)
 - Tracker categories (`main`/`agent`/`language`/`skill`/`integration`) are recorded from the templates.yml section a file resolves from, carried on `ResolvedFile.category`; they must never be derived from path substrings
-- Init never hard-fails on a tracked modified file that adds no new owners: it plans `SkipModified` and keeps the local version; `merge` is the update path, `--force` overwrites. Owner-expanding conflicts and untracked collisions remain hard preflight errors
+- Merged files: `original_sha` is what slopctl wrote; `template_sha` (set only by `merge`, only when it differs) is the template content that write was based on, and any plain copy clears it (`record_installation_with_owners`). `check_modification` reports such an unedited file as `FileStatus::Merged`. Every `FileStatus` match must treat `Merged` as customized content: never refresh it automatically, keep it while `template_sha` equals the current source SHA, point to `merge` when the template changed, and overwrite only with `--force`. A tracker refresh (`RefreshTracker`) keeps the installed SHA; it must never record the source SHA over a merged file
+- No implicit registration: a file without a tracker entry belongs to the user, and nothing records it automatically. `try_migrate_tracker` only converts the legacy global tracker. The single way an existing file becomes tracked without being written is `init` finding it byte-identical to its template. Entries an older slopctl registered from disk (`template_version` 0, no owners, no origin) are dropped when the tracker loads (`FileMetadata::is_registration_leftover`), so real installs must never be recorded with `template_version` 0
+- Init never hard-fails on a tracked modified file that adds no new owners: it plans `SkipModified` and keeps the local version; `merge` is the update path, `--force` overwrites. Owner-expanding conflicts and untracked collisions remain hard preflight errors; an untracked file byte-identical to its template is recorded (`RefreshTracker`) instead of colliding
 - Command verb separation: `init` installs something new (a language or agent) and rejects a no-op re-init when everything requested is already tracker-installed (bypass with `--force`); bare `slopctl update` refreshes the whole workspace from the local cache (selectors narrow it); `merge` reconciles customized files. "Already installed" is determined from FileTracker owners (`get_installed_languages`/`get_installed_agents`), never from marker directories, because agents create their own markers
 - Removing an agent or language releases its ownership across ALL tracker entries (`clear_agent_owner`/`clear_lang_owner`), not only on deleted files; native-only agents also own shared cross-client copies that stay on disk
 - Location-based removal checks (`path_belongs_to_agent`) match by `Path::starts_with` against the agent's catalog directories (markers, skill_dir, prompt_dir); never by substring or path-component name matching
 - `update` creates agent-category files only for agents that own at least one tracker entry (`get_installed_agents`), never for agents known only by a marker directory. The check is per agent, not per file: an installed agent's missing, newly catalogued, or previously deleted file (e.g. a `CLAUDE.md` dropped by an old init/remove cycle) is recreated, which a per-file `get_metadata` probe used to silently skip. Files it refuses to create are reported per agent with a `slopctl init --agent <name>` hint, never dropped silently; `--force` does not override this, and `--agent` on `update` narrows scope only — it never authorizes creation, and errors with the same hint when the named agent owns nothing. `update --file`/`--skill` selectors are explicit intent and are deliberately not gated this way (an unmatched selector already hard-errors), so refreshing a single agent file makes that agent tracker-installed and its remaining files reachable by the next bare `update`. Marker presence only drives skill distribution. `merge` without `--agent` unions the resolved content across all detected agents
+
+### Catalog Clash Resilience
+
+- Stale skill pruning in `update` (`collect_stale_skill_files`) compares against the complete workspace resolution (`desired_targets`), never against a scope narrowed by `--agent`/`--lang`/`--skill`; a narrowed run additionally prunes only inside the skill directories its selected set writes to. Several agents ship skills with the same name (e.g. `init-session`), so a narrowed comparison deletes other agents' copies
+- One source per skill name: top-level, language and shared skills install into the same skill directories, so a name defined with two different sources there is a hard error in the strict loader (`bom::require_unique_skill_sources`, called from `load_effective_catalogs`) and an error in `templates --verify`. Agent skill lists may carry their own variant (they install into the agent's own directory); verify only warns about those. The lenient loader skips the check so `remove`/`status` keep working
+- Include resolution tracks only the current include path (a stack, not a visited set), so a group or language reached through two paths (a diamond) is not a cycle. Identical entries reached twice are deduped (`resolve_language_files`/`resolve_language_skills`); only different sources for one target are a "duplicate target" error. The engine likewise collapses resolved entries with the same source and target, unioning their owners (`merge_identical_entries`), so a skill listed in a language and the top-level list installs once
+- `fetch_catalog` (`template_manager/mod.rs`) is the only way a catalog enters a cache directory: it stages into a sibling dir and swaps it in after a successful fetch, so files dropped upstream never linger and a failed fetch keeps the old cache. `agent-defaults.yml`, `model-defaults.yml` and the legacy tracker have their own update paths and are carried over
+- An unreadable `.slopctl/tracker.yml` (e.g. the obsolete scalar format) still loads as empty, but warns, and the next save moves it to `tracker.yml.bak` instead of overwriting it
+- Every `remove` mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) passes its candidates through `split_user_owned` (`template_manager/remove.rs`) right before deletion: untracked files and files outside the workspace (`FileTracker::is_outside_workspace`, e.g. `$userprofile` skills shared by every project) are never deleted, not even with `--force`; modified and merged files only with `--force`. `update`'s stale-skill pruning skips files outside the workspace for the same reason. Collection code may gather broadly (BoM targets, skill-directory scans); the gate is what protects user files, so it must stay the last step before deleting and every new removal path must use it. Kept files are reported with the reason. Delete a file first, then drop its tracker entry
+- `doctor` reports tracked files the current catalog no longer provides as `Orphaned` (informational, no automatic fix); `update` keeps leaving them alone and `remove` owns their cleanup. Orphan detection and `update` share `resolve_workspace_sets`, so both agree on what the catalog provides
+
+### Template Layers
+
+- A template system is a full catalog (`templates.yml`, its files and skills, optionally `agent-defaults.yml`). The baseline comes from `templates.uri` with optional `templates.ref`/`templates.path`, read from the same scope as the uri (`EffectiveConfig::baseline_source`; `--from` and `fallbackUri` use the uri alone); layers are configured as an ordered list under `templates.layers` (`LayerSpec { id, uri, ref, path }`, config keys `templates.layers.<id>.uri|ref|path`). Global layers come first, then workspace layers (`EffectiveConfig::layers` concatenates instead of shadowing); the same id in both scopes is an error
+- Ids (`[a-z0-9_-]+`) are declared by the system author in `templates.yml` (`id:`), required for layers and checked against the configured id at fetch time; a baseline without one is `baseline`. Ids are for provenance, not namespacing: skill install slots are fixed by the agentskills.io name, so clashes are settled by precedence
+- `template_layer::apply_layers`, called from `load_effective_catalogs` between the baseline load and overlays, is the only merge path. Rules, later wins: `main` replaced; `$instructions` fragments keyed by source path relative to their system; other files by target; keyed sections merged field by field; shared-list skills (top-level, languages, shared) settled globally by name so a name has one source; agent skill lists per agent; layer `agent-defaults.yml` entries by name. Every replacement is recorded in `TemplateSystems.overrides`
+- Layer sources are rebased to absolute paths inside `layers/<id>/` (sibling of the baseline cache, `template_layer::layer_cache_dir`) with `utils::rebase_source`, shared with overlays. Layer file sources must be relative; URL skills are rebased to their cached copies via the manifest's `url_skills` (one definition per discovered skill)
+- `fetch_catalog(&CatalogSource, dest)` fetches every system: git URLs (`git::is_git_url`) via the user's `git`, other `http(s)` URLs as GitHub tree URLs, everything else as a local folder. URL skills are cached for every source kind, and each fetch writes `.slopctl-source.yml` (`SourceManifest`: uri, ref, path, commit, fetched, url_skills). The strict loader refuses an unfetched layer or one whose manifest no longer matches its config; the lenient loader warns and skips
+- Provenance: `ResolvedFile.origin` comes from `EffectiveCatalogs::origin_of` (cache-path prefix; overlay files have none) and is stored as `FileMetadata.origin` via `FileTracker::set_origin` at every install site. AGENTS.md has no origin. `update` reports origin switches, `doctor` names orphans from systems not configured here, `remove --source <id>` removes a system's files
+- Private layers belong in the global config; workspace config is committed, so workspace layers must be reachable by the whole team
+- Layer test fixtures use the ids `fake-layer` and `bogus-layer`; integration tests keep the baseline at `<root>/templates` so layer caches stay per test
 
 ### Agent Overlays
 
@@ -127,6 +152,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Maintain conventional commit message standards
 - Keep change history transparent through commit messages
 - GitHub API access is unauthenticated (no tokens or credentials); unauthenticated limits apply (~60 REST requests/hour per IP, plus raw.githubusercontent.com throttling)
+- Git template sources are cloned with the user's installed `git` (`src/git.rs`); authentication for private repositories is delegated to the user's SSH keys and credential helpers. slopctl never reads, stores, or passes credentials
 - Template marker detection prevents accidental overwrites of user-customized files
 
 ### Testing
@@ -136,6 +162,7 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Unit tests: In-file `#[cfg(test)]` modules, named `test_<scenario>_<expected_outcome>`
 - Integration tests: Manual CLI verification with `--dry-run` flag
 - Test serialization: Tests that call `std::env::set_current_dir` share a `CWD_LOCK` mutex to prevent race conditions
+- Env var serialization: every test that sets, removes, or reads an environment variable another test changes (e.g. `XDG_CONFIG_HOME`, `*_API_KEY`) must hold `crate::ENV_LOCK` (`lib.rs`), taken with `.lock().unwrap_or_else(|e| e.into_inner())`; never declare a module-local env lock, since two locks do not exclude each other. This includes read-only tests: reading the same variable twice without the lock races with any concurrent writer
 - CI runs `cargo test --verbose` on Linux, macOS, and Windows (nightly toolchain)
 - Testing framework: Built-in Rust test harness with `assert!`, `assert_eq!`, `assert_ne!`
 - Rust source tests must not use real-world coding-agent or programming-language fixture names. Use artificial agents `bogus` and `fake`; use artificial languages `Rust++` and `CppScript`. Real supported names belong only in shipped template/catalog data, not source fixtures.
@@ -145,6 +172,8 @@ Unit tests are co-located with implementation in each source file under `#[cfg(t
 - Code comments: `///` doc comments on all public APIs; `//` for non-obvious implementation details only
 - API documentation: Generated via `cargo doc`; doc comment structure uses `# Arguments`, `# Errors`, `# Examples` sections
 - README updates: Required when adding or changing CLI commands, flags, or user-visible behavior
+- Behavioral spec: `docs/SPEC.md` is the reference for what every command and concept does. A change to behavior must update the spec in the same change. Known problems are tracked there as `SPEC-NN` issues with a severity and a proposed fix; mark an issue resolved in the spec when its fix ships, and never reuse an ID
+- Terminology: the word "adopt" is retired because it meant three different things. Use **registration** for recording a file that already exists on disk in the tracker (today only `init` recording an untracked file that is byte-identical to its template), and **placement** for deciding which skill directories receive a copy of a skill (see the glossary in `docs/SPEC.md`)
 - Changelog: Maintained in `UPDATES.md` at the repository root (append-only; see the `recent-updates` skill)
 
 <!-- {languages} -->
@@ -387,7 +416,7 @@ Load the `rust-build-commands` skill when building or running the project.
 
 **Formatting Configuration (.rustfmt.toml):**
 
-- This repo's root `.rustfmt.toml` is dogfooded from `templates/rust-format-instructions.toml` in the separate [`slopctl-templates`](https://github.com/heikopanjas/slopctl-templates) repository — the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files. This is now a cross-repo invariant with nothing enforcing it automatically — check by hand when either file changes
+- This repo's root `.rustfmt.toml` is dogfooded from `templates/rust-format-instructions.toml` in the separate [`slopctl-starter`](https://github.com/heikopanjas/slopctl-starter) repository — the same file slopctl installs as `.rustfmt.toml` into every downstream workspace that adds Rust language support. The two must stay byte-identical; editing one without the other desyncs this workspace's tracked SHA from the template SHA, which trips the shared-ownership preflight check and blocks `slopctl update`/`init` on this repo's own `rust` language files. This is now a cross-repo invariant with nothing enforcing it automatically — check by hand when either file changes
 - Do NOT add `required_version` (or other CI-environment-specific settings) to either copy — a hardcoded version pin breaks `cargo fmt` for any downstream user whose local rustfmt doesn't match exactly, since they don't get this repo's `rust-toolchain.toml`. Version consistency for this repo's own CI is handled entirely by the toolchain pin (see "Toolchain Pinning" above)
 - Key formatting rules:
   - `max_width = 167` - Allow longer lines for readability

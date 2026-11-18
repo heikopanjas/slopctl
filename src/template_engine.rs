@@ -85,7 +85,9 @@ pub struct ResolvedFile
     /// Agent owners for this file
     pub agent:    Vec<String>,
     /// FileTracker category derived from the templates.yml section this file resolves from
-    pub category: String
+    pub category: String,
+    /// Template system that provides the source; `None` for overlay agent files
+    pub origin:   Option<String>
 }
 
 /// All files, fragments, and directories resolved from templates.yml for a given set of options
@@ -107,6 +109,47 @@ pub struct ResolvedFiles
     _temp_dir:       tempfile::TempDir
 }
 
+/// Collapses entries that copy the same source to the same target, unioning their owners
+///
+/// One skill can be reached from several catalog lists in a single run (e.g. a language and the
+/// top-level `skills`). Only entries with different sources for one target are real conflicts;
+/// preflight still reports those.
+fn merge_identical_entries(files: &mut Vec<ResolvedFile>)
+{
+    let mut index: HashMap<(PathBuf, PathBuf), usize> = HashMap::with_capacity(files.len());
+    let mut merged: Vec<ResolvedFile> = Vec::with_capacity(files.len());
+    for entry in files.drain(..)
+    {
+        match index.get(&(entry.target.clone(), entry.source.clone()))
+        {
+            | Some(&position) =>
+            {
+                let kept = &mut merged[position];
+                for lang in entry.lang
+                {
+                    if kept.lang.contains(&lang) == false
+                    {
+                        kept.lang.push(lang);
+                    }
+                }
+                for agent in entry.agent
+                {
+                    if kept.agent.contains(&agent) == false
+                    {
+                        kept.agent.push(agent);
+                    }
+                }
+            }
+            | None =>
+            {
+                index.insert((entry.target.clone(), entry.source.clone()), merged.len());
+                merged.push(entry);
+            }
+        }
+    }
+    *files = merged;
+}
+
 /// A resolved file's content with provenance metadata for the merge command
 pub struct ResolvedContent
 {
@@ -114,7 +157,9 @@ pub struct ResolvedContent
     pub lang:     Vec<String>,
     pub agent:    Vec<String>,
     /// FileTracker category carried from the resolved file (`"main"` for AGENTS.md)
-    pub category: String
+    pub category: String,
+    /// Template system carried from the resolved file; `None` for AGENTS.md, which merges fragments of every system
+    pub origin:   Option<String>
 }
 
 struct PreflightPlan
@@ -827,7 +872,8 @@ impl<'a> TemplateEngine<'a>
                         target:   target_path,
                         lang:     Self::owner_list(lang, LANG_NONE),
                         agent:    Self::owner_list(agent, AGENT_ALL),
-                        category: Self::tracker_category_for_section(category)
+                        category: Self::tracker_category_for_section(category),
+                        origin:   None
                     });
                 }
             };
@@ -892,7 +938,8 @@ impl<'a> TemplateEngine<'a>
                                 target:   target_path,
                                 lang:     Vec::new(),
                                 agent:    Self::owner_list(agent_name, AGENT_ALL),
-                                category: "agent".to_string()
+                                category: "agent".to_string(),
+                                origin:   None
                             });
                         }
                         else if local_cache_only == true
@@ -1005,7 +1052,8 @@ impl<'a> TemplateEngine<'a>
                         target:   target_path,
                         lang:     Self::owner_list(lang, LANG_NONE),
                         agent:    Self::owner_list(agent, AGENT_ALL),
-                        category: Self::tracker_category_for_section(category)
+                        category: Self::tracker_category_for_section(category),
+                        origin:   None
                     });
                 }
             };
@@ -1079,7 +1127,8 @@ impl<'a> TemplateEngine<'a>
                             target:   target_path,
                             lang:     Vec::new(),
                             agent:    Self::owner_list(agent_name, AGENT_ALL),
-                            category: "agent".to_string()
+                            category: "agent".to_string(),
+                            origin:   None
                         });
                     }
                 }
@@ -1156,7 +1205,7 @@ impl<'a> TemplateEngine<'a>
             }
 
             // When adding a native-only agent after language install, hydrate language skills from
-            // templates into the agent's native skill dir (replaces broad .agents/skills/ adoption).
+            // templates into the agent's native skill dir (placement, not a copy of .agents/skills/).
             if native_only_agent == true &&
                 options.lang.is_none() == true &&
                 let Some(agent_name) = options.agent &&
@@ -1171,6 +1220,11 @@ impl<'a> TemplateEngine<'a>
         }
 
         let ctx = TemplateContext { source: main_source, target: main_target, fragments, template_version: config.version };
+        for entry in &mut files_to_copy
+        {
+            entry.origin = catalogs.origin_of(&entry.source).map(str::to_string);
+        }
+        merge_identical_entries(&mut files_to_copy);
 
         Ok(ResolvedFiles { context: ctx, files: files_to_copy, directories: directories_to_create, _temp_dir: temp_dir })
     }
@@ -1200,7 +1254,8 @@ impl<'a> TemplateEngine<'a>
             content:  fresh_main,
             lang:     options.lang.map(|lang| vec![lang.to_string()]).unwrap_or_default(),
             agent:    options.agent.map(|agent| vec![agent.to_string()]).unwrap_or_default(),
-            category: "main".to_string()
+            category: "main".to_string(),
+            origin:   None
         });
 
         for entry in &resolved.files
@@ -1212,7 +1267,8 @@ impl<'a> TemplateEngine<'a>
                     content,
                     lang: entry.lang.clone(),
                     agent: entry.agent.clone(),
-                    category: entry.category.clone()
+                    category: entry.category.clone(),
+                    origin: entry.origin.clone()
                 });
             }
         }
@@ -1373,13 +1429,32 @@ impl<'a> TemplateEngine<'a>
                     }
                     | FileStatus::NotTracked =>
                     {
-                        conflicts.push(format!("target '{}' already exists but is not tracked", entry.target.display()));
+                        // An untracked file is the user's. Only content identical to the template
+                        // is recorded as an install, because then "slopctl installed this" is true.
+                        if FileTracker::calculate_sha256(&entry.target)? == source_sha
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                        }
+                        else
+                        {
+                            conflicts.push(format!(
+                                "target '{}' already exists, was not installed by slopctl, and differs from the template; use 'slopctl merge' to combine it or move \
+                                 it aside",
+                                entry.target.display()
+                            ));
+                        }
                     }
-                    | FileStatus::Modified =>
+                    | status @ (FileStatus::Modified | FileStatus::Merged) =>
                     {
-                        let adds_new_owners =
-                            file_tracker.get_metadata(&entry.target).map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
-                        if adds_new_owners == true
+                        let metadata = file_tracker.get_metadata(&entry.target);
+                        // A merged file whose template is unchanged is current; only its owners need recording.
+                        let template_unchanged = status == FileStatus::Merged && metadata.is_some_and(|metadata| metadata.template_sha() == source_sha);
+                        let adds_new_owners = metadata.map(|metadata| metadata.would_add_owner_lists(&entry.lang, &entry.agent)).unwrap_or(true);
+                        if template_unchanged == true
+                        {
+                            planned_files.push(PlannedFileAction { index, source_sha, category, kind: PlannedFileActionKind::RefreshTracker });
+                        }
+                        else if adds_new_owners == true
                         {
                             conflicts.push(format!(
                                 "target '{}' has local modifications and cannot be shared with a new language or agent; use 'slopctl merge' to combine it",
@@ -1690,14 +1765,25 @@ impl<'a> TemplateEngine<'a>
                     println!("  {} {} (already installed)", "○".green(), target.display().to_string().yellow());
                 }
 
-                file_tracker.record_installation_with_owners(
+                // A tracker refresh keeps the installed content, which may be a merge of the template.
+                let installed_sha = if planned.kind == PlannedFileActionKind::RefreshTracker
+                {
+                    file_tracker.get_metadata(target).map_or_else(|| planned.source_sha.clone(), |metadata| metadata.original_sha.clone())
+                }
+                else
+                {
+                    planned.source_sha.clone()
+                };
+                file_tracker.record_installation_with_template(
                     target,
+                    installed_sha,
                     planned.source_sha.clone(),
                     template_version,
                     &entry.lang,
                     &entry.agent,
                     planned.category.clone()
                 );
+                file_tracker.set_origin(target, entry.origin.as_deref());
             }
         }
 
@@ -1814,7 +1900,8 @@ impl<'a> TemplateEngine<'a>
                             target,
                             lang: Self::owner_list(lang, LANG_NONE),
                             agent: Self::owner_list(agent, AGENT_ALL),
-                            category: "skill".to_string()
+                            category: "skill".to_string(),
+                            origin: None
                         });
                     }
                 }
@@ -1855,7 +1942,8 @@ impl<'a> TemplateEngine<'a>
                     target:   target_base.join(filename),
                     lang:     Self::owner_list(lang, LANG_NONE),
                     agent:    Self::owner_list(agent, AGENT_ALL),
-                    category: "skill".to_string()
+                    category: "skill".to_string(),
+                    origin:   None
                 });
             }
         }
@@ -1887,7 +1975,8 @@ mod tests
             target:   PathBuf::from(target),
             lang:     Vec::new(),
             agent:    Vec::new(),
-            category: "language".to_string()
+            category: "language".to_string(),
+            origin:   None
         }
     }
 
@@ -2869,7 +2958,7 @@ languages:
         fs::write(&source, "# Skill")?;
         let source_sha = FileTracker::calculate_sha256(&source)?;
 
-        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new(), category: "skill".to_string() }];
+        let files = vec![ResolvedFile { source, target: target.clone(), lang: Vec::new(), agent: Vec::new(), category: "skill".to_string(), origin: None }];
         let plan = PreflightPlan {
             files: vec![PlannedFileAction {
                 index:      0,
@@ -2943,7 +3032,23 @@ languages:
         {
             panic!("expected preflight error");
         };
-        assert!(err.to_string().contains("not tracked") == true);
+        assert!(err.to_string().contains("was not installed by slopctl") == true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_preflight_untracked_file_identical_to_template_is_recorded() -> anyhow::Result<()>
+    {
+        let _cwd = crate::template_manager::CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let (plan, files) = preflight_toplevel_cross_client_skill("# Skill", None, "# Skill")?;
+
+        let skill_action = plan
+            .files
+            .iter()
+            .find(|action| files[action.index].target.ends_with(".agents/skills/git-workflow/SKILL.md"))
+            .ok_or_else(|| anyhow::anyhow!("skill must be planned"))?;
+        assert_eq!(skill_action.kind, PlannedFileActionKind::RefreshTracker, "an untracked copy of the template is recorded, not copied or rejected");
         Ok(())
     }
 

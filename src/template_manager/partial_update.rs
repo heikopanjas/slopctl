@@ -50,7 +50,7 @@ impl TemplateManager
         );
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, dry_run == false);
 
         let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
         let config = &catalogs.templates;
@@ -183,7 +183,8 @@ impl TemplateManager
             ));
         }
 
-        let stale = collect_stale_skill_files(&tracker, &workspace, skills, &selected);
+        let desired = self.desired_targets(&catalogs, &tracker, &workspace, force, dry_run)?;
+        let stale = collect_stale_skill_files(&tracker, &workspace, skills, &selected, &desired, agent.is_some() == true || lang.is_some() == true);
 
         // Guard customized or untracked targets unless forced.
         let mut blocked: Vec<String> = Vec::new();
@@ -193,7 +194,7 @@ impl TemplateManager
             {
                 match tracker.check_modification(target)?
                 {
-                    | FileStatus::Modified | FileStatus::NotTracked => blocked.push(display_path(target, &workspace)),
+                    | FileStatus::Modified | FileStatus::Merged | FileStatus::NotTracked => blocked.push(display_path(target, &workspace)),
                     | FileStatus::Unmodified | FileStatus::Deleted =>
                     {}
                 }
@@ -240,6 +241,7 @@ impl TemplateManager
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
             file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
+            file_tracker.set_origin(target, entry.origin.as_deref());
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale
@@ -286,37 +288,11 @@ impl TemplateManager
         );
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, dry_run == false);
 
         let catalogs = load_effective_catalogs(&self.config_dir, &workspace)?;
         let config = &catalogs.templates;
         let tracker = FileTracker::new(&workspace)?;
-
-        // Language scope: explicit override must exist; otherwise refresh every
-        // installed language that is still present in the catalog.
-        let effective_langs: Vec<Option<String>> = match lang
-        {
-            | Some(l) =>
-            {
-                require!(
-                    config.languages.contains_key(l) == true,
-                    Err(anyhow::anyhow!("Language '{}' not found in templates.yml.\nAvailable languages: {}", l, sorted_keys(config.languages.keys())))
-                );
-                vec![Some(l.to_string())]
-            }
-            | None =>
-            {
-                let installed: Vec<Option<String>> = tracker.get_installed_languages().into_iter().filter(|l| config.languages.contains_key(l)).map(Some).collect();
-                if installed.is_empty() == true
-                {
-                    vec![None]
-                }
-                else
-                {
-                    installed
-                }
-            }
-        };
 
         // An explicitly requested agent must already be tracker-installed: --agent narrows
         // scope, it never authorizes creating that agent's files (see the candidate-loop
@@ -327,22 +303,7 @@ impl TemplateManager
             return Err(anyhow::anyhow!("Agent '{}' is not installed in this workspace.\nUse 'slopctl init --agent {}' to install it.", name, name));
         }
 
-        let effective_agents = effective_agent_scope(agent, &catalogs, &workspace)?;
-
-        // Resolve the full template set per (language, agent) combination and union
-        // the candidates. AGENTS.md never appears here; it is carried in the resolved
-        // context and updated only through 'slopctl merge'.
-        let engine = TemplateEngine::new(&self.config_dir);
-        let mut resolved_sets: Vec<ResolvedFiles> = Vec::with_capacity(effective_langs.len() * effective_agents.len());
-        for lang_opt in &effective_langs
-        {
-            for agent_opt in &effective_agents
-            {
-                let options =
-                    UpdateOptions { lang: lang_opt.as_deref(), agent: agent_opt.as_deref(), mission: None, force, dry_run, partial: None, local_cache_only: true };
-                resolved_sets.push(engine.resolve_all_files_with(&options, &catalogs)?);
-            }
-        }
+        let resolved_sets = self.resolve_workspace_sets(&catalogs, &tracker, &workspace, lang, agent, force, dry_run)?;
 
         let mut candidates: BTreeMap<PathBuf, &ResolvedFile> = BTreeMap::new();
         for set in &resolved_sets
@@ -355,8 +316,18 @@ impl TemplateManager
 
         // Prune tracked files of still-resolved skills that were removed upstream.
         // Skills that left the catalog entirely are untouched; 'remove' owns that case.
+        // Staleness is judged against the whole workspace, never a narrowed scope.
+        let narrowed = lang.is_some() == true || agent.is_some() == true;
+        let desired = if narrowed == true
+        {
+            self.desired_targets(&catalogs, &tracker, &workspace, force, dry_run)?
+        }
+        else
+        {
+            candidates.keys().cloned().collect()
+        };
         let resolved_skill_names: Vec<String> = candidates.keys().filter_map(|target| skill_name_of(target)).collect::<BTreeSet<String>>().into_iter().collect();
-        let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates);
+        let stale = collect_stale_skill_files(&tracker, &workspace, &resolved_skill_names, &candidates, &desired, narrowed);
 
         // Per-agent installed-ness, probed once: an agent counts as installed when it owns
         // at least one tracker entry. Never derived from marker dirs (agents create their
@@ -368,9 +339,11 @@ impl TemplateManager
         // untracked ones (kept with a report; --force overwrites), drop up-to-date copies.
         let mut to_refresh: Vec<(&PathBuf, &ResolvedFile)> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
+        let mut merged_skipped: Vec<String> = Vec::new();
         let mut changelog_skipped: Vec<String> = Vec::new();
         let mut agent_skipped: BTreeMap<String, usize> = BTreeMap::new();
         let mut up_to_date = 0usize;
+        let mut origin_switches: Vec<String> = Vec::new();
         for (target, entry) in &candidates
         {
             if target.exists() == false
@@ -405,11 +378,32 @@ impl TemplateManager
                         }
                         else
                         {
+                            origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
                             to_refresh.push((target, entry));
+                        }
+                    }
+                    | FileStatus::Merged =>
+                    {
+                        // A merged file is current while its template is unchanged; once the
+                        // template moves on, 'merge' is the update path and --force overwrites.
+                        let source_sha = FileTracker::calculate_sha256(&entry.source)?;
+                        if tracker.get_metadata(target).is_some_and(|metadata| metadata.template_sha() == source_sha) == true
+                        {
+                            up_to_date += 1;
+                        }
+                        else if force == true
+                        {
+                            origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
+                            to_refresh.push((target, entry));
+                        }
+                        else
+                        {
+                            merged_skipped.push(display_path(target, &workspace));
                         }
                     }
                     | FileStatus::Modified | FileStatus::NotTracked =>
                     {
+                        origin_switches.extend(describe_origin_switch(&tracker, target, entry, &workspace));
                         if force == true
                         {
                             to_refresh.push((target, entry));
@@ -427,7 +421,7 @@ impl TemplateManager
         let mut stale_to_remove: Vec<&PathBuf> = Vec::new();
         for target in &stale
         {
-            if force == false && tracker.check_modification(target)? == FileStatus::Modified
+            if force == false && matches!(tracker.check_modification(target)?, FileStatus::Modified | FileStatus::Merged) == true
             {
                 skipped.push(display_path(target, &workspace));
             }
@@ -438,11 +432,20 @@ impl TemplateManager
         }
 
         let agent_skipped_total: usize = agent_skipped.values().sum();
+        for switch in &origin_switches
+        {
+            println!("{} {}", "→".blue(), switch);
+        }
 
         if to_refresh.is_empty() == true && stale_to_remove.is_empty() == true
         {
-            println!("{} Workspace is up to date ({} file(s) checked)", "✓".green(), up_to_date + skipped.len() + changelog_skipped.len() + agent_skipped_total);
+            println!(
+                "{} Workspace is up to date ({} file(s) checked)",
+                "✓".green(),
+                up_to_date + skipped.len() + merged_skipped.len() + changelog_skipped.len() + agent_skipped_total
+            );
             report_skipped(&skipped);
+            report_merged_skipped(&merged_skipped);
             report_changelog_skipped(&changelog_skipped);
             report_agent_skipped(&agent_skipped);
             println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
@@ -467,6 +470,10 @@ impl TemplateManager
             for path in &skipped
             {
                 println!("  {} {} (skipped - local modifications preserved)", "○".yellow(), path);
+            }
+            for path in &merged_skipped
+            {
+                println!("  {} {} (skipped - merged, template changed)", "○".yellow(), path);
             }
             for path in &changelog_skipped
             {
@@ -495,6 +502,7 @@ impl TemplateManager
             crate::utils::copy_file_with_mkdir(&entry.source, target)?;
             let sha = FileTracker::calculate_sha256(target)?;
             file_tracker.record_installation_with_owners(target, sha, config.version, &entry.lang, &entry.agent, entry.category.clone());
+            file_tracker.set_origin(target, entry.origin.as_deref());
             println!("  {} {}", "✓".green(), display_path(target, &workspace).yellow());
         }
         for target in &stale_to_remove
@@ -509,11 +517,82 @@ impl TemplateManager
         file_tracker.save()?;
 
         report_skipped(&skipped);
+        report_merged_skipped(&merged_skipped);
         report_changelog_skipped(&changelog_skipped);
         report_agent_skipped(&agent_skipped);
         println!("{} Refreshed {} file(s); {} already up to date", "✓".green(), to_refresh.len(), up_to_date);
         println!("{} AGENTS.md is not refreshed by update; use 'slopctl merge' to update it", "→".blue());
         Ok(())
+    }
+
+    /// Resolves the full template set for every (language, agent) scope of a workspace
+    ///
+    /// Languages default to every tracker-installed language still in the catalog and agents to
+    /// every detected agent; `lang`/`agent` narrow the scope. Shared by `update` and `doctor` so
+    /// both agree on which targets the current catalog provides. AGENTS.md never appears in the
+    /// file sets; it is carried in the resolved context and updated only through `merge`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a scope override is unknown or resolution fails
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn resolve_workspace_sets(
+        &self, catalogs: &EffectiveCatalogs, tracker: &FileTracker, workspace: &Path, lang: Option<&str>, agent: Option<&str>, force: bool, dry_run: bool
+    ) -> Result<Vec<ResolvedFiles>>
+    {
+        let config = &catalogs.templates;
+        // Language scope: explicit override must exist; otherwise refresh every
+        // installed language that is still present in the catalog.
+        let effective_langs: Vec<Option<String>> = match lang
+        {
+            | Some(l) =>
+            {
+                require!(
+                    config.languages.contains_key(l) == true,
+                    Err(anyhow::anyhow!("Language '{}' not found in templates.yml.\nAvailable languages: {}", l, sorted_keys(config.languages.keys())))
+                );
+                vec![Some(l.to_string())]
+            }
+            | None =>
+            {
+                let installed: Vec<Option<String>> = tracker.get_installed_languages().into_iter().filter(|l| config.languages.contains_key(l)).map(Some).collect();
+                if installed.is_empty() == true
+                {
+                    vec![None]
+                }
+                else
+                {
+                    installed
+                }
+            }
+        };
+
+        let effective_agents = effective_agent_scope(agent, catalogs, workspace)?;
+
+        let engine = TemplateEngine::new(&self.config_dir);
+        let mut resolved_sets: Vec<ResolvedFiles> = Vec::with_capacity(effective_langs.len() * effective_agents.len());
+        for lang_opt in &effective_langs
+        {
+            for agent_opt in &effective_agents
+            {
+                let options =
+                    UpdateOptions { lang: lang_opt.as_deref(), agent: agent_opt.as_deref(), mission: None, force, dry_run, partial: None, local_cache_only: true };
+                resolved_sets.push(engine.resolve_all_files_with(&options, catalogs)?);
+            }
+        }
+
+        Ok(resolved_sets)
+    }
+
+    /// Resolves every target the whole workspace should have, ignoring `--lang`/`--agent` narrowing
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if resolution fails
+    fn desired_targets(&self, catalogs: &EffectiveCatalogs, tracker: &FileTracker, workspace: &Path, force: bool, dry_run: bool) -> Result<BTreeSet<PathBuf>>
+    {
+        let sets = self.resolve_workspace_sets(catalogs, tracker, workspace, None, None, force, dry_run)?;
+        Ok(sets.iter().flat_map(|set| set.files.iter().map(|entry| normalize_path(&entry.target))).collect())
     }
 }
 
@@ -585,6 +664,18 @@ fn report_skipped(skipped: &[String])
     }
 }
 
+/// Reports merged targets whose template changed since the merge
+///
+/// The installed content is a merge of an older template; refreshing it would drop
+/// the merged changes, so `merge` is the update path and `--force` overwrites.
+fn report_merged_skipped(skipped: &[String])
+{
+    for path in skipped
+    {
+        println!("  {} {} (skipped - merged file, template changed; use 'slopctl merge' or --force)", "○".yellow(), path.yellow());
+    }
+}
+
 /// Reports changelog-marker targets skipped by update
 ///
 /// Unlike `report_skipped`, `--force` does not override this: `merge` is the
@@ -603,8 +694,17 @@ fn skill_name_of(target: &Path) -> Option<String>
     TemplateManager::extract_skill_name_from_path(target)
 }
 
-/// Collects tracked skill files for the requested skills that are absent from the new source set
-fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_skills: &[String], selected: &BTreeMap<PathBuf, &ResolvedFile>) -> Vec<PathBuf>
+/// Collects tracked skill files of the requested skills that no longer have a template source
+///
+/// A file is stale only when neither the selected set nor the complete workspace resolution
+/// (`desired`) produces it. Comparing against the selected set alone treated other agents'
+/// copies of a same-named skill as stale whenever `--agent` narrowed the scope (SPEC-22).
+/// When `narrowed`, pruning is further limited to the skill directories the selected set
+/// writes to, so a narrowed run never deletes outside its own scope. Files outside the
+/// workspace (`$userprofile` skills) are never pruned; other projects may use them (SPEC-25).
+fn collect_stale_skill_files(
+    tracker: &FileTracker, workspace: &Path, requested_skills: &[String], selected: &BTreeMap<PathBuf, &ResolvedFile>, desired: &BTreeSet<PathBuf>, narrowed: bool
+) -> Vec<PathBuf>
 {
     if requested_skills.is_empty() == true
     {
@@ -612,15 +712,21 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
     }
 
     let requested: HashSet<&str> = requested_skills.iter().map(|s| s.as_str()).collect();
-    let new_targets: BTreeSet<PathBuf> =
-        selected.keys().filter(|target| skill_name_of(target).is_some_and(|name| requested.contains(name.as_str()))).cloned().collect();
+    let is_requested = |target: &Path| skill_name_of(target).is_some_and(|name| requested.contains(name.as_str()));
+    let selected_roots: BTreeSet<PathBuf> =
+        selected.keys().filter(|target| is_requested(target) == true).filter_map(|target| TemplateManager::skill_root_from_path(target)).collect();
 
     let mut stale: Vec<PathBuf> = tracker
         .get_entries_by_category("skill")
         .into_iter()
         .filter_map(|(relative_path, _meta)| {
             let absolute = normalize_path(&workspace.join(relative_path));
-            if skill_name_of(&absolute).is_some_and(|name| requested.contains(name.as_str())) == true && new_targets.contains(&absolute) == false
+            let in_scope = narrowed == false || TemplateManager::skill_root_from_path(&absolute).is_some_and(|root| selected_roots.contains(&root));
+            if is_requested(&absolute) == true &&
+                selected.contains_key(&absolute) == false &&
+                desired.contains(&absolute) == false &&
+                in_scope == true &&
+                tracker.is_outside_workspace(&absolute) == false
             {
                 Some(absolute)
             }
@@ -633,6 +739,18 @@ fn collect_stale_skill_files(tracker: &FileTracker, workspace: &Path, requested_
     stale.sort();
     stale.dedup();
     stale
+}
+
+/// Describes a tracked file whose providing template system changed since it was installed
+///
+/// Happens when a layer is added, removed or reordered. Legacy entries without a recorded origin
+/// are not reported; the refresh records their origin.
+fn describe_origin_switch(tracker: &FileTracker, target: &Path, entry: &ResolvedFile, workspace: &Path) -> Option<String>
+{
+    let previous = tracker.get_metadata(target)?.origin.as_deref()?;
+    let current = entry.origin.as_deref()?;
+    require!(previous != current, None);
+    Some(format!("{}: now from template system '{}' (was '{}')", display_path(target, workspace), current, previous))
 }
 
 /// Renders a target path relative to the workspace for display

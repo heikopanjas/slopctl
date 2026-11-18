@@ -414,7 +414,7 @@ fn test_init_then_remove_agent_then_remove_lang_leaves_clean() -> anyhow::Result
 // ── Agent switching ──────────────────────────────────────────────────────────
 
 #[test]
-fn test_init_cross_client_then_native_adopts_skills() -> anyhow::Result<()>
+fn test_init_cross_client_then_native_places_skills() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
     let fixture = IntegrationFixture::new()?;
@@ -426,10 +426,10 @@ fn test_init_cross_client_then_native_adopts_skills() -> anyhow::Result<()>
     let cross_client_skills = workspace.path().join(".agents/skills");
     assert!(has_skill_md_under(&cross_client_skills) == true, "cross-client skills must exist after first init");
 
-    // Second: install native-only agent → should adopt skills into .bogus/skills/
+    // Second: install native-only agent → skills must be placed into .bogus/skills/ too
     fixture.init(Some("bogus"), Some("Rust++"))?;
     let native_skills = workspace.path().join(".bogus/skills");
-    assert!(has_skill_md_under(&native_skills) == true, "skills must be adopted into .bogus/skills/ for native-only agent");
+    assert!(has_skill_md_under(&native_skills) == true, "skills must be placed into .bogus/skills/ for a native-only agent");
 
     Ok(())
 }
@@ -1112,6 +1112,192 @@ fn test_reinit_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
 }
 
 #[test]
+fn test_update_full_keeps_merged_file_until_template_changes() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let target = workspace.path().join(".rpp.toml");
+    let merged = "max_width = 167\n# kept by merge\n";
+    simulate_merge(&target, merged, &fixture.config_dir.path().join("rpp-format.toml"))?;
+
+    // Regression (SPEC-10): merge re-recorded the tracker SHA, so the file read as
+    // Unmodified and a plain update replaced the merged content with the template.
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "update must keep a merge of the current template");
+
+    // A newer template is not applied over the merge; 'merge' is the update path.
+    fs::write(fixture.config_dir.path().join("rpp-format.toml"), "max_width = 120\n")?;
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "update must not overwrite a merged file when the template changes");
+
+    fixture.manager().update_full(None, None, true, false)?;
+    assert_eq!(fs::read_to_string(&target)?, "max_width = 120\n", "update --force replaces the merged file");
+    let tracker = FileTracker::new(workspace.path())?;
+    assert_eq!(tracker.check_modification(&target)?, crate::file_tracker::FileStatus::Unmodified, "a forced refresh is a plain copy again");
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_keeps_previously_registered_user_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    // Reproduce an older tracker that registered the user's own version of a catalog target
+    // from disk: current SHA, template version 0, no owners.
+    let target = workspace.path().join(".rpp.toml");
+    let user_content = "max_width = 100\n# my own settings\n";
+    fs::write(&target, user_content)?;
+    let mut tracker = FileTracker::new(workspace.path())?;
+    tracker.remove_entry(&target);
+    tracker.record_installation(&target, FileTracker::calculate_sha256(&target)?, 0, "none".into(), "all".into(), "command".into());
+    tracker.save()?;
+
+    // Regression (SPEC-11): the registered file read as an unmodified install and update replaced it.
+    fixture.manager().update_full(None, None, false, false)?;
+    assert_eq!(fs::read_to_string(&target)?, user_content, "update must not overwrite a file slopctl only registered");
+
+    Ok(())
+}
+
+#[test]
+fn test_init_records_untracked_file_identical_to_template() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+    let target = workspace.path().join(".rpp.toml");
+    forget_tracker_entry(&target)?;
+
+    // An untracked copy of the template is recorded as installed, so a second init succeeds.
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let tracker = FileTracker::new(workspace.path())?;
+    assert!(tracker.get_metadata(&target).is_some_and(|metadata| metadata.has_lang("Rust++")) == true, "identical file must be recorded with its owner");
+
+    // An untracked file that differs stays the user's: init refuses instead of taking it over.
+    forget_tracker_entry(&target)?;
+    fs::write(&target, "max_width = 100\n")?;
+    let result = fixture.init(Some("foobar"), Some("Rust++"));
+    assert!(result.is_err() == true, "a differing untracked file must block init");
+    assert_eq!(fs::read_to_string(&target)?, "max_width = 100\n");
+
+    Ok(())
+}
+
+/// Snapshot of every file under `root` with its content, for comparing before and after a command
+fn snapshot_tree(root: &Path) -> anyhow::Result<std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>>
+{
+    let mut files = Vec::new();
+    crate::utils::collect_files_recursive(root, &mut files)?;
+    files.into_iter().map(|file| Ok((file.clone(), fs::read(&file)?))).collect()
+}
+
+#[test]
+fn test_dry_runs_and_read_only_commands_write_nothing() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    // A workspace installed by an old slopctl: files on disk, entries only in the legacy global tracker.
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+    fs::remove_dir_all(workspace.path().join(".slopctl"))?;
+    let workspace_canon = fs::canonicalize(workspace.path())?;
+    let legacy = crate::file_tracker::legacy_tracker_path(fixture.config_dir.path());
+    let legacy_data = serde_json::json!({
+        workspace_canon.join(".rpp.toml").to_string_lossy().to_string(): {
+            "original_sha": FileTracker::calculate_sha256(&workspace.path().join(".rpp.toml"))?,
+            "template_version": 5,
+            "installed_date": "2026-01-01T00:00:00+00:00",
+            "lang": "Rust++",
+            "category": "language",
+            "workspace": workspace_canon.to_string_lossy().to_string()
+        }
+    });
+    fs::write(&legacy, serde_json::to_string_pretty(&legacy_data)?)?;
+    // A diverged file makes 'merge -n' list a merge instead of returning early as up to date.
+    fs::write(workspace.path().join(".gitignore"), "target/\nmine/\n")?;
+
+    let before = snapshot_tree(workspace.path())?;
+    let legacy_before = fs::read(&legacy)?;
+    let manager = fixture.manager();
+    let dry_init = UpdateOptions {
+        lang:             None,
+        agent:            Some("fake"),
+        mission:          None,
+        force:            false,
+        dry_run:          true,
+        partial:          None,
+        local_cache_only: false
+    };
+
+    // Regression (SPEC-48): the legacy migration saved tracker.yml and pruned the global file
+    // before every dry-run branch, and 'merge -n' always saved the tracker.
+    manager.update(&dry_init)?;
+    manager.update_full(None, None, false, true)?;
+    // Untracked targets block a partial refresh without --force; the failing run must not write either.
+    assert!(manager.update_partial(&[], &["git-workflow".to_string()], None, None, false, true).is_err() == true);
+    manager.merge(&MergeOptions { lang: Some("Rust++"), agent: None, mission: None }, true, false, false)?;
+    manager.remove(None, Some("Rust++"), false, true)?;
+    manager.remove_purge(false, true)?;
+    manager.status(false)?;
+    manager.doctor(false, false, false, false)?;
+    manager.doctor(true, true, false, false)?;
+
+    assert_eq!(snapshot_tree(workspace.path())?, before, "dry runs and read-only commands must not change the workspace");
+    assert_eq!(fs::read(&legacy)?, legacy_before, "dry runs and read-only commands must not touch the legacy global tracker");
+
+    // The first command that writes files performs the migration.
+    manager.update_full(None, None, false, false)?;
+    let tracker = FileTracker::new(workspace.path())?;
+    assert!(tracker.get_metadata(&workspace.path().join(".rpp.toml")).is_some_and(|metadata| metadata.has_lang("Rust++")) == true);
+    assert!(legacy.exists() == false, "a migrated legacy tracker with no other workspaces is removed");
+
+    Ok(())
+}
+
+#[test]
+fn test_reinit_keeps_merged_file() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("bogus"), Some("Rust++"))?;
+
+    let target = workspace.path().join(".rpp.toml");
+    let merged = "max_width = 167\n# kept by merge\n";
+    simulate_merge(&target, merged, &fixture.config_dir.path().join("rpp-format.toml"))?;
+
+    // Regression (SPEC-10): init planned a plain Copy for the Unmodified-looking merged file.
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "init must keep a merge of the current template");
+    let tracker = FileTracker::new(workspace.path())?;
+    assert_eq!(tracker.check_modification(&target)?, crate::file_tracker::FileStatus::Merged, "the tracker refresh must keep the merged state");
+
+    fs::write(fixture.config_dir.path().join("rpp-format.toml"), "max_width = 120\n")?;
+    fixture.init(Some("foobar"), Some("Rust++"))?;
+    assert_eq!(fs::read_to_string(&target)?, merged, "init must not overwrite a merged file when the template changes");
+
+    Ok(())
+}
+
+#[test]
 fn test_update_full_after_merge_resync_preserves_updates_log() -> anyhow::Result<()>
 {
     let _g = cwd_test_guard();
@@ -1733,6 +1919,20 @@ fn simulate_merge_resync(target: &Path) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Writes `merged` to `target` and records it the way `merge` does: the merged
+/// content as installed, `template` as the template it was based on.
+fn simulate_merge(target: &Path, merged: &str, template: &Path) -> anyhow::Result<()>
+{
+    fs::write(target, merged)?;
+    let mut tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let installed_sha = FileTracker::calculate_sha256(target)?;
+    let template_sha = FileTracker::calculate_sha256(template)?;
+    let category = tracker.get_metadata(target).map(|metadata| metadata.category.clone()).unwrap_or_default();
+    tracker.record_installation_with_template(target, installed_sha, template_sha, 5, &[], &[], category);
+    tracker.save()?;
+    Ok(())
+}
+
 /// Drops `target`'s tracker entry, leaving the file unknown to slopctl.
 ///
 /// Reproduces the state left by an older init/remove cycle: the agent is still
@@ -1943,5 +2143,325 @@ fn test_verify_reports_agent_missing_from_defaults() -> anyhow::Result<()>
     fs::write(&templates, content)?;
 
     assert!(fixture.verify().is_err() == true);
+    Ok(())
+}
+
+// ── Catalog clash resilience ─────────────────────────────────────────────────
+
+#[test]
+fn test_init_skill_listed_in_language_and_top_level_installs_once() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    let yaml = fs::read_to_string(&templates)?
+        .replace("      - source: 'skills/rpp-coding-conventions'\n", "      - source: 'skills/rpp-coding-conventions'\n      - source: 'skills/git-workflow'\n");
+    fs::write(&templates, yaml)?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(workspace.path().join(".agents/skills/git-workflow/SKILL.md").exists() == true);
+    let tracker = FileTracker::new(&std::env::current_dir()?)?;
+    let meta =
+        tracker.get_metadata(&std::env::current_dir()?.join(".agents/skills/git-workflow/SKILL.md")).ok_or_else(|| anyhow::anyhow!("git-workflow must be tracked"))?;
+    assert!(meta.has_lang("Rust++") == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_update_full_narrowed_agent_keeps_other_agent_skill_copy() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    let native_copy = workspace.path().join(".bogus/skills/rpp-coding-conventions/SKILL.md");
+    assert!(native_copy.exists() == true, "native-only agent must get its own copy of the language skill");
+
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+
+    assert!(native_copy.exists() == true, "update --agent fake must not prune bogus's copy as stale");
+    assert!(workspace.path().join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_update_narrowed_agent_keeps_other_agents_same_named_skill() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let d = fixture.config_dir.path();
+    let templates = d.join("templates.yml");
+    let yaml = fs::read_to_string(&templates)?
+        .replace("  bogus:\n    instructions:\n", "  bogus:\n    skills:\n      - source: 'skills/init-session'\n    instructions:\n")
+        .replace("  fake:\n    prompts:\n", "  fake:\n    skills:\n      - source: 'skills/init-session'\n    prompts:\n");
+    fs::write(&templates, yaml)?;
+    let skill_source = d.join("skills/init-session");
+    fs::create_dir_all(&skill_source)?;
+    fs::write(skill_source.join("SKILL.md"), "---\nname: init-session\n---\n# init-session\n")?;
+    fs::write(skill_source.join("notes.md"), "# notes\n")?;
+
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    fixture.init(Some("fake"), None)?;
+    fixture.init(Some("bogus"), None)?;
+    let fake_copy = workspace.path().join(".fake/skills/init-session");
+    let bogus_copy = workspace.path().join(".bogus/skills/init-session");
+    assert!(fake_copy.join("SKILL.md").exists() == true && bogus_copy.join("SKILL.md").exists() == true);
+
+    // Regression (SPEC-22): the narrowed run compared only against its own agent's targets
+    // and pruned every other agent's copy of a same-named skill as stale.
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+    assert!(bogus_copy.join("SKILL.md").exists() == true, "update --agent fake must keep bogus's init-session");
+    fixture.manager().update_partial(&[], &["init-session".to_string()], None, Some("fake"), false, false)?;
+    assert!(bogus_copy.join("SKILL.md").exists() == true, "update --agent fake --skill init-session must keep bogus's init-session");
+
+    // A file dropped upstream is still pruned, but a narrowed run only prunes inside its own scope.
+    fs::remove_file(skill_source.join("notes.md"))?;
+    fixture.manager().update_full(None, Some("fake"), false, false)?;
+    assert!(fake_copy.join("notes.md").exists() == false, "a stale file in the narrowed scope must be pruned");
+    assert!(bogus_copy.join("notes.md").exists() == true, "a narrowed run must not prune outside its scope");
+    fixture.manager().update_full(None, None, false, false)?;
+    assert!(bogus_copy.join("notes.md").exists() == false, "a bare update prunes the remaining stale file");
+    assert!(bogus_copy.join("SKILL.md").exists() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_remove_lang_keeps_untracked_file_in_skill_dir() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let skill_dir = workspace.path().join(".agents/skills/rpp-coding-conventions");
+    let notes = skill_dir.join("notes.md");
+    fs::write(&notes, "my own notes\n")?;
+
+    fixture.remove_lang("Rust++")?;
+
+    assert!(skill_dir.join("SKILL.md").exists() == false, "tracked skill files must be removed");
+    assert!(notes.exists() == true, "untracked user file must survive remove --lang");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_orphans_empty_after_multi_agent_init() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.init(Some("bogus"), None)?;
+    fixture.init(None, Some("CppScript"))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert!(orphans.is_empty() == true, "a freshly initialized workspace has no orphans, got: {orphans:?}");
+
+    Ok(())
+}
+
+#[test]
+fn test_doctor_reports_skill_dropped_from_catalog() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = IntegrationFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    let templates = fixture.config_dir.path().join("templates.yml");
+    fs::write(&templates, fs::read_to_string(&templates)?.replace("    skills:\n      - source: 'skills/rpp-coding-conventions'\n", ""))?;
+
+    let cwd = std::env::current_dir()?;
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert_eq!(orphans, vec![(crate::template_engine::normalize_path(&cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md")), None)]);
+    fixture.doctor(false, false)?;
+
+    Ok(())
+}
+
+// ── Template layers ──────────────────────────────────────────────────────────
+
+/// Baseline fixture relocated to `<root>/templates` so its layer caches (`<root>/layers/<id>`) stay per test
+struct LayeredFixture
+{
+    _base:  IntegrationFixture,
+    root:   tempfile::TempDir,
+    source: tempfile::TempDir
+}
+
+impl LayeredFixture
+{
+    /// Builds a baseline plus a local layer `fake-layer` that adds skill `fake-review` to `Rust++`
+    /// and overrides the baseline skill `rpp-coding-conventions`
+    fn new() -> anyhow::Result<Self>
+    {
+        let base = IntegrationFixture::new()?;
+        let root = tempfile::TempDir::new()?;
+        crate::copy_dir_all(base.config_dir.path(), &root.path().join("templates"))?;
+
+        let source = tempfile::TempDir::new()?;
+        let s = source.path();
+        fs::write(
+            s.join("templates.yml"),
+            "version: 5\nid: fake-layer\nlanguages:\n  Rust++:\n    files:\n      - source: private-hint.md\n        target: '$instructions'\n    skills:\n      - \
+             source: skills/fake-review\n      - source: skills/rpp-coding-conventions\n"
+        )?;
+        fs::write(s.join("private-hint.md"), "## Private Rust++ notes\n")?;
+        for (skill, body) in [("fake-review", "# Fake review"), ("rpp-coding-conventions", "# Layer conventions")]
+        {
+            fs::create_dir_all(s.join("skills").join(skill))?;
+            fs::write(s.join("skills").join(skill).join("SKILL.md"), format!("---\nname: {skill}\n---\n{body}\n"))?;
+        }
+        Ok(Self { _base: base, root, source })
+    }
+
+    fn manager(&self) -> TemplateManager
+    {
+        TemplateManager { config_dir: self.root.path().join("templates") }
+    }
+
+    fn spec(&self) -> crate::config::LayerSpec
+    {
+        crate::config::LayerSpec { id: "fake-layer".to_string(), uri: self.source.path().to_string_lossy().into_owned(), ..Default::default() }
+    }
+
+    /// Configures the layer in the workspace config and fetches it
+    fn enable_layer(&self, workspace: &Path) -> anyhow::Result<()>
+    {
+        let mut config = crate::Config::load_workspace(workspace)?;
+        config.templates.layers = vec![self.spec()];
+        config.save_workspace(workspace)?;
+        self.manager().fetch_layers(workspace, true, false)
+    }
+
+    fn disable_layer(&self, workspace: &Path) -> anyhow::Result<()>
+    {
+        let mut config = crate::Config::load_workspace(workspace)?;
+        config.templates.layers.clear();
+        config.save_workspace(workspace)
+    }
+
+    fn init(&self, agent: Option<&str>, lang: Option<&str>) -> anyhow::Result<()>
+    {
+        let options = UpdateOptions { lang, agent, mission: None, force: false, dry_run: false, partial: None, local_cache_only: false };
+        self.manager().update(&options)
+    }
+}
+
+fn origin_of(workspace: &Path, relative: &str) -> anyhow::Result<Option<String>>
+{
+    let tracker = FileTracker::new(workspace)?;
+    Ok(tracker.get_metadata(&workspace.join(relative)).ok_or_else(|| anyhow::anyhow!("{relative} must be tracked"))?.origin.clone())
+}
+
+#[test]
+fn test_init_with_layer_installs_layer_content_and_records_origins() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    assert!(cwd.join(".agents/skills/fake-review/SKILL.md").exists() == true, "layer skill must be installed");
+    let overridden = fs::read_to_string(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md"))?;
+    assert!(overridden.contains("Layer conventions") == true, "layer must override the baseline skill");
+    let agents_md = fs::read_to_string(cwd.join("AGENTS.md"))?;
+    assert!(agents_md.contains("## Rust++ Conventions") == true && agents_md.contains("## Private Rust++ notes") == true, "fragments of both systems");
+
+    assert_eq!(origin_of(&cwd, ".agents/skills/fake-review/SKILL.md")?, Some("fake-layer".to_string()));
+    assert_eq!(origin_of(&cwd, ".agents/skills/rpp-coding-conventions/SKILL.md")?, Some("fake-layer".to_string()));
+    assert_eq!(origin_of(&cwd, ".agents/skills/git-workflow/SKILL.md")?, Some("baseline".to_string()));
+    assert_eq!(origin_of(&cwd, "AGENTS.md")?, None, "AGENTS.md merges every system");
+
+    Ok(())
+}
+
+#[test]
+fn test_dropping_layer_switches_override_back_and_reports_orphans() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+    fixture.disable_layer(&cwd)?;
+
+    fixture.manager().update_full(None, None, false, false)?;
+
+    let conventions = fs::read_to_string(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md"))?;
+    assert!(conventions.contains("Layer conventions") == false, "the baseline version must come back");
+    assert_eq!(origin_of(&cwd, ".agents/skills/rpp-coding-conventions/SKILL.md")?, Some("baseline".to_string()));
+    assert!(cwd.join(".agents/skills/fake-review/SKILL.md").exists() == true, "update never deletes orphans");
+
+    let orphans = fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd);
+    assert_eq!(orphans, vec![(crate::template_engine::normalize_path(&cwd.join(".agents/skills/fake-review/SKILL.md")), Some("fake-layer".to_string()))]);
+
+    fixture.manager().remove_source("fake-layer", true, false)?;
+    assert!(cwd.join(".agents/skills/fake-review").exists() == false, "remove --source deletes the layer's files");
+    assert!(cwd.join(".agents/skills/rpp-coding-conventions/SKILL.md").exists() == true, "baseline files stay");
+    assert!(fixture.manager().collect_orphans(&FileTracker::new(&cwd)?, &cwd).is_empty() == true);
+
+    Ok(())
+}
+
+#[test]
+fn test_layer_changed_after_fetch_blocks_update_until_refetch() -> anyhow::Result<()>
+{
+    let _g = cwd_test_guard();
+    let fixture = LayeredFixture::new()?;
+    let workspace = tempfile::TempDir::new()?;
+    std::env::set_current_dir(workspace.path())?;
+    let cwd = std::env::current_dir()?;
+
+    fixture.enable_layer(&cwd)?;
+    fixture.init(Some("fake"), Some("Rust++"))?;
+
+    let mut config = crate::Config::load_workspace(&cwd)?;
+    config.templates.layers[0].path = Some(".".to_string());
+    config.save_workspace(&cwd)?;
+
+    let err = fixture.manager().update_full(None, None, false, false).expect_err("a changed layer config must be refetched first");
+    assert!(err.to_string().contains("templates --update") == true, "got: {err}");
+
+    fixture.manager().fetch_layers(&cwd, true, false)?;
+    fixture.manager().update_full(None, None, false, false)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_fetch_layer_with_wrong_id_keeps_cache_untouched() -> anyhow::Result<()>
+{
+    let fixture = LayeredFixture::new()?;
+    let mut spec = fixture.spec();
+    spec.id = "bogus-layer".to_string();
+
+    let err = fixture.manager().fetch_layer(&spec).unwrap_err().to_string();
+    assert!(err.contains("declares id 'fake-layer'") == true, "got: {err}");
+    assert!(crate::template_layer::layer_cache_dir(&fixture.root.path().join("templates"), "bogus-layer").exists() == false);
+
     Ok(())
 }

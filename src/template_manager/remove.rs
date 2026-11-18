@@ -14,7 +14,7 @@ use crate::{
     agent_overlay::load_effective_catalogs_lenient,
     bom,
     bom::BillOfMaterials,
-    file_tracker::FileTracker,
+    file_tracker::{FileStatus, FileTracker},
     template_engine,
     utils::{collect_files_recursive, confirm_action, remove_file_and_cleanup_parents}
 };
@@ -25,7 +25,73 @@ struct PurgeTargets
     files:             Vec<PathBuf>,
     agents_md_skipped: bool,
     agents_md_path:    PathBuf,
-    changelog_skipped: Vec<PathBuf>
+    changelog_skipped: Vec<PathBuf>,
+    kept:              KeptFiles
+}
+
+/// Why a removal candidate stays on disk
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeepReason
+{
+    /// slopctl did not install the file
+    Untracked,
+    /// The user changed the file, or it holds merged content, and `force` was not given
+    Modified,
+    /// The file lies outside the workspace (e.g. a `$userprofile` skill) and may be shared
+    OutsideWorkspace
+}
+
+impl KeepReason
+{
+    fn describe(self) -> &'static str
+    {
+        match self
+        {
+            | KeepReason::Untracked => "not installed by slopctl",
+            | KeepReason::Modified => "modified, use --force to delete",
+            | KeepReason::OutsideWorkspace => "outside the workspace and possibly used by other projects; delete it yourself if unused"
+        }
+    }
+}
+
+/// Files a removal keeps on disk, each with the reason
+type KeptFiles = Vec<(PathBuf, KeepReason)>;
+
+/// Splits removal candidates into (deletable files, files kept with the reason)
+///
+/// Removal only deletes what slopctl installed into this workspace and the user left alone.
+/// Untracked files and files outside the workspace are never deleted, not even with `force`;
+/// modified and merged files only with `force`.
+fn split_user_owned(candidates: Vec<PathBuf>, tracker: &FileTracker, force: bool) -> Result<(Vec<PathBuf>, KeptFiles)>
+{
+    let mut deletable = Vec::with_capacity(candidates.len());
+    let mut kept = Vec::new();
+    for file in candidates
+    {
+        if tracker.is_outside_workspace(&file) == true
+        {
+            kept.push((file, KeepReason::OutsideWorkspace));
+        }
+        else
+        {
+            match tracker.check_modification(&file)?
+            {
+                | FileStatus::NotTracked => kept.push((file, KeepReason::Untracked)),
+                | FileStatus::Modified | FileStatus::Merged if force == false => kept.push((file, KeepReason::Modified)),
+                | FileStatus::Unmodified | FileStatus::Modified | FileStatus::Merged | FileStatus::Deleted => deletable.push(file)
+            }
+        }
+    }
+    Ok((deletable, kept))
+}
+
+/// Prints the files a removal keeps, with the reason for each
+fn report_kept(kept: &[(PathBuf, KeepReason)])
+{
+    for (file, reason) in kept
+    {
+        println!("  {} {} (kept - {})", "○".yellow(), file.display(), reason.describe());
+    }
 }
 
 /// Splits removal candidates into (preserved changelog files, deletable files)
@@ -61,7 +127,7 @@ impl TemplateManager
     pub fn remove(&self, agent: Option<&str>, lang: Option<&str>, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&current_dir);
+        let _ = self.try_migrate_tracker(&current_dir, dry_run == false);
         let catalogs = load_effective_catalogs_lenient(&self.config_dir, &current_dir)?;
         // A catalog mismatch must not block removal: tracker records still identify the agent's files.
         if let Some(agent_name) = agent &&
@@ -208,8 +274,8 @@ impl TemplateManager
                                         // Skip skills that belong to a language installation — those
                                         // must survive agent removal. Only agent-specific and
                                         // top-level skills (no language owners) are orphaned when
-                                        // the last cross-client agent leaves.
-                                        // Untracked files (no metadata) are treated as agent-owned.
+                                        // the last cross-client agent leaves. Untracked files are
+                                        // collected too; the user-file gate keeps them.
                                         let is_lang_skill = file_tracker.get_metadata(&f).map(|meta| meta.lang.is_empty() == false).unwrap_or(false);
 
                                         if is_lang_skill == false && files_to_remove.contains(&f) == false
@@ -340,10 +406,9 @@ impl TemplateManager
                     let skill_search_dirs = agent_defaults::get_workspace_skill_search_dirs_from_catalog(&catalogs.agents, &current_dir, &userprofile);
                     for skill in lang_skills
                     {
-                        let skill_name = skill.derive_name();
                         for search_dir in &skill_search_dirs
                         {
-                            let candidate = search_dir.join(skill_name);
+                            let candidate = search_dir.join(skill.derive_name());
                             if candidate.is_dir() == true
                             {
                                 dirs_to_cleanup.push(candidate.clone());
@@ -397,6 +462,8 @@ impl TemplateManager
         // Preserve user-owned changelog files regardless of how they were collected:
         // their log history is not stale template state.
         let (changelog_kept, deletable) = split_changelog_preserved(files_to_remove);
+        let mut file_tracker = FileTracker::new(&current_dir)?;
+        let (deletable, kept) = split_user_owned(deletable, &file_tracker, force)?;
         files_to_remove = deletable;
 
         dirs_to_cleanup.sort_by(|left, right| right.components().count().cmp(&left.components().count()).then_with(|| left.cmp(right)));
@@ -405,7 +472,7 @@ impl TemplateManager
 
         let description = description_parts.join(", ");
 
-        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true && changelog_kept.is_empty() == true
+        if files_to_remove.is_empty() == true && dirs_to_cleanup.is_empty() == true && changelog_kept.is_empty() == true && kept.is_empty() == true
         {
             println!("{} No files found for {} in current directory", "→".blue(), description);
             return Ok(());
@@ -424,6 +491,7 @@ impl TemplateManager
             {
                 println!("  {} {} (kept - log entries preserved)", "○".yellow(), file.display());
             }
+            report_kept(&kept);
 
             for dir in &dirs_to_cleanup
             {
@@ -442,6 +510,7 @@ impl TemplateManager
         {
             println!("  • {}", file.display().to_string().yellow());
         }
+        report_kept(&kept);
         println!();
 
         if force == false && confirm_action(&format!("{} Proceed with removal? [y/N]: ", "?".yellow()))? == false
@@ -449,8 +518,6 @@ impl TemplateManager
             println!("{} Operation cancelled", "✗".red());
             return Ok(());
         }
-
-        let mut file_tracker = FileTracker::new(&current_dir)?;
 
         let mut removed_count = 0;
         for file in &files_to_remove
@@ -467,22 +534,21 @@ impl TemplateManager
             }
 
             let is_main_file = file.file_name().is_some_and(|name| name == "AGENTS.md");
-            // Files that physically live inside the agent's directory tree must always
-            // be removed when removing that agent. Language skills (lang != LANG_NONE,
-            // agent == []) are installed into the native skill dir of native-only agents
-            // like Claude; the tracker records them as lang-owned, so is_unreferenced()
-            // stays false. We force-delete by physical location so the agent directory
-            // is fully cleaned up and status no longer reports the agent as installed.
+            // Tracked files that physically live inside the agent's directory tree are
+            // removed with that agent. Language skills (lang != LANG_NONE, agent == [])
+            // are installed into the native skill dir of native-only agents like Claude;
+            // the tracker records them as lang-owned, so is_unreferenced() stays false.
+            // Untracked and modified files never reach this point (split_user_owned).
             let in_agent_dir = has_agent_target == true && Self::path_belongs_to_agent(file, &agent_dirs) == true;
             let should_remove = remove_all == true || in_agent_dir == true || (is_main_file == false && file_tracker.is_unreferenced(file) == true);
 
             if should_remove == true
             {
-                file_tracker.remove_entry(file);
                 match remove_file_and_cleanup_parents(file)
                 {
                     | Ok(_) =>
                     {
+                        file_tracker.remove_entry(file);
                         println!("{} Removed {}", "✓".green(), file.display());
                         removed_count += 1;
                     }
@@ -527,7 +593,117 @@ impl TemplateManager
         }
 
         println!("\n{} Removed {} file(s) for {}", "✓".green(), removed_count, description);
+        if kept.is_empty() == false
+        {
+            println!("{} Kept {} file(s) that are not slopctl's to delete", "→".blue(), kept.len());
+        }
 
+        Ok(())
+    }
+
+    /// Remove every tracked file that one template system provided
+    ///
+    /// The counterpart to dropping a template layer from the configuration: deletes tracked files
+    /// whose recorded origin is `source` and drops their tracker entries (also for files already
+    /// gone from disk). Changelog-marker files are kept like in `remove --lang`; AGENTS.md has no
+    /// single origin and is never touched (re-run `slopctl merge` to drop a system's fragments).
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Template system id, as recorded in the tracker
+    /// * `force` - Skip the confirmation prompt
+    /// * `dry_run` - Preview what would be removed without making changes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the tracker cannot be read or written
+    pub fn remove_source(&self, source: &str, force: bool, dry_run: bool) -> Result<()>
+    {
+        let current_dir = std::env::current_dir()?;
+        let mut file_tracker = FileTracker::new(&current_dir)?;
+        let tracked: Vec<PathBuf> = file_tracker
+            .get_entries()
+            .into_iter()
+            .filter(|(_, metadata)| metadata.origin.as_deref() == Some(source))
+            .map(|(rel_path, _)| current_dir.join(rel_path))
+            .collect();
+        let (present, missing): (Vec<PathBuf>, Vec<PathBuf>) = tracked.into_iter().partition(|path| path.exists() == true);
+        let (changelog_kept, deletable) = split_changelog_preserved(present);
+        let (mut files_to_remove, kept) = split_user_owned(deletable, &file_tracker, force)?;
+        files_to_remove.sort();
+
+        if files_to_remove.is_empty() == true && missing.is_empty() == true && kept.is_empty() == true
+        {
+            println!("{} No files from template system '{}' are tracked in this workspace", "→".blue(), source.yellow());
+            return Ok(());
+        }
+
+        let heading = if dry_run == true
+        {
+            "Files that would be deleted"
+        }
+        else
+        {
+            "Files to be removed"
+        };
+        println!("\n{} {} for template system '{}':", "→".blue(), heading, source.yellow());
+        for file in &files_to_remove
+        {
+            println!("  {} {}", "●".red(), file.display());
+        }
+        for file in &changelog_kept
+        {
+            println!("  {} {} (kept - log entries preserved)", "○".yellow(), file.display());
+        }
+        report_kept(&kept);
+        if missing.is_empty() == false
+        {
+            println!(
+                "  {} {} tracker entr{} for files already deleted",
+                "○".yellow(),
+                missing.len(),
+                if missing.len() == 1
+                {
+                    "y"
+                }
+                else
+                {
+                    "ies"
+                }
+            );
+        }
+
+        if dry_run == true
+        {
+            println!("\n{} Dry run complete. No files were modified.", "✓".green());
+            return Ok(());
+        }
+        if force == false && confirm_action(&format!("\n{} Proceed with removal? [y/N]: ", "?".yellow()))? == false
+        {
+            println!("{} Operation cancelled", "✗".red());
+            return Ok(());
+        }
+
+        let mut removed_count = 0;
+        for file in &files_to_remove
+        {
+            match remove_file_and_cleanup_parents(file)
+            {
+                | Ok(_) =>
+                {
+                    file_tracker.remove_entry(file);
+                    removed_count += 1;
+                }
+                | Err(e) => eprintln!("{} Failed to remove {}: {}", "✗".red(), file.display(), e)
+            }
+        }
+        for file in &missing
+        {
+            file_tracker.remove_entry(file);
+        }
+        file_tracker.save()?;
+
+        println!("\n{} Removed {} file(s) from template system '{}'", "✓".green(), removed_count, source.yellow());
         Ok(())
     }
 
@@ -548,11 +724,11 @@ impl TemplateManager
     pub fn remove_purge(&self, force: bool, dry_run: bool) -> Result<()>
     {
         let current_dir = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&current_dir);
+        let _ = self.try_migrate_tracker(&current_dir, dry_run == false);
 
-        let PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped } = self.collect_purge_targets(&current_dir, force)?;
+        let PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped, kept } = self.collect_purge_targets(&current_dir, force)?;
 
-        if files_to_purge.is_empty() == true && agents_md_skipped == false && changelog_skipped.is_empty() == true
+        if files_to_purge.is_empty() == true && agents_md_skipped == false && changelog_skipped.is_empty() == true && kept.is_empty() == true
         {
             println!("{} No slopctl files found to purge", "→".blue());
             return Ok(());
@@ -576,6 +752,7 @@ impl TemplateManager
             {
                 println!("  {} {} (skipped - log entries preserved, use --force)", "○".yellow(), file.display());
             }
+            report_kept(&kept);
 
             println!("\n{} Dry run complete. No files were modified.", "✓".green());
             return Ok(());
@@ -628,6 +805,7 @@ impl TemplateManager
         {
             println!("{} {} contains user log entries and was not deleted; use --force to delete it anyway", "→".yellow(), file.display());
         }
+        report_kept(&kept);
 
         if purged_count == 0
         {
@@ -750,7 +928,9 @@ impl TemplateManager
             changelog_skipped = skipped;
         }
 
-        Ok(PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped })
+        let (files_to_purge, kept) = split_user_owned(files_to_purge, &file_tracker, force)?;
+
+        Ok(PurgeTargets { files: files_to_purge, agents_md_skipped, agents_md_path, changelog_skipped, kept })
     }
 
     /// Collects the workspace directories that belong to an agent
@@ -797,7 +977,7 @@ mod tests
 {
     use std::{fs, path::PathBuf};
 
-    use super::{PurgeTargets, TemplateManager};
+    use super::{KeepReason, PurgeTargets, TemplateManager, split_user_owned};
     use crate::{
         agent_defaults::AGENT_DEFAULTS_FILE,
         bom::BillOfMaterials,
@@ -1069,6 +1249,7 @@ mod tests
         fs::create_dir_all(&skill_dir)?;
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# Rust++ Coding Conventions")?;
+        record_lang_skill_files(workspace.path(), &[&skill_file])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1082,7 +1263,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_lang_discovers_untracked_url_skill_by_source_path_name() -> anyhow::Result<()>
+    fn test_remove_lang_discovers_url_skill_by_source_path_name() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1098,6 +1279,7 @@ mod tests
         let nested_file = skill_dir.join("references/guides/topic.md");
         fs::create_dir_all(nested_file.parent().ok_or_else(|| anyhow::anyhow!("missing nested skill parent"))?)?;
         fs::write(&nested_file, "# Topic")?;
+        record_lang_skill_files(workspace.path(), &[&skill_file, &nested_file])?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
@@ -1105,7 +1287,7 @@ mod tests
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
         manager.remove(None, Some("Rust++"), true, false)?;
 
-        assert!(skill_file.exists() == false, "untracked URL skill must be removed using the source path's skill name");
+        assert!(skill_file.exists() == false, "an installed URL skill must be found by the source path's skill name");
         assert!(nested_file.exists() == false);
         assert!(skill_dir.exists() == false, "empty skill root must be removed after its nested files");
         Ok(())
@@ -1135,7 +1317,7 @@ mod tests
     }
 
     #[test]
-    fn test_remove_agent_discovers_untracked_skill_files() -> anyhow::Result<()>
+    fn test_remove_agent_without_tracker_keeps_untracked_files() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1162,28 +1344,131 @@ mod tests
         let result = manager.remove(Some("bogus"), None, true, false);
 
         assert!(result.is_ok() == true);
-        // Positive: untracked skill under the agent's skill dir must be deleted
-        assert!(skill_file.exists() == false);
-        // Negative: the agent file itself is also removed (it was in the skill dir's parent scope)
-        // and the workspace root must not have been disturbed
-        assert!(workspace.path().exists() == true, "workspace root must not be deleted");
+        // Regression (SPEC-11): without a tracker, remove used to register every file on disk
+        // as a slopctl install first and then delete it. Untracked files belong to the user.
+        assert!(skill_file.exists() == true, "an untracked skill must survive remove in a workspace without a tracker");
+        assert!(agent_file.exists() == true, "an untracked file at a catalog target must survive as well");
+        Ok(())
+    }
+
+    /// Records existing files in the workspace tracker as unmodified Rust++ skill files
+    fn record_lang_skill_files(workspace: &std::path::Path, files: &[&std::path::Path]) -> anyhow::Result<()>
+    {
+        let mut tracker = FileTracker::new(workspace)?;
+        for file in files
+        {
+            tracker.record_installation(file, FileTracker::calculate_sha256(file)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        }
+        tracker.save()
+    }
+
+    /// Writes `content` to `path` and records it in the workspace tracker as an unmodified skill file
+    fn write_tracked_skill(workspace: &std::path::Path, path: &std::path::Path, content: &str) -> anyhow::Result<()>
+    {
+        fs::create_dir_all(path.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(path, content)?;
+        let mut tracker = FileTracker::new(workspace)?;
+        tracker.record_installation(path, FileTracker::calculate_sha256(path)?, 5, LANG_NONE.into(), "bogus".into(), "skill".into());
+        tracker.save()
+    }
+
+    #[test]
+    fn test_split_user_owned_keeps_untracked_and_modified_files() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let ws = workspace.path();
+        let unmodified = ws.join("unmodified.md");
+        let modified = ws.join("modified.md");
+        let merged = ws.join("merged.md");
+        let untracked = ws.join("untracked.md");
+        for (path, content) in [(&unmodified, "a"), (&modified, "b"), (&merged, "c"), (&untracked, "d")]
+        {
+            fs::write(path, content)?;
+        }
+
+        let mut tracker = FileTracker::new(ws)?;
+        tracker.record_installation(&unmodified, FileTracker::calculate_sha256(&unmodified)?, 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+        tracker.record_installation(&modified, "stale-sha".into(), 5, LANG_NONE.into(), "bogus".into(), "agent".into());
+        tracker.record_installation_with_template(&merged, FileTracker::calculate_sha256(&merged)?, "template-sha".into(), 5, &[], &[], "agent".into());
+
+        let candidates = vec![unmodified.clone(), modified.clone(), merged.clone(), untracked.clone()];
+        let (deletable, kept) = split_user_owned(candidates.clone(), &tracker, false)?;
+        assert_eq!(deletable, vec![unmodified.clone()], "only unedited slopctl files are deletable");
+        assert_eq!(kept, vec![(modified.clone(), KeepReason::Modified), (merged.clone(), KeepReason::Modified), (untracked.clone(), KeepReason::Untracked)]);
+
+        let (deletable, kept) = split_user_owned(candidates, &tracker, true)?;
+        assert_eq!(deletable, vec![unmodified, modified, merged], "--force also deletes modified and merged slopctl files");
+        assert_eq!(kept, vec![(untracked, KeepReason::Untracked)], "--force never deletes untracked files");
         Ok(())
     }
 
     #[test]
-    fn test_remove_all_discovers_untracked_skill_files() -> anyhow::Result<()>
+    fn test_split_user_owned_keeps_files_outside_workspace() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let home = tempfile::TempDir::new()?;
+        let shared_skill = home.path().join(".agents/skills/shared/SKILL.md");
+        fs::create_dir_all(shared_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&shared_skill, "# Shared")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&shared_skill, FileTracker::calculate_sha256(&shared_skill)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        assert!(tracker.is_outside_workspace(&shared_skill) == true);
+
+        let (deletable, kept) = split_user_owned(vec![shared_skill.clone()], &tracker, true)?;
+        assert!(deletable.is_empty() == true, "a file outside the workspace is never deleted, not even with --force");
+        assert_eq!(kept, vec![(shared_skill, KeepReason::OutsideWorkspace)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_and_purge_keep_userprofile_skill() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        let home = tempfile::TempDir::new()?;
+        fs::write(data_dir.path().join("templates.yml"), "version: 5\nlanguages:\n  Rust++:\n    files: []\n")?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
+
+        // A '$userprofile' skill target is tracked by every workspace that installed it.
+        let shared_skill = home.path().join(".agents/skills/shared/SKILL.md");
+        fs::create_dir_all(shared_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&shared_skill, "# Shared")?;
+        let lang_file = workspace.path().join(".rpp.toml");
+        fs::write(&lang_file, "max_width = 167\n")?;
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&shared_skill, FileTracker::calculate_sha256(&shared_skill)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_file, FileTracker::calculate_sha256(&lang_file)?, 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        // Regression (SPEC-25): removing a language deleted the shared skill for every project.
+        manager.remove(None, Some("Rust++"), true, false)?;
+        assert!(lang_file.exists() == false, "the workspace's own language file must be removed");
+        assert!(shared_skill.exists() == true, "remove --lang must keep a skill outside the workspace");
+
+        manager.remove_purge(true, false)?;
+        assert!(shared_skill.exists() == true, "purge --force must keep a skill outside the workspace");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_all_keeps_untracked_skill_files() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
-        // Place an untracked skill in the cross-client directory
-        let skill_dir = workspace.path().join(".agents/skills/my-skill");
-        fs::create_dir_all(&skill_dir)?;
-        let skill_file = skill_dir.join("SKILL.md");
-        fs::write(&skill_file, "# My Skill")?;
+        // Regression (SPEC-39): a skill the user wrote in the cross-client directory was deleted
+        let user_skill = workspace.path().join(".agents/skills/my-skill/SKILL.md");
+        fs::create_dir_all(user_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&user_skill, "# My Skill")?;
+        let installed_skill = workspace.path().join(".agents/skills/installed-skill/SKILL.md");
+        write_tracked_skill(workspace.path(), &installed_skill, "# Installed Skill")?;
 
-        // An unrelated file outside the skill dir must not be touched
         let other_file = workspace.path().join("README.md");
         fs::write(&other_file, "# Project")?;
 
@@ -1191,13 +1476,43 @@ mod tests
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove(None, None, true, false);
+        manager.remove(None, None, true, false)?;
 
-        assert!(result.is_ok() == true);
-        // Positive: untracked skill must be deleted
-        assert!(skill_file.exists() == false);
-        // Negative: unrelated file must be untouched
+        assert!(user_skill.exists() == true, "remove --all must keep untracked user skills, even with --force");
+        assert!(installed_skill.exists() == false, "remove --all must delete slopctl-installed skills");
         assert!(other_file.exists() == true, "files outside slopctl dirs must not be deleted");
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_agent_keeps_untracked_file_at_catalog_target() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+
+        let yaml =
+            "version: 5\nagents:\n  bogus:\n    instructions:\n      - source: instructions.md\n        target: $workspace/.bogus/instructions.md\nlanguages: {}\n";
+        fs::write(data_dir.path().join("templates.yml"), yaml)?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", false, None, None)])?;
+
+        // The workspace has a tracker, so the user's own instructions file stays untracked
+        let installed_skill = workspace.path().join(".bogus/skills/installed-skill/SKILL.md");
+        write_tracked_skill(workspace.path(), &installed_skill, "# Installed Skill")?;
+        let user_instructions = workspace.path().join(".bogus/instructions.md");
+        fs::write(&user_instructions, "my own notes")?;
+        let user_skill = workspace.path().join(".bogus/skills/my-skill/SKILL.md");
+        fs::create_dir_all(user_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&user_skill, "# My Skill")?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+        manager.remove(Some("bogus"), None, true, false)?;
+
+        assert!(installed_skill.exists() == false, "the agent's installed skill must be removed");
+        assert!(user_instructions.exists() == true, "an untracked file at a catalog target belongs to the user");
+        assert!(user_skill.exists() == true, "an untracked skill in the agent's skill dir belongs to the user");
         Ok(())
     }
 
@@ -1249,25 +1564,26 @@ mod tests
     }
 
     #[test]
-    fn test_remove_purge_discovers_untracked_skill_files() -> anyhow::Result<()>
+    fn test_remove_purge_keeps_untracked_skill_files() -> anyhow::Result<()>
     {
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
         write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
 
-        let skill_dir = workspace.path().join(".agents/skills/my-skill");
-        fs::create_dir_all(&skill_dir)?;
-        let skill_file = skill_dir.join("SKILL.md");
-        fs::write(&skill_file, "# My Skill")?;
+        let user_skill = workspace.path().join(".agents/skills/my-skill/SKILL.md");
+        fs::create_dir_all(user_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&user_skill, "# My Skill")?;
+        let installed_skill = workspace.path().join(".agents/skills/installed-skill/SKILL.md");
+        write_tracked_skill(workspace.path(), &installed_skill, "# Installed Skill")?;
 
         let _g = cwd_test_guard();
         std::env::set_current_dir(workspace.path())?;
 
         let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
-        let result = manager.remove_purge(true, false);
+        manager.remove_purge(true, false)?;
 
-        assert!(result.is_ok() == true);
-        assert!(skill_file.exists() == false);
+        assert!(user_skill.exists() == true, "purge --force must keep untracked user skills");
+        assert!(installed_skill.exists() == false, "purge must delete slopctl-installed skills");
         Ok(())
     }
 
@@ -1664,17 +1980,17 @@ mod tests
         Ok(())
     }
 
-    // ── Regression: adopted native-agent skill copies inherit lang ───────────
+    // ── Regression: native-agent skill copies inherit lang ───────────────────
 
     #[test]
-    fn test_remove_lang_removes_adopted_native_agent_skill_copies() -> anyhow::Result<()>
+    fn test_remove_lang_removes_native_agent_skill_copies() -> anyhow::Result<()>
     {
         // Scenario: init --agent codex --lang swift → init --agent claude → remove --lang swift
         //
-        // After `init --agent claude` the cross-client skills in .agents/skills/ are
-        // adopted to .claude/skills/ (native-only agent). The adoption previously stamped
-        // every copy with lang: LANG_NONE, so `remove --lang swift` could not find them.
-        // After the fix, adopted copies carry the original lang and are properly removed.
+        // After `init --agent claude` the language skills are placed into .claude/skills/
+        // as well (native-only agent). Placement previously stamped every copy with
+        // lang: LANG_NONE, so `remove --lang swift` could not find them. After the fix,
+        // native copies carry the original lang and are properly removed.
 
         let data_dir = tempfile::TempDir::new()?;
         let workspace = tempfile::TempDir::new()?;
@@ -1687,7 +2003,7 @@ mod tests
         let cc_skill_file = cc_skill_dir.join("SKILL.md");
         fs::write(&cc_skill_file, "# CppScript Conventions")?;
 
-        // Same skill adopted to native agent dir (tracked with lang: CppScript after fix)
+        // Same skill placed into the native agent dir (tracked with lang: CppScript after fix)
         let native_skill_dir = workspace.path().join(".fake/skills/cppscript-conventions");
         fs::create_dir_all(&native_skill_dir)?;
         let native_skill_file = native_skill_dir.join("SKILL.md");
@@ -1706,7 +2022,7 @@ mod tests
 
         assert!(result.is_ok() == true);
         assert!(cc_skill_file.exists() == false, "cross-client lang skill must be removed");
-        assert!(native_skill_file.exists() == false, "adopted native-agent copy must also be removed");
+        assert!(native_skill_file.exists() == false, "the native-agent copy must also be removed");
 
         let tracker_after = FileTracker::new(&std::env::current_dir()?)?;
         assert!(tracker_after.get_installed_language().is_none() == true, "tracker must report no language after remove --lang");

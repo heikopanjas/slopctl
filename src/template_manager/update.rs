@@ -30,7 +30,7 @@ impl TemplateManager
         );
 
         let workspace = std::env::current_dir()?;
-        let _ = self.try_migrate_tracker(&workspace);
+        let _ = self.try_migrate_tracker(&workspace, options.dry_run == false);
 
         // No-op re-init guard: when everything requested is already installed (per the
         // tracker, not agent-created marker dirs), init has nothing new to do; the
@@ -58,7 +58,7 @@ impl TemplateManager
         match version
         {
             | 1 => Err(anyhow::anyhow!(
-                "V1 templates are no longer supported. Migrate to V5: slopctl config --set templates.uri https://github.com/heikopanjas/slopctl-templates/tree/develop/templates"
+                "V1 templates are no longer supported. Migrate to V5: slopctl config --set templates.uri https://github.com/heikopanjas/slopctl-starter/tree/develop/templates"
             )),
             | 2..=5 =>
             {

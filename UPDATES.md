@@ -4,6 +4,245 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:48 (v23.3.9, dry runs write nothing)
+
+- fixed SPEC-48: the legacy global tracker migration ran before every
+  dry-run branch and from `status` and `doctor`, saving
+  `.slopctl/tracker.yml` and rewriting the global `installed_files.json`;
+  `merge -n` always saved the tracker
+- `try_migrate_tracker` and `migrate_from_global` take an `apply` flag;
+  only commands that write files apply the migration, the rest print how
+  many legacy entries are pending
+- `merge -n` no longer saves the tracker
+- new regression test runs every dry run and read-only command against a
+  workspace with pending legacy entries and compares the workspace and
+  the global file byte for byte; AGENTS.md asks to extend it for new
+  dry-run paths
+- version bump: 23.3.8 to 23.3.9 (PATCH - bug fix)
+
+### 2026-11-18 21:35 (v23.3.8, never delete files outside the workspace)
+
+- fixed the data-loss part of SPEC-25: skills installed to
+  `$userprofile` are tracked by every workspace that installed them, and
+  `remove --lang`, `--all`, `--source` and `--purge` deleted them, which
+  broke every other project and the user setup using the same skill
+- new `FileTracker::is_outside_workspace` recognizes such files by their
+  absolute tracker key; the `remove` gate keeps them in every mode, also
+  with `--force`, and lists them for the user to delete by hand
+- `update` stale-skill pruning skips files outside the workspace too
+- decision: workspace commands never delete outside the
+  workspace instead of tracking which projects still use a global file,
+  which would need a global record that does not exist
+- still open: `$userprofile` language skills land in a directory that
+  depends on the command `--agent` flag; tracked as P1 under SPEC-25
+- version bump: 23.3.7 to 23.3.8 (PATCH - bug fix)
+
+### 2026-11-18 21:21 (v23.3.7, narrowed update keeps other agents skills)
+
+- fixed SPEC-22: `update --agent X` (also with `--skill`) compared stale
+  skill files only against X's own targets, so it deleted every other
+  agent's copy of a same-named skill, e.g. vibe, goose and cline
+  `init-session` on `update --agent codex`
+- `collect_stale_skill_files` now treats a tracked skill file as stale
+  only when the complete workspace resolution (`desired_targets`, no
+  narrowing) no longer produces it
+- a run narrowed by `--agent` or `--lang` additionally prunes only inside
+  the skill directories it writes to; the next bare `update` handles the
+  rest
+- rationale: scope flags narrow what update writes, never what it
+  compares against
+- version bump: 23.3.6 to 23.3.7 (PATCH - bug fix)
+
+### 2026-11-18 21:15 (v23.3.6, no implicit registration of user files)
+
+- fixed SPEC-11: in a workspace without a tracker, every command
+  (including `status`, `doctor` and dry runs) recorded all files in
+  skill and prompt directories, AGENTS.md and file markers as pristine
+  installs with no owners, so `update` overwrote them and `remove`
+  deleted them
+- deleted `adopt_untracked_files_from_catalog`; `try_migrate_tracker`
+  now only converts the legacy global tracker and no longer needs the
+  catalog, so read-only commands stop creating `.slopctl/tracker.yml`
+- `init` records an untracked file only when it is byte-identical to its
+  template; a differing one stays a preflight error, now pointing to
+  `merge`
+- tracker load drops entries an earlier version registered (template
+  version 0, no owners, no origin), so those files are the user's again
+- decision: no explicit registration command and no `origin: user`; a
+  registered user file would behave exactly like an untracked one, which
+  every command already respects since SPEC-39
+- fixed SPEC-18: the word adopt is gone from code and tests; the
+  remaining comment and two test names now say placement
+- version bump: 23.3.5 to 23.3.6 (PATCH - bug fix)
+
+### 2026-11-18 21:07 (v23.3.5, remove keeps user files)
+
+- fixed SPEC-39: `remove --agent`, `--all`, `--purge` and the last
+  cross-client sweep deleted files the user wrote (untracked skills,
+  a hand-written file at a catalog target) and edited copies of
+  installed files
+- every remove mode now passes its candidates through one gate,
+  `split_user_owned`: untracked files are never deleted, not even with
+  `--force`; modified and merged files only with `--force`
+- kept files are listed with the reason in the dry run, the
+  confirmation list and the summary
+- `--force` on remove now also means delete my edited copies outside
+  `--purge`; help text and README updated
+- removed the `--lang` special case for untracked catalog-shipped skill
+  files; the gate covers it
+- `remove` now drops a tracker entry only after the file was deleted
+  (part of SPEC-14)
+- rationale: collection code gathers broadly by location, so a single
+  last gate is the only place that can reliably protect user files
+- version bump: 23.3.4 to 23.3.5 (PATCH - bug fix)
+
+### 2026-11-18 20:59 (v23.3.4, keep merged files on update and init)
+
+- fixed SPEC-10: `merge` recorded the merged SHA, so the file looked
+  unmodified and the next `update` or `init` replaced the merge with the
+  plain template without warning
+- the tracker now stores an optional `template_sha` next to
+  `original_sha`, written by `merge` only when the two differ; plain
+  copies clear it, so existing trackers load and save unchanged
+- new `FileStatus::Merged`: `init` and `update` keep a merged file while
+  its template is unchanged, skip it with a merge hint when the template
+  changed, and replace it only with `--force`; partial update needs
+  `--force` to select one; `doctor` reports it as ok
+- `merge` no longer sends an unedited merge of the current template back
+  to the LLM on every run
+- `init` tracker refreshes keep the installed SHA instead of writing the
+  source SHA over it
+- rationale: the tracker could not tell what slopctl wrote from what the
+  template contained, which is the root cause behind the overwrite
+- version bump: 23.3.3 to 23.3.4 (PATCH - bug fix, tracker format is
+  backward compatible)
+
+### 2026-11-18 20:49 (v23.3.3, behavioral spec and review)
+
+- added `docs/SPEC.md`, a full behavioral spec of every command,
+  the catalog and config model, the tracker, AGENTS.md assembly and
+  skill placement, with file references into the code
+- the review behind it found 50 issues, recorded as `SPEC-NN` boxes with
+  severity and a proposed fix plus a register and a suggested fix order;
+  five are P0 data-loss paths, including merged files overwritten by the
+  next update and `update --agent` deleting other agents' same-named
+  skills (reproduced with a dry run)
+- the spec proposes a target model: installed means tracker-owned only,
+  skill placement as reconciliation against a desired state, two hashes
+  per tracked file, explicit registration, and no deletion outside the
+  workspace
+- AGENTS.md now points to the spec as the behavioral reference and
+  retires the word adopt in favor of registration and placement
+- rationale: skill adoption had no single definition and behavior was
+  spread over README, AGENTS.md rules and the code; no code changes yet,
+  fixes are picked from the register
+- version bump: 23.3.2 to 23.3.3 (PATCH - documentation only)
+
+### 2026-10-31 18:28 (v23.3.2, fix flaky env var tests)
+
+- `config.rs` tests now use the crate-wide `crate::ENV_LOCK` instead of a
+  module-local lock, so they serialize with the `merge.rs` tests that also
+  set `XDG_CONFIG_HOME`
+- `test_get_global_dir_is_parent_of_global_path` now takes the lock; it read
+  `XDG_CONFIG_HOME` twice unguarded and failed on ubuntu CI when another test
+  set the variable between the two reads
+- AGENTS.md testing section now requires every env var test, including
+  read-only ones, to hold `crate::ENV_LOCK`
+- rationale: the develop build after the history rewrite failed on this race
+  although the same tree had passed minutes earlier
+- version bump: 23.3.1 to 23.3.2 (PATCH - test-only fix)
+
+### 2026-10-31 16:40 (v23.3.1, rename the default catalog to slopctl-starter)
+
+- renamed the GitHub repository `heikopanjas/slopctl-templates` to
+  `heikopanjas/slopctl-starter`; the default template, agent and model
+  sources, the V1 migration hint, README and AGENTS.md now use the new name
+- the catalog declares `id: slopctl-starter`, so files installed from it
+  record that origin instead of the generic `baseline`
+- older slopctl releases keep working: they hardcode the old URL and rely
+  on GitHub's rename redirects, verified for the web, raw file, contents
+  and tarball endpoints; they also ignore the new `id` key
+- never create a new repository named `slopctl-templates` under this
+  account; it would break those redirects for every older client
+- rationale: the catalog is a sample and starter kit for users' own
+  templates, and the repository name and id now say so
+- version bump: 23.3.0 to 23.3.1 (PATCH - default source location only)
+
+### 2026-10-31 16:15 (v23.3.0, correct ci trigger description)
+
+- AGENTS.md now states that build.yml runs on develop and feature/**
+  branches (push and pull request) across Linux, macOS and Windows
+- rationale: the old wording said develop only, which suggested feature
+  branches get no CI; the template layer branch was verified on all three
+  platforms by its own push
+
+### 2026-10-31 14:55 (v23.3.0, git baseline with ref and path)
+
+- added `templates.ref` and `templates.path` so the baseline can be a git
+  repository whose catalog lives in a subdirectory, e.g.
+  `git@github.com:heikopanjas/slopctl-templates.git` with path `templates`
+- both keys are read from the same config scope as `templates.uri`;
+  `--from` and `templates.fallbackUri` keep using a plain uri
+- verified end to end against the real repository over SSH, with a private
+  layer adding a skill to the `swift` language
+- rationale: layers already accepted `ref` and `path`, but the baseline
+  could not point into a repository subdirectory, so a git baseline failed
+  with a missing `templates.yml`
+
+### 2026-10-31 (v23.3.0, add layered template systems)
+
+- added template layers: an ordered list of additional template systems
+  under `templates.layers` (global, then workspace), each a full catalog
+  from a local folder, a public GitHub tree URL, or a git URL for public or
+  private repos on any host; merged item by item onto the baseline with
+  the later system winning
+- template systems declare an `id` in `templates.yml`; installed files
+  record their `origin` in the tracker, so `update` reports origin switches,
+  `doctor` names orphans from systems not configured on this machine, and
+  the new `remove --source <id>` removes everything a system installed
+- skills in top-level, language and shared lists are settled globally by
+  name across systems so one install slot never has two sources;
+  `$instructions` fragments are keyed by their relative source path because
+  they all share one target
+- git sources are cloned with the user's `git`; private repos authenticate
+  through the user's SSH keys or credential helpers and slopctl handles no
+  credentials, keeping the unauthenticated-HTTP rule intact
+- every fetch writes a `.slopctl-source.yml` manifest (source, commit, skill
+  names per URL skill); URL skills are now cached for local and git
+  catalogs too, so `update` works offline for them
+- `templates --list` shows the systems, per-skill origin and overrides;
+  `templates --verify` checks each layer and git freshness via `ls-remote`
+- rationale: users need to add private or personal content (e.g. a private
+  SwiftUI review skill) on top of an established catalog without forking
+  it; ids give provenance across machines because the tracker is committed
+- version bump: 23.2.2 to 23.3.0 (MINOR - new backward-compatible feature;
+  `id` and `origin` are optional and no layers means today's behavior)
+
+### 2026-10-31 (v23.2.2, harden catalog clash handling before template layers)
+
+- skill names now map to one source across top-level, language and shared
+  lists; conflicts fail the strict loader and `templates --verify`, agent
+  skill variants are only warned about
+- include resolution no longer treats a diamond (a group or language reached
+  through two includes) as circular or as a duplicate target; identical
+  entries are deduped, and the engine merges identical resolved entries so a
+  skill listed in a language and in top-level `skills` installs once
+- catalog fetches stage and swap the cache directory, so files deleted from
+  a local source no longer linger in the cache; agent and model defaults are
+  carried over
+- an unreadable tracker is backed up to `tracker.yml.bak` on the next save
+  instead of being silently overwritten
+- `remove --lang` keeps files the user added to a skill directory
+- `doctor` reports orphaned files that the catalog no longer provides
+- fixed the `LanguageConfig` doc that claimed included-language skills are
+  not propagated
+- checked and dropped: `update --agent` pruning other agents' skill copies
+  does not happen (skill distribution always covers every installed agent);
+  a regression test guards it
+- rationale: these were latent single-catalog bugs that additional template
+  systems would make likely; fixing them first keeps the layer feature small
+- version bump: 23.2.1 to 23.2.2 (PATCH - bug fixes, no new features)
+
 ### 2026-10-09 (v23.2.1, announce website slopctl.me)
 
 - README now links the new website https://slopctl.me at the top and in a

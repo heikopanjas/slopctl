@@ -104,6 +104,51 @@ pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<usize>
     Ok(copied)
 }
 
+/// Rewrites a relative source into an absolute path inside `base`
+///
+/// Used for sources of overlay agents and template layers, whose files live outside the baseline
+/// cache: absolute paths let every existing `config_dir.join(source)` site resolve them unchanged.
+/// URLs, absolute paths and `..` components are rejected so a source stays inside `base`.
+/// `std::path::absolute` is used on the base instead of `canonicalize` to avoid `\\?\` paths on
+/// Windows.
+///
+/// # Errors
+///
+/// Returns an error if the source is a URL, escapes `base`, is empty, or is not valid UTF-8
+pub(crate) fn rebase_source(source: &str, base: &Path) -> Result<String>
+{
+    require!(source.contains("://") == false, Err(anyhow::anyhow!("source '{}' must be a relative path, URLs are not allowed", source)));
+
+    let joined = std::path::absolute(base)?.join(safe_relative_path(source)?);
+    // Components never keep a trailing separator, which `derive_name` relies on.
+    joined.to_str().map(str::to_string).ok_or_else(|| anyhow::anyhow!("source '{}' resolves to a non-UTF-8 path", source))
+}
+
+/// Parses a relative path that must stay inside its base directory
+///
+/// # Errors
+///
+/// Returns an error for absolute paths, `..` components, or a path naming nothing
+pub(crate) fn safe_relative_path(path: &str) -> Result<PathBuf>
+{
+    let mut relative = PathBuf::new();
+    for component in Path::new(path).components()
+    {
+        match component
+        {
+            | std::path::Component::Normal(part) => relative.push(part),
+            | std::path::Component::CurDir =>
+            {}
+            | std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_) =>
+            {
+                return Err(anyhow::anyhow!("path '{}' must stay inside its base directory", path));
+            }
+        }
+    }
+    require!(relative.as_os_str().is_empty() == false, Err(anyhow::anyhow!("path '{}' must name a file or directory", path)));
+    Ok(relative)
+}
+
 /// Copies a file from source to target, creating parent directories if needed
 ///
 /// # Arguments

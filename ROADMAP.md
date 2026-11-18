@@ -1,6 +1,6 @@
 # slopctl Roadmap
 
-**Last updated:** 2026-07-22
+**Last updated:** 2026-11-18
 
 Forward-looking plan for slopctl: work that is planned or under
 consideration but not yet shipped. This file is intentionally short.
@@ -14,6 +14,30 @@ usable instead of perpetually stale.
 ---
 
 ## Open items
+
+### Review whether `$userprofile` installs are still needed
+
+`$userprofile` targets install files into the user's home directory instead
+of the workspace. The feature exists to compensate for agents that could not
+read project-specific instructions and skills. At the time that was Codex:
+its skill directory was `~/.codex/skills` until v19.1.1 (2026-05-14), when
+Codex gained workspace-local skills and slopctl moved it to `.codex/skills`.
+Since v20.0.0 `$userprofile` is only an opt-in exception (explicit
+`target: '$userprofile'`, plus `userprofile_skill_dir` in
+`agent-defaults.yml`), kept for global or corporate policy skills.
+
+- **Status:** open. Check every supported agent for project-local
+  instructions and skills. If all of them support it, decide whether the
+  remaining policy use case justifies the feature.
+- **Why it matters:** files outside the workspace are the source of
+  SPEC-25 in `docs/SPEC.md`. Workspaces track them although other projects
+  share them, so `remove` must never delete them (fixed in v23.3.8), and
+  `$userprofile` language skills still land in a directory that depends on
+  the command's `--agent` flag (open). The slopctl-starter catalog uses no
+  `$userprofile` target today.
+- **If it goes:** drop the `$userprofile` skill target and the
+  `userprofile_skill_dir` field (MAJOR version), and close the open part of
+  SPEC-25 by removal instead of a placement fix.
 
 ### Third-party license manifest (optional)
 

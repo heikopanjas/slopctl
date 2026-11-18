@@ -3,7 +3,7 @@
 //! Handles downloading templates from GitHub repositories.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     fs,
     io::{self, Write},
     path::PathBuf
@@ -18,6 +18,9 @@ use crate::{
     github,
     model_defaults::{self, MODEL_DEFAULTS_FILE}
 };
+
+/// Skill names discovered per URL-based skill source, keyed by the source URL
+pub type UrlSkillNames = BTreeMap<String, Vec<String>>;
 
 /// Manages downloading templates from remote sources
 ///
@@ -48,10 +51,14 @@ impl DownloadManager
     ///
     /// * `url` - GitHub URL to download from
     ///
+    /// # Returns
+    ///
+    /// The skill names discovered for each URL-based skill source (see [`Self::cache_url_skills`])
+    ///
     /// # Errors
     ///
     /// Returns an error if URL parsing or download fails
-    pub fn download_templates_from_url(&self, url: &str) -> Result<()>
+    pub fn download_templates_from_url(&self, url: &str) -> Result<UrlSkillNames>
     {
         let parsed =
             github::parse_github_url(url).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL format. Expected: https://github.com/owner/repo/tree/branch/path"))?;
@@ -158,16 +165,37 @@ impl DownloadManager
             self.copy_template_skill_from_tarball(&mut tarball_cache, &parsed, source)?;
         }
 
-        // Cache URL-based skills from one tarball fetch per external repository
-        let url_skill_sources = Self::collect_url_skill_sources(&config);
-        for source in &url_skill_sources
-        {
-            self.download_url_skill_to_cache(&mut tarball_cache, source)?;
-        }
+        let url_skills = self.cache_url_skills_with(&mut tarball_cache, &config)?;
 
         println!("{} Templates downloaded successfully", "✓".green());
 
-        Ok(())
+        Ok(url_skills)
+    }
+
+    /// Caches every URL-based skill of `config` into `config_dir/skills/<name>/`
+    ///
+    /// One tarball is fetched per external repository. A URL can yield several skills (a
+    /// repository root containing many skill directories), so the discovered names are returned
+    /// per URL; the template cache manifest records them.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a skill URL is invalid or cannot be fetched
+    pub fn cache_url_skills(&self, config: &TemplateConfig) -> Result<UrlSkillNames>
+    {
+        self.cache_url_skills_with(&mut github::RepoTarballCache::new(), config)
+    }
+
+    /// [`Self::cache_url_skills`] reusing an existing tarball cache
+    fn cache_url_skills_with(&self, tarball_cache: &mut github::RepoTarballCache, config: &TemplateConfig) -> Result<UrlSkillNames>
+    {
+        let mut url_skills = UrlSkillNames::new();
+        for source in Self::collect_url_skill_sources(config)
+        {
+            let names = self.download_url_skill_to_cache(tarball_cache, &source)?;
+            url_skills.insert(source, names);
+        }
+        Ok(url_skills)
     }
 
     /// Downloads the agent defaults catalog from a GitHub URL
@@ -348,8 +376,8 @@ impl DownloadManager
         Ok(())
     }
 
-    /// Downloads a URL-based skill repository into `config_dir/skills/<name>/`
-    fn download_url_skill_to_cache(&self, cache: &mut github::RepoTarballCache, source: &str) -> Result<()>
+    /// Downloads a URL-based skill repository into `config_dir/skills/<name>/` and returns the skill names
+    fn download_url_skill_to_cache(&self, cache: &mut github::RepoTarballCache, source: &str) -> Result<Vec<String>>
     {
         let parsed = github::parse_github_url(source).ok_or_else(|| anyhow::anyhow!("Invalid GitHub URL for skill cache: {}", source))?;
 
@@ -370,9 +398,10 @@ impl DownloadManager
         if discovered.is_empty() == true
         {
             println!("{} No skills found (no SKILL.md) at {}", "!".yellow(), source.yellow());
-            return Ok(());
+            return Ok(Vec::new());
         }
 
+        let mut names = Vec::with_capacity(discovered.len());
         for (skill_name, skill_path) in discovered
         {
             let dest = self.config_dir.join("skills").join(&skill_name);
@@ -380,9 +409,10 @@ impl DownloadManager
             io::stdout().flush()?;
             github::copy_skill_tree(&skill_path, &dest)?;
             println!("{}", "✓".green());
+            names.push(skill_name);
         }
 
-        Ok(())
+        Ok(names)
     }
 
     /// Loads template configuration from templates.yml

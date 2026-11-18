@@ -128,6 +128,10 @@ pub enum Commands
         #[arg(short, long, conflicts_with = "purge")]
         lang: Option<String>,
 
+        /// Template system id (e.g. a template layer): remove every file it provided
+        #[arg(short, long, conflicts_with_all = ["agent", "lang", "all", "purge"])]
+        source: Option<String>,
+
         /// Remove all agent files and skills; AGENTS.md is kept
         #[arg(long, default_value = "false", conflicts_with = "purge")]
         all: bool,
@@ -137,8 +141,8 @@ pub enum Commands
         #[arg(long, default_value = "false")]
         purge: bool,
 
-        /// Skip confirmation prompt.
-        /// With --purge: also deletes a customized AGENTS.md.
+        /// Skip confirmation prompt and also delete installed files you modified.
+        /// With --purge: also deletes a customized AGENTS.md. Files slopctl did not install and files outside the workspace are never deleted.
         #[arg(short, long, default_value = "false")]
         force: bool,
 
