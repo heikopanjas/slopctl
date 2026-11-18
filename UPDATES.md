@@ -4,6 +4,23 @@ This file is the append-only log of slopctl project decisions and notable change
 
 <!-- {changelog} -->
 
+### 2026-11-18 21:35 (v23.3.8, never delete files outside the workspace)
+
+- fixed the data-loss part of SPEC-25: skills installed to
+  `$userprofile` are tracked by every workspace that installed them, and
+  `remove --lang`, `--all`, `--source` and `--purge` deleted them, which
+  broke every other project and the user setup using the same skill
+- new `FileTracker::is_outside_workspace` recognizes such files by their
+  absolute tracker key; the `remove` gate keeps them in every mode, also
+  with `--force`, and lists them for the user to delete by hand
+- `update` stale-skill pruning skips files outside the workspace too
+- decision: workspace commands never delete outside the
+  workspace instead of tracking which projects still use a global file,
+  which would need a global record that does not exist
+- still open: `$userprofile` language skills land in a directory that
+  depends on the command `--agent` flag; tracked as P1 under SPEC-25
+- version bump: 23.3.7 to 23.3.8 (PATCH - bug fix)
+
 ### 2026-11-18 21:21 (v23.3.7, narrowed update keeps other agents skills)
 
 - fixed SPEC-22: `update --agent X` (also with `--skill`) compared stale

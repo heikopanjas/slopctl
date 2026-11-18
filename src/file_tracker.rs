@@ -587,6 +587,15 @@ impl FileTracker
         self.metadata.get_mut(&relative_key).map(|meta| meta.release_agent(agent)).unwrap_or(false)
     }
 
+    /// Returns true when a path lies outside the workspace (e.g. a `$userprofile` skill target)
+    ///
+    /// Such files are shared with other projects and the user's own setup, so workspace
+    /// commands may install and refresh them but never delete them (`docs/SPEC.md`, SPEC-25).
+    pub fn is_outside_workspace(&self, file_path: &Path) -> bool
+    {
+        Path::new(&self.to_relative_key(file_path)).is_absolute()
+    }
+
     /// Returns true when a tracked file has no remaining owners.
     pub fn is_unreferenced(&self, file_path: &Path) -> bool
     {

@@ -1,6 +1,6 @@
 # Project Instructions for AI Coding Agents
 
-**Last updated:** 2026-11-18 (v23.3.7)
+**Last updated:** 2026-11-18 (v23.3.8)
 
 <!-- {mission} -->
 
@@ -123,7 +123,7 @@ When initializing a session or analyzing the workspace, refer to instruction fil
 - Include resolution tracks only the current include path (a stack, not a visited set), so a group or language reached through two paths (a diamond) is not a cycle. Identical entries reached twice are deduped (`resolve_language_files`/`resolve_language_skills`); only different sources for one target are a "duplicate target" error. The engine likewise collapses resolved entries with the same source and target, unioning their owners (`merge_identical_entries`), so a skill listed in a language and the top-level list installs once
 - `fetch_catalog` (`template_manager/mod.rs`) is the only way a catalog enters a cache directory: it stages into a sibling dir and swaps it in after a successful fetch, so files dropped upstream never linger and a failed fetch keeps the old cache. `agent-defaults.yml`, `model-defaults.yml` and the legacy tracker have their own update paths and are carried over
 - An unreadable `.slopctl/tracker.yml` (e.g. the obsolete scalar format) still loads as empty, but warns, and the next save moves it to `tracker.yml.bak` instead of overwriting it
-- Every `remove` mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) passes its candidates through `split_user_owned` (`template_manager/remove.rs`) right before deletion: untracked files are never deleted, not even with `--force`; modified and merged files only with `--force`. Collection code may gather broadly (BoM targets, skill-directory scans); the gate is what protects user files, so it must stay the last step before deleting and every new removal path must use it. Kept files are reported with the reason. Delete a file first, then drop its tracker entry
+- Every `remove` mode (`--agent`, `--lang`, `--all`, `--source`, `--purge`) passes its candidates through `split_user_owned` (`template_manager/remove.rs`) right before deletion: untracked files and files outside the workspace (`FileTracker::is_outside_workspace`, e.g. `$userprofile` skills shared by every project) are never deleted, not even with `--force`; modified and merged files only with `--force`. `update`'s stale-skill pruning skips files outside the workspace for the same reason. Collection code may gather broadly (BoM targets, skill-directory scans); the gate is what protects user files, so it must stay the last step before deleting and every new removal path must use it. Kept files are reported with the reason. Delete a file first, then drop its tracker entry
 - `doctor` reports tracked files the current catalog no longer provides as `Orphaned` (informational, no automatic fix); `update` keeps leaving them alone and `remove` owns their cleanup. Orphan detection and `update` share `resolve_workspace_sets`, so both agree on what the catalog provides
 
 ### Template Layers

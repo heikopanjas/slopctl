@@ -36,7 +36,9 @@ enum KeepReason
     /// slopctl did not install the file
     Untracked,
     /// The user changed the file, or it holds merged content, and `force` was not given
-    Modified
+    Modified,
+    /// The file lies outside the workspace (e.g. a `$userprofile` skill) and may be shared
+    OutsideWorkspace
 }
 
 impl KeepReason
@@ -46,7 +48,8 @@ impl KeepReason
         match self
         {
             | KeepReason::Untracked => "not installed by slopctl",
-            | KeepReason::Modified => "modified, use --force to delete"
+            | KeepReason::Modified => "modified, use --force to delete",
+            | KeepReason::OutsideWorkspace => "outside the workspace and possibly used by other projects; delete it yourself if unused"
         }
     }
 }
@@ -56,19 +59,27 @@ type KeptFiles = Vec<(PathBuf, KeepReason)>;
 
 /// Splits removal candidates into (deletable files, files kept with the reason)
 ///
-/// Removal only deletes what slopctl installed and the user left alone. Untracked files are
-/// never deleted, not even with `force`; modified and merged files only with `force`.
+/// Removal only deletes what slopctl installed into this workspace and the user left alone.
+/// Untracked files and files outside the workspace are never deleted, not even with `force`;
+/// modified and merged files only with `force`.
 fn split_user_owned(candidates: Vec<PathBuf>, tracker: &FileTracker, force: bool) -> Result<(Vec<PathBuf>, KeptFiles)>
 {
     let mut deletable = Vec::with_capacity(candidates.len());
     let mut kept = Vec::new();
     for file in candidates
     {
-        match tracker.check_modification(&file)?
+        if tracker.is_outside_workspace(&file) == true
         {
-            | FileStatus::NotTracked => kept.push((file, KeepReason::Untracked)),
-            | FileStatus::Modified | FileStatus::Merged if force == false => kept.push((file, KeepReason::Modified)),
-            | FileStatus::Unmodified | FileStatus::Modified | FileStatus::Merged | FileStatus::Deleted => deletable.push(file)
+            kept.push((file, KeepReason::OutsideWorkspace));
+        }
+        else
+        {
+            match tracker.check_modification(&file)?
+            {
+                | FileStatus::NotTracked => kept.push((file, KeepReason::Untracked)),
+                | FileStatus::Modified | FileStatus::Merged if force == false => kept.push((file, KeepReason::Modified)),
+                | FileStatus::Unmodified | FileStatus::Modified | FileStatus::Merged | FileStatus::Deleted => deletable.push(file)
+            }
         }
     }
     Ok((deletable, kept))
@@ -1388,6 +1399,59 @@ mod tests
         let (deletable, kept) = split_user_owned(candidates, &tracker, true)?;
         assert_eq!(deletable, vec![unmodified, modified, merged], "--force also deletes modified and merged slopctl files");
         assert_eq!(kept, vec![(untracked, KeepReason::Untracked)], "--force never deletes untracked files");
+        Ok(())
+    }
+
+    #[test]
+    fn test_split_user_owned_keeps_files_outside_workspace() -> anyhow::Result<()>
+    {
+        let workspace = tempfile::TempDir::new()?;
+        let home = tempfile::TempDir::new()?;
+        let shared_skill = home.path().join(".agents/skills/shared/SKILL.md");
+        fs::create_dir_all(shared_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&shared_skill, "# Shared")?;
+
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&shared_skill, FileTracker::calculate_sha256(&shared_skill)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        assert!(tracker.is_outside_workspace(&shared_skill) == true);
+
+        let (deletable, kept) = split_user_owned(vec![shared_skill.clone()], &tracker, true)?;
+        assert!(deletable.is_empty() == true, "a file outside the workspace is never deleted, not even with --force");
+        assert_eq!(kept, vec![(shared_skill, KeepReason::OutsideWorkspace)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_lang_and_purge_keep_userprofile_skill() -> anyhow::Result<()>
+    {
+        let data_dir = tempfile::TempDir::new()?;
+        let workspace = tempfile::TempDir::new()?;
+        let home = tempfile::TempDir::new()?;
+        fs::write(data_dir.path().join("templates.yml"), "version: 5\nlanguages:\n  Rust++:\n    files: []\n")?;
+        write_synthetic_agent_defaults(data_dir.path(), &[("bogus", true, None, None)])?;
+
+        // A '$userprofile' skill target is tracked by every workspace that installed it.
+        let shared_skill = home.path().join(".agents/skills/shared/SKILL.md");
+        fs::create_dir_all(shared_skill.parent().ok_or_else(|| anyhow::anyhow!("missing parent"))?)?;
+        fs::write(&shared_skill, "# Shared")?;
+        let lang_file = workspace.path().join(".rpp.toml");
+        fs::write(&lang_file, "max_width = 167\n")?;
+        let mut tracker = FileTracker::new(workspace.path())?;
+        tracker.record_installation(&shared_skill, FileTracker::calculate_sha256(&shared_skill)?, 5, "Rust++".into(), AGENT_ALL.into(), "skill".into());
+        tracker.record_installation(&lang_file, FileTracker::calculate_sha256(&lang_file)?, 5, "Rust++".into(), AGENT_ALL.into(), "language".into());
+        tracker.save()?;
+
+        let _g = cwd_test_guard();
+        std::env::set_current_dir(workspace.path())?;
+        let manager = TemplateManager { config_dir: data_dir.path().to_path_buf() };
+
+        // Regression (SPEC-25): removing a language deleted the shared skill for every project.
+        manager.remove(None, Some("Rust++"), true, false)?;
+        assert!(lang_file.exists() == false, "the workspace's own language file must be removed");
+        assert!(shared_skill.exists() == true, "remove --lang must keep a skill outside the workspace");
+
+        manager.remove_purge(true, false)?;
+        assert!(shared_skill.exists() == true, "purge --force must keep a skill outside the workspace");
         Ok(())
     }
 
