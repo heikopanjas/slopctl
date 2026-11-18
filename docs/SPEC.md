@@ -1,6 +1,6 @@
 # slopctl specification
 
-**Spec version:** 1 (describes slopctl v23.3.7)
+**Spec version:** 1 (describes slopctl v23.3.8)
 **Last reviewed:** 2026-11-18
 
 This document defines what slopctl does, command by command and concept by concept. It describes the current behavior of the code and marks every place where that behavior is wrong, inconsistent, or undefined. Each such place has an issue box with a proposed solution. Section 11 collects all issues in one register.
@@ -538,6 +538,8 @@ Hydration: `init --agent <native-only>` **without** `--lang` copies the skills o
 > **Problem.** Skills with a `$userprofile` target live outside the workspace but are tracked by each workspace's tracker with an absolute key. `remove --lang`, `--all` and `--purge` delete tracked files, so removing a language in one repository deletes a global skill every other repository and the user's own setup depend on. A language skill with `target: '$userprofile'` also lands in a different directory depending on the `--agent` of the command, and bare `update` writes one copy per detected agent.
 >
 > **Proposal.** Workspaces do not own files outside the workspace. `$userprofile` targets are installed and refreshed, recorded with `scope: user` for reporting, and never deleted by `remove`, which lists them instead. For language and top-level skills, `$userprofile` resolves to `~/.agents/skills` plus each installed native-only agent's `userprofile_skill_dir`, independent of the command's flags.
+>
+> **Deletion resolved in v23.3.8.** `FileTracker::is_outside_workspace` recognizes such files by their absolute tracker key, so no extra `scope` field is needed. `split_user_owned` keeps them in every `remove` mode, also with `--force`, and lists them as "outside the workspace and possibly used by other projects; delete it yourself if unused". `update`'s stale-skill pruning skips them too. They are still installed and refreshed. **Still open (P1):** the flag-dependent routing of `$userprofile` language and top-level skills described above, which belongs to the placement model ([section 10.2](#102-skill-placement-as-reconciliation)).
 
 > <a id="spec-26"></a>**SPEC-26** · P1 · update --skill
 >
@@ -807,7 +809,7 @@ Precedence: `--purge`, `--source`, `--all` (error with `--agent` or `--lang`), t
 
 What each mode collects:
 
-Every mode passes its candidates through one gate before deleting (`split_user_owned`, since v23.3.5): untracked files are kept, modified and merged files are kept unless `--force` is given, and kept files are listed with the reason.
+Every mode passes its candidates through one gate before deleting (`split_user_owned`, since v23.3.5): untracked files and, since v23.3.8, files outside the workspace are kept, modified and merged files are kept unless `--force` is given, and kept files are listed with the reason.
 
 | Mode | Candidates | Deleted when (after the gate) |
 |---|---|---|
@@ -1071,7 +1073,7 @@ Implemented in v23.3.4 as `original_sha` (installed) plus an optional `template_
 
 ### 10.4 Files outside the workspace
 
-`$userprofile` targets are installed and refreshed, marked `scope: user`, and never deleted by a workspace command ([SPEC-25](#spec-25)).
+`$userprofile` targets are installed and refreshed and never deleted by a workspace command ([SPEC-25](#spec-25), done in v23.3.8). The tracker's absolute key identifies them; no extra field is needed.
 
 ### 10.5 Safety guarantees
 
@@ -1093,7 +1095,7 @@ All issues are open unless marked resolved.
 | [SPEC-10](#spec-10) | P0 | tracker | `update`/`init` overwrite merged files | **resolved in v23.3.4** |
 | [SPEC-11](#spec-11) | P0 | registration | user files registered as pristine, then overwritten or deleted; runs from read-only commands | **resolved in v23.3.6** |
 | [SPEC-22](#spec-22) | P0 | update | `update --agent X` deletes other agents' same-named skills | **resolved in v23.3.7** |
-| [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | never delete outside the workspace |
+| [SPEC-25](#spec-25) | P0 | `$userprofile` | workspace `remove` deletes global skills | **deletion resolved in v23.3.8**; flag-dependent routing still open (P1) |
 | [SPEC-39](#spec-39) | P0 | remove | deletes untracked and modified user files | **resolved in v23.3.5** |
 | [SPEC-01](#spec-01) | P1 | config | malformed config silently ignored | hard error |
 | [SPEC-05](#spec-05) | P1 | URL skills | `init` downloads live, `update` reads cache by wrong name | rewrite baseline URL skills at fetch |
@@ -1143,7 +1145,7 @@ All issues are open unless marked resolved.
 
 ### Suggested order
 
-1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25), [SPEC-22](#spec-22) (done), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
+1. **Stop data loss.** [SPEC-10](#spec-10) (done), [SPEC-39](#spec-39) (done), [SPEC-25](#spec-25) (deletion done), [SPEC-22](#spec-22) (done), [SPEC-11](#spec-11) (done), [SPEC-48](#spec-48). Each can ship alone.
 2. **One definition of installed** (10.1): [SPEC-19](#spec-19), [SPEC-46](#spec-46), [SPEC-31](#spec-31), [SPEC-38](#spec-38).
 3. **Skill placement** (10.2): [SPEC-18](#spec-18) (done), [SPEC-20](#spec-20), [SPEC-21](#spec-21), [SPEC-23](#spec-23), [SPEC-24](#spec-24), [SPEC-27](#spec-27). This is a MAJOR version because skill ownership in the tracker changes meaning.
 4. **URL skills and identity**: [SPEC-05](#spec-05), [SPEC-06](#spec-06), [SPEC-26](#spec-26).

@@ -142,7 +142,7 @@ pub enum Commands
         purge: bool,
 
         /// Skip confirmation prompt and also delete installed files you modified.
-        /// With --purge: also deletes a customized AGENTS.md. Files slopctl did not install are never deleted.
+        /// With --purge: also deletes a customized AGENTS.md. Files slopctl did not install and files outside the workspace are never deleted.
         #[arg(short, long, default_value = "false")]
         force: bool,
 

@@ -700,7 +700,8 @@ fn skill_name_of(target: &Path) -> Option<String>
 /// (`desired`) produces it. Comparing against the selected set alone treated other agents'
 /// copies of a same-named skill as stale whenever `--agent` narrowed the scope (SPEC-22).
 /// When `narrowed`, pruning is further limited to the skill directories the selected set
-/// writes to, so a narrowed run never deletes outside its own scope.
+/// writes to, so a narrowed run never deletes outside its own scope. Files outside the
+/// workspace (`$userprofile` skills) are never pruned; other projects may use them (SPEC-25).
 fn collect_stale_skill_files(
     tracker: &FileTracker, workspace: &Path, requested_skills: &[String], selected: &BTreeMap<PathBuf, &ResolvedFile>, desired: &BTreeSet<PathBuf>, narrowed: bool
 ) -> Vec<PathBuf>
@@ -721,7 +722,11 @@ fn collect_stale_skill_files(
         .filter_map(|(relative_path, _meta)| {
             let absolute = normalize_path(&workspace.join(relative_path));
             let in_scope = narrowed == false || TemplateManager::skill_root_from_path(&absolute).is_some_and(|root| selected_roots.contains(&root));
-            if is_requested(&absolute) == true && selected.contains_key(&absolute) == false && desired.contains(&absolute) == false && in_scope == true
+            if is_requested(&absolute) == true &&
+                selected.contains_key(&absolute) == false &&
+                desired.contains(&absolute) == false &&
+                in_scope == true &&
+                tracker.is_outside_workspace(&absolute) == false
             {
                 Some(absolute)
             }
